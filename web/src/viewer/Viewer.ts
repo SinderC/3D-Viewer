@@ -70,8 +70,8 @@ export class Viewer {
 
   private readonly edgeMaterial = new THREE.LineBasicMaterial({ color: 0x1e2026 });
   private readonly highlight = new THREE.MeshStandardMaterial({
-    color: 0x5aa9ff,
-    emissive: 0x123a66,
+    color: 0xff7d2d,
+    emissive: 0x4a240d,
     roughness: 0.5,
     side: THREE.DoubleSide,
     polygonOffset: true,
