@@ -15,6 +15,9 @@ const CSP = [
   "base-uri 'self'",
 ].join('; ');
 
+// GitHub Pages serves the app from /<repo>/; local builds use the root.
+const base = process.env.BASE_PATH ?? '/';
+
 const csp = (): Plugin => ({
   name: 'csp',
   apply: 'build',
@@ -23,6 +26,7 @@ const csp = (): Plugin => ({
 });
 
 export default defineConfig({
+  base,
   plugins: [
     react(),
     csp(),
@@ -41,7 +45,7 @@ export default defineConfig({
         display: 'standalone',
         icons: [{ src: 'icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' }],
         file_handlers: [
-          { action: '/', accept: { 'model/step': ['.stp', '.step'], 'application/octet-stream': ['.stp', '.step'] } },
+          { action: base, accept: { 'model/step': ['.stp', '.step'], 'application/octet-stream': ['.stp', '.step'] } },
         ],
         launch_handler: { client_mode: 'focus-existing' },
       },
