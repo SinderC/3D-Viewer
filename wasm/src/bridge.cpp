@@ -7,12 +7,15 @@
 //
 // Geometry is meshed once per prototype (part definition) and shared by all instances.
 
+#include <BRepAdaptor_Curve.hxx>
+#include <BRepAdaptor_Surface.hxx>
 #include <BRepBndLib.hxx>
 #include <BRepLib_ToolTriangulatedShape.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
 #include <Bnd_Box.hxx>
+#include <GCPnts_AbscissaPoint.hxx>
 #include <HeaderSection_FileSchema.hxx>
 #include <Interface_HArray1OfHAsciiString.hxx>
 #include <Message.hxx>
@@ -85,9 +88,15 @@ struct Group
   int      color; // index into colors, -1 = inherit
 };
 
+// Measurement data, parallel to the B-rep faces / edges that produced triangles / segments.
+constexpr int kFaceStride = 7; // kind (0 other, 1 plane), origin xyz, outward normal xyz
+constexpr int kEdgeStride = 9; // kind (0 other, 1 line, 2 circle), length, radius, centre xyz, axis xyz
+
 struct Proto
 {
   Range              positions, normals, indices, edges;
+  Range              faceStarts, faceData; // first index of each face (uint32) / kFaceStride doubles
+  Range              edgeStarts, edgeData; // first segment of each edge (uint32) / kEdgeStride doubles
   std::vector<Group> groups;
 };
 
@@ -106,6 +115,7 @@ std::vector<uint8_t> gGeometry;
 template <typename T>
 Range append(const std::vector<T>& data)
 {
+  gGeometry.resize((gGeometry.size() + 7) & ~size_t(7)); // keep Float64Array views aligned
   Range r{gGeometry.size(), data.size()};
   const auto* bytes = reinterpret_cast<const uint8_t*>(data.data());
   gGeometry.insert(gGeometry.end(), bytes, bytes + data.size() * sizeof(T));
@@ -339,7 +349,8 @@ private:
     const auto colorOf   = faceStyles(def, shape, partColor);
 
     std::vector<float>    pos, nrm, edges;
-    std::vector<uint32_t> idx;
+    std::vector<uint32_t> idx, faceStarts, edgeStarts;
+    std::vector<double>   faceData, edgeData;
     Proto                 proto;
 
     for (TopExp_Explorer ex(shape, TopAbs_FACE); ex.More(); ex.Next())
@@ -378,6 +389,9 @@ private:
         idx.insert(idx.end(), {base + a - 1, base + b - 1, base + c - 1});
       }
 
+      faceStarts.push_back(start);
+      appendFaceData(face, reversed, faceData);
+
       const int* found = colorOf.Seek(face);
       const int  color = found ? *found : partColor;
       const auto count = uint32_t(idx.size()) - start;
@@ -387,12 +401,16 @@ private:
         proto.groups.push_back({start, count, color});
     }
 
-    collectEdges(shape, edges);
+    collectEdges(shape, edges, edgeStarts, edgeData);
 
-    proto.positions = append(pos);
-    proto.normals   = append(nrm);
-    proto.indices   = append(idx);
-    proto.edges     = append(edges);
+    proto.positions  = append(pos);
+    proto.normals    = append(nrm);
+    proto.indices    = append(idx);
+    proto.edges      = append(edges);
+    proto.faceStarts = append(faceStarts);
+    proto.faceData   = append(faceData);
+    proto.edgeStarts = append(edgeStarts);
+    proto.edgeData   = append(edgeData);
     return proto;
   }
 
@@ -430,8 +448,52 @@ private:
     return result;
   }
 
+  static void appendFaceData(const TopoDS_Face& face, bool reversed, std::vector<double>& out)
+  {
+    double d[kFaceStride] = {};
+    if (!BRep_Tool::Surface(face).IsNull())
+    {
+      BRepAdaptor_Surface surf(face);
+      if (surf.GetType() == GeomAbs_Plane)
+      {
+        const gp_Pln pln = surf.Plane();
+        gp_Dir       n   = pln.Axis().Direction();
+        if (reversed)
+          n.Reverse();
+        const gp_Pnt o = pln.Location();
+        const double v[] = {1, o.X(), o.Y(), o.Z(), n.X(), n.Y(), n.Z()};
+        std::copy(v, v + kFaceStride, d);
+      }
+    }
+    out.insert(out.end(), d, d + kFaceStride);
+  }
+
+  static void appendEdgeData(const TopoDS_Edge& edge, double polylineLength, std::vector<double>& out)
+  {
+    double d[kEdgeStride] = {0, polylineLength};
+    if (BRep_Tool::IsGeometric(edge))
+    {
+      BRepAdaptor_Curve curve(edge);
+      d[1] = GCPnts_AbscissaPoint::Length(curve);
+      if (curve.GetType() == GeomAbs_Line)
+        d[0] = 1;
+      else if (curve.GetType() == GeomAbs_Circle)
+      {
+        const gp_Circ c = curve.Circle();
+        const gp_Pnt  o = c.Location();
+        const gp_Dir  a = c.Axis().Direction();
+        const double  v[] = {2, d[1], c.Radius(), o.X(), o.Y(), o.Z(), a.X(), a.Y(), a.Z()};
+        std::copy(v, v + kEdgeStride, d);
+      }
+    }
+    out.insert(out.end(), d, d + kEdgeStride);
+  }
+
   // Feature edges as line segments (x0 y0 z0 x1 y1 z1 ...). Seams and degenerate edges skipped.
-  static void collectEdges(const TopoDS_Shape& shape, std::vector<float>& out)
+  static void collectEdges(const TopoDS_Shape&    shape,
+                           std::vector<float>&    out,
+                           std::vector<uint32_t>& starts,
+                           std::vector<double>&   data)
   {
     TopTools_IndexedDataMapOfShapeListOfShape edgeFaces;
     TopExp::MapShapesAndAncestors(shape, TopAbs_EDGE, TopAbs_FACE, edgeFaces);
@@ -455,13 +517,19 @@ private:
 
       const gp_Trsf               t     = loc.Transformation();
       const TColStd_Array1OfInteger& nodes = poly->Nodes();
+      if (nodes.Length() < 2)
+        continue;
+      starts.push_back(uint32_t(out.size() / 6));
+      double length = 0;
       for (int k = nodes.Lower(); k < nodes.Upper(); ++k)
       {
         const gp_Pnt a = tri->Node(nodes(k)).Transformed(t);
         const gp_Pnt b = tri->Node(nodes(k + 1)).Transformed(t);
+        length += a.Distance(b);
         out.insert(out.end(),
                    {float(a.X()), float(a.Y()), float(a.Z()), float(b.X()), float(b.Y()), float(b.Z())});
       }
+      appendEdgeData(edge, length, data);
     }
   }
 
@@ -542,6 +610,14 @@ std::string toJson(const std::string& schema, const std::string& unit, const Bui
     writeRange(o, "indices", p.indices);
     o << ',';
     writeRange(o, "edges", p.edges);
+    o << ',';
+    writeRange(o, "faceStarts", p.faceStarts);
+    o << ',';
+    writeRange(o, "faceData", p.faceData);
+    o << ',';
+    writeRange(o, "edgeStarts", p.edgeStarts);
+    o << ',';
+    writeRange(o, "edgeData", p.edgeData);
     o << ",\"groups\":[";
     for (size_t g = 0; g < p.groups.size(); ++g)
       o << (g ? "," : "") << '[' << p.groups[g].start << ',' << p.groups[g].count << ','

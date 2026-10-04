@@ -120,6 +120,11 @@ input[type='checkbox'] { accent-color: var(--accent); margin: 0; }
   white-space: nowrap;
 }
 
+.measure-label.warn {
+  background: #e05252;
+  color: #fff;
+}
+
 @media (max-width: 700px) {
   .app { grid-template: 'bar' auto 'stage' 1fr 'side' 40% / 1fr; }
   .sidebar { border-right: 0; border-top: 1px solid var(--line); }

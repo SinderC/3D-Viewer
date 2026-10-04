@@ -97,7 +97,7 @@ export function App() {
               <dt>Format</dt>
               <dd title={model.schema}>STEP {model.ap}</dd>
               <dt>Units</dt>
-              <dd>{model.unit.label}</dd>
+              <dd>{model.unit}</dd>
               <dt>Parts</dt>
               <dd>
                 {model.protos.length} ({model.nodes.filter((n) => n.proto >= 0).length} instances)

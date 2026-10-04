@@ -1,4 +1,5 @@
 // Model produced by the WASM bridge (see wasm/src/bridge.cpp) and decoded into typed arrays.
+import { fileUnit, type UnitId } from './units';
 
 type Range = [offset: number, count: number];
 
@@ -12,6 +13,10 @@ export interface RawModel {
     normals: Range;
     indices: Range;
     edges: Range;
+    faceStarts: Range;
+    faceData: Range;
+    edgeStarts: Range;
+    edgeData: Range;
     groups: [start: number, count: number, color: number][];
   }[];
 }
@@ -21,8 +26,19 @@ export interface Proto {
   normals: Float32Array;
   indices: Uint32Array;
   edges: Float32Array;
+  /** First index (into `indices`) of each B-rep face, ascending. */
+  faceStarts: Uint32Array;
+  /** Per face, FACE_STRIDE values: kind (0 other, 1 plane), origin xyz, outward normal xyz. */
+  faceData: Float64Array;
+  /** First segment (into `edges`, 6 floats each) of each B-rep edge, ascending. */
+  edgeStarts: Uint32Array;
+  /** Per edge, EDGE_STRIDE values: kind (0 other, 1 line, 2 circle), length, radius, centre xyz, axis xyz. */
+  edgeData: Float64Array;
   groups: { start: number; count: number; color: number }[];
 }
+
+export const FACE_STRIDE = 7;
+export const EDGE_STRIDE = 9;
 
 export interface ModelNode {
   id: number;
@@ -37,17 +53,12 @@ export interface ModelNode {
 export interface Model {
   schema: string;
   ap: 'AP203' | 'AP214' | 'AP242' | 'unknown';
-  unit: LengthUnit;
+  unit: UnitId; // the file's length unit
   colors: RawModel['colors'];
   nodes: ModelNode[];
   roots: number[];
   protos: Proto[];
   triangles: number;
-}
-
-export interface LengthUnit {
-  label: string;
-  perMm: number; // file units per millimetre (geometry is always in mm)
 }
 
 export function apOf(schema: string): Model['ap'] {
@@ -57,26 +68,20 @@ export function apOf(schema: string): Model['ap'] {
   return 'unknown';
 }
 
-// OCCT reports STEP unit names such as "MILLIMETRE", "INCH", "METRE", "CENTIMETRE", "FOOT".
-export function lengthUnit(name: string): LengthUnit {
-  const n = name.toUpperCase();
-  if (n.includes('INCH')) return { label: 'in', perMm: 1 / 25.4 };
-  if (n.includes('FOOT')) return { label: 'ft', perMm: 1 / 304.8 };
-  if (n.includes('CENTI')) return { label: 'cm', perMm: 0.1 };
-  if (n.includes('MILLI') || n === '') return { label: 'mm', perMm: 1 };
-  if (n.includes('METRE') || n.includes('METER')) return { label: 'm', perMm: 0.001 };
-  return { label: 'mm', perMm: 1 };
-}
-
 export function decodeModel(raw: RawModel, geometry: ArrayBuffer): Model {
   const f32 = ([off, n]: Range) => new Float32Array(geometry, off, n);
   const u32 = ([off, n]: Range) => new Uint32Array(geometry, off, n);
+  const f64 = ([off, n]: Range) => new Float64Array(geometry, off, n);
 
   const protos = raw.protos.map((p) => ({
     positions: f32(p.positions),
     normals: f32(p.normals),
     indices: u32(p.indices),
     edges: f32(p.edges),
+    faceStarts: u32(p.faceStarts),
+    faceData: f64(p.faceData),
+    edgeStarts: u32(p.edgeStarts),
+    edgeData: f64(p.edgeData),
     groups: p.groups.map(([start, count, color]) => ({ start, count, color })),
   }));
 
@@ -90,7 +95,7 @@ export function decodeModel(raw: RawModel, geometry: ArrayBuffer): Model {
   return {
     schema: raw.schema,
     ap: apOf(raw.schema),
-    unit: lengthUnit(raw.fileUnit),
+    unit: fileUnit(raw.fileUnit),
     colors: raw.colors,
     nodes,
     roots,

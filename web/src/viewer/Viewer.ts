@@ -2,8 +2,9 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from 'three-mesh-bvh';
-import type { Model } from '../core/model';
-import { Measure } from './measure';
+import { EDGE_STRIDE, FACE_STRIDE, type Model, type Proto } from '../core/model';
+import type { UnitId } from '../core/units';
+import { Measure, type EdgePick, type FacePick, type MeasureMode, type Pick } from './measure';
 import { buildSectionCaps, disposeCaps } from './section';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
@@ -33,6 +34,7 @@ const AXES: Record<Axis, THREE.Vector3> = {
 };
 const DEFAULT_COLOR = new THREE.Color(0xb8bcc4);
 const CLICK_TOLERANCE_PX = 4;
+const EDGE_PICK_PX = 6;
 
 export class Viewer {
   onPick: (nodeId: number | null) => void = () => {};
@@ -136,7 +138,8 @@ export class Viewer {
       g.setAttribute('normal', new THREE.BufferAttribute(p.normals, 3));
       g.setIndex(new THREE.BufferAttribute(p.indices, 1));
       p.groups.forEach((grp, i) => g.addGroup(grp.start, grp.count, i));
-      g.computeBoundsTree();
+      // Indirect: keep the index order, which faceStarts refers to.
+      g.computeBoundsTree({ indirect: true });
       const e = new THREE.BufferGeometry();
       e.setAttribute('position', new THREE.BufferAttribute(p.edges, 3));
       return { faces: g, edges: e };
@@ -155,13 +158,14 @@ export class Viewer {
         const proto = model.protos[node.proto];
         const mats = proto.groups.map((g) => material(g.color >= 0 ? g.color : color));
         const mesh = new THREE.Mesh(geometries[node.proto].faces, mats.length === 1 ? mats[0] : mats);
-        mesh.userData = { nodeId: id, baseMaterial: mesh.material };
+        mesh.userData = { nodeId: id, baseMaterial: mesh.material, proto };
         obj.add(mesh);
         this.meshes.push(mesh);
 
         const lines = new THREE.LineSegments(geometries[node.proto].edges, this.edgeMaterial);
         lines.visible = this.edgesVisible;
-        lines.raycast = () => {};
+        lines.raycast = () => {}; // picked explicitly in pickEdge()
+        lines.userData = { proto };
         obj.add(lines);
         this.edgeLines.push(lines);
       }
@@ -171,7 +175,6 @@ export class Viewer {
 
     this.modelRoot.updateMatrixWorld(true);
     this.bounds.setFromObject(this.modelRoot);
-    this.measure.setUnit(model.unit);
     this.setView('iso');
   }
 
@@ -245,6 +248,16 @@ export class Viewer {
   setTool(tool: Tool): void {
     this.tool = tool;
     if (tool !== 'measure') this.measure.clear();
+    this.requestRender();
+  }
+
+  setMeasureMode(mode: MeasureMode): void {
+    this.measure.setMode(mode);
+    this.requestRender();
+  }
+
+  setUnit(unit: UnitId): void {
+    this.measure.setUnit(unit);
     this.requestRender();
   }
 
@@ -369,22 +382,117 @@ export class Viewer {
 
     const hit = this.raycast(e.clientX, e.clientY);
     if (this.tool === 'measure') {
-      if (hit) this.measure.addPoint(this.snap(hit, e));
+      const pick = this.pick(this.measure.pickKind, hit, e);
+      if (pick) this.measure.add(pick);
     } else {
       this.onPick(hit ? (hit.object.userData.nodeId as number) : null);
     }
     this.requestRender();
   };
 
-  private raycast(clientX: number, clientY: number): THREE.Intersection | undefined {
+  private raycaster(clientX: number, clientY: number): THREE.Raycaster {
     const rect = this.renderer.domElement.getBoundingClientRect();
     const ndc = new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
     const raycaster = new THREE.Raycaster();
     raycaster.setFromCamera(ndc, this.camera);
-    const clipped = this.clipping.length > 0;
-    return raycaster
+    return raycaster;
+  }
+
+  private raycast(clientX: number, clientY: number): THREE.Intersection | undefined {
+    return this.raycaster(clientX, clientY)
       .intersectObjects(this.meshes.filter(isShown), false)
-      .find((h) => !clipped || this.clipPlane.distanceToPoint(h.point) >= 0);
+      .find((h) => this.unclipped(h.point));
+  }
+
+  private unclipped(p: THREE.Vector3, tolerance = 0): boolean {
+    return !this.clipping.length || this.clipPlane.distanceToPoint(p) >= -tolerance;
+  }
+
+  private pick(kind: Pick['kind'], hit: THREE.Intersection | undefined, e: PointerEvent): Pick | null {
+    if (kind === 'edge') return this.pickEdge(e, hit);
+    if (!hit) return null;
+    return kind === 'face' ? this.pickFace(hit) : { kind: 'point', point: this.snap(hit, e) };
+  }
+
+  // The B-rep face containing the hit triangle.
+  private pickFace(hit: THREE.Intersection): FacePick | null {
+    const mesh = hit.object as THREE.Mesh;
+    const proto = mesh.userData.proto as Proto;
+    if (hit.faceIndex == null || !proto.faceStarts.length) return null;
+    const f = lastAtOrBelow(proto.faceStarts, hit.faceIndex * 3);
+    const start = proto.faceStarts[f];
+    const end = proto.faceStarts[f + 1] ?? proto.indices.length;
+
+    const m = mesh.matrixWorld;
+    const v = new THREE.Vector3();
+    const triangles = new Float32Array((end - start) * 3);
+    for (let k = start; k < end; k++) {
+      v.fromArray(proto.positions, proto.indices[k] * 3).applyMatrix4(m).toArray(triangles, (k - start) * 3);
+    }
+
+    let plane: THREE.Plane | null = null;
+    const d = proto.faceData.subarray(f * FACE_STRIDE, (f + 1) * FACE_STRIDE);
+    if (d[0] === 1) {
+      const origin = new THREE.Vector3(d[1], d[2], d[3]).applyMatrix4(m);
+      const normal = new THREE.Vector3(d[4], d[5], d[6]).applyMatrix3(new THREE.Matrix3().getNormalMatrix(m)).normalize();
+      plane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, origin);
+    }
+    return { kind: 'face', point: hit.point.clone(), triangles, plane };
+  }
+
+  // The visible B-rep edge nearest the cursor, within a few pixels.
+  private pickEdge(e: PointerEvent, meshHit: THREE.Intersection | undefined): EdgePick | null {
+    const raycaster = this.raycaster(e.clientX, e.clientY);
+    const depth = meshHit?.distance ?? this.camera.position.distanceTo(this.controls.target);
+    const threshold = EDGE_PICK_PX * this.worldPerPixel(depth);
+    raycaster.params.Line = { threshold };
+
+    const hits: THREE.Intersection[] = [];
+    for (const lines of this.edgeLines) {
+      if (lines.parent && isShown(lines.parent)) THREE.LineSegments.prototype.raycast.call(lines, raycaster, hits);
+    }
+    let best: THREE.Intersection | undefined;
+    let bestRay = Infinity;
+    for (const h of hits) {
+      // Skip edges hidden behind the surface under the cursor, or cut away by the section.
+      if (meshHit && h.distance > meshHit.distance + 4 * threshold) continue;
+      if (!this.unclipped(h.point, threshold)) continue;
+      const ray = raycaster.ray.distanceSqToPoint(h.point);
+      if (ray < bestRay) {
+        bestRay = ray;
+        best = h;
+      }
+    }
+    if (!best || best.index == null) return null;
+
+    const lines = best.object as THREE.LineSegments;
+    const proto = lines.userData.proto as Proto;
+    const i = lastAtOrBelow(proto.edgeStarts, best.index / 2);
+    const start = proto.edgeStarts[i] * 6;
+    const end = (proto.edgeStarts[i + 1] ?? proto.edges.length / 6) * 6;
+    const m = lines.matrixWorld;
+    const v = new THREE.Vector3();
+    const segments = new Float32Array(end - start);
+    for (let k = start; k < end; k += 3) v.fromArray(proto.edges, k).applyMatrix4(m).toArray(segments, k - start);
+
+    const d = proto.edgeData.subarray(i * EDGE_STRIDE, (i + 1) * EDGE_STRIDE);
+    return {
+      kind: 'edge',
+      point: best.point.clone(),
+      segments,
+      curve: d[0] === 1 ? 'line' : d[0] === 2 ? 'circle' : 'other',
+      length: d[1],
+      radius: d[2],
+      center: new THREE.Vector3(d[3], d[4], d[5]).applyMatrix4(m),
+      axis: new THREE.Vector3(d[6], d[7], d[8]).transformDirection(m),
+    };
+  }
+
+  // World-space size of one screen pixel at the given distance from the camera.
+  private worldPerPixel(distance: number): number {
+    const h = this.renderer.domElement.clientHeight || 1;
+    if (this.camera instanceof THREE.OrthographicCamera) return (this.camera.top - this.camera.bottom) / this.camera.zoom / h;
+    return (2 * distance * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2))) / h;
   }
 
   // Snap to the nearest vertex of the hit triangle when it is close on screen.
@@ -419,6 +527,18 @@ export class Viewer {
       this.measure.updateLabel(this.camera, this.renderer.domElement);
     });
   };
+}
+
+// Index of the last element <= value in an ascending array (value >= sorted[0]).
+function lastAtOrBelow(sorted: Uint32Array, value: number): number {
+  let lo = 0;
+  let hi = sorted.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (sorted[mid] <= value) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo;
 }
 
 function isShown(o: THREE.Object3D): boolean {

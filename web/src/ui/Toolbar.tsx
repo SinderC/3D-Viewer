@@ -1,4 +1,6 @@
 import type { Dispatch, RefObject } from 'react';
+import { UNITS, type UnitId } from '../core/units';
+import { MEASURE_MODES, type MeasureMode } from '../viewer/measure';
 import type { Axis, ViewName, Viewer } from '../viewer/Viewer';
 import type { Action, State } from './state';
 
@@ -39,10 +41,28 @@ export function Toolbar({ state, dispatch, viewer, onOpen }: Props) {
         <button
           aria-pressed={state.tool === 'measure'}
           onClick={() => dispatch({ type: 'setTool', tool: state.tool === 'measure' ? 'select' : 'measure' })}
-          title="Click two points (M)"
+          title="Measure (M)"
         >
           Measure
         </button>
+        <select
+          value={state.measureMode}
+          aria-label="Measurement"
+          onChange={(e) => dispatch({ type: 'setMeasureMode', mode: e.target.value as MeasureMode })}
+        >
+          {Object.entries(MEASURE_MODES).map(([mode, { label }]) => (
+            <option key={mode} value={mode}>
+              {label}
+            </option>
+          ))}
+        </select>
+        <select value={state.unit} aria-label="Units" onChange={(e) => dispatch({ type: 'setUnit', unit: e.target.value as UnitId })}>
+          {Object.entries(UNITS).map(([id, { label }]) => (
+            <option key={id} value={id}>
+              {label}
+            </option>
+          ))}
+        </select>
         <span className="sep" />
         <label>
           Section{' '}

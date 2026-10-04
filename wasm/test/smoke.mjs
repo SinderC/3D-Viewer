@@ -48,6 +48,27 @@ function openEdgeRatio(geometry, proto) {
   return edges.size ? open / edges.size : 0;
 }
 
+// Face / edge measurement arrays must line up with the triangles and segments they describe.
+function measureStats(geometry, protos) {
+  let planes = 0;
+  let circles = 0;
+  let measureOk = true;
+  for (const p of protos) {
+    const faceStarts = new Uint32Array(geometry, p.faceStarts[0], p.faceStarts[1]);
+    const faceData = new Float64Array(geometry, p.faceData[0], p.faceData[1]);
+    const edgeStarts = new Uint32Array(geometry, p.edgeStarts[0], p.edgeStarts[1]);
+    const edgeData = new Float64Array(geometry, p.edgeData[0], p.edgeData[1]);
+    measureOk &&= faceData.length === faceStarts.length * 7 && edgeData.length === edgeStarts.length * 9;
+    measureOk &&= faceStarts[0] === 0 && (edgeStarts.length === 0 || edgeStarts[0] === 0);
+    for (let i = 0; i < faceData.length; i += 7) if (faceData[i] === 1) planes++;
+    for (let i = 0; i < edgeData.length; i += 9) {
+      if (edgeData[i] === 2) circles++;
+      measureOk &&= edgeData[i + 1] > 0;
+    }
+  }
+  return { planes, circles, measureOk };
+}
+
 const occt = await createOcctViewer();
 const rows = [];
 let failed = 0;
@@ -65,7 +86,8 @@ for (const target of targets) {
       const geometry = res.geometry.slice().buffer;
       const tris = model.protos.reduce((n, p) => n + p.indices[1] / 3, 0);
       const edges = model.protos.reduce((n, p) => n + p.edges[1] / 6, 0);
-      const ok = tris > 0 && model.nodes.length > 0 && res.geometry.byteLength > 0;
+      const { planes, circles, measureOk } = measureStats(geometry, model.protos);
+      const ok = tris > 0 && model.nodes.length > 0 && res.geometry.byteLength > 0 && measureOk;
       Object.assign(row, {
         status: ok ? 'ok' : 'FAIL',
         ap: apOf(model.schema),
@@ -75,6 +97,8 @@ for (const target of targets) {
         tris,
         edges,
         colors: model.colors.length,
+        planes,
+        circles,
         open: model.protos.map((p) => (openEdgeRatio(geometry, p) * 100).toFixed(1) + '%').join(' '),
       });
     }

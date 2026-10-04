@@ -1,4 +1,6 @@
 import type { Model } from '../core/model';
+import type { UnitId } from '../core/units';
+import type { MeasureMode } from '../viewer/measure';
 import type { Section, Tool } from '../viewer/Viewer';
 
 export interface State {
@@ -11,6 +13,8 @@ export interface State {
   hidden: ReadonlySet<number>;
   selected: number | null;
   tool: Tool;
+  measureMode: MeasureMode;
+  unit: UnitId;
   section: Section;
   edges: boolean;
   ortho: boolean;
@@ -24,6 +28,8 @@ export type Action =
   | { type: 'setHidden'; hidden: ReadonlySet<number> }
   | { type: 'select'; id: number | null }
   | { type: 'setTool'; tool: Tool }
+  | { type: 'setMeasureMode'; mode: MeasureMode }
+  | { type: 'setUnit'; unit: UnitId }
   | { type: 'setSection'; section: Partial<Section> }
   | { type: 'toggleEdges' }
   | { type: 'toggleOrtho' };
@@ -35,6 +41,8 @@ export const initialState: State = {
   hidden: new Set(),
   selected: null,
   tool: 'select',
+  measureMode: 'pointDistance',
+  unit: 'mm',
   section: noSection,
   edges: true,
   ortho: false,
@@ -43,11 +51,18 @@ export const initialState: State = {
 export function reducer(state: State, action: Action): State {
   switch (action.type) {
     case 'loadStart':
-      return { ...initialState, edges: state.edges, ortho: state.ortho, status: 'loading', fileName: action.fileName };
+      return {
+        ...initialState,
+        edges: state.edges,
+        ortho: state.ortho,
+        measureMode: state.measureMode,
+        status: 'loading',
+        fileName: action.fileName,
+      };
     case 'progress':
       return { ...state, progress: { stage: action.stage, percent: action.percent } };
     case 'loaded':
-      return { ...state, status: 'ready', model: action.model, loadMs: action.ms, progress: undefined };
+      return { ...state, status: 'ready', model: action.model, unit: action.model.unit, loadMs: action.ms, progress: undefined };
     case 'failed':
       return { ...state, status: 'error', error: action.error, progress: undefined };
     case 'setHidden':
@@ -56,6 +71,10 @@ export function reducer(state: State, action: Action): State {
       return { ...state, selected: action.id };
     case 'setTool':
       return { ...state, tool: action.tool };
+    case 'setMeasureMode':
+      return { ...state, tool: 'measure', measureMode: action.mode };
+    case 'setUnit':
+      return { ...state, unit: action.unit };
     case 'setSection':
       return { ...state, section: { ...state.section, ...action.section } };
     case 'toggleEdges':

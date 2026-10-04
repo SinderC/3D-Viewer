@@ -12,7 +12,7 @@ interface Props {
 export function ViewerCanvas({ state, dispatch, viewerRef }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const [viewer, setViewer] = useState<Viewer | null>(null);
-  const { model, hidden, selected, tool, section, edges, ortho } = state;
+  const { model, hidden, selected, tool, measureMode, unit, section, edges, ortho } = state;
 
   useEffect(() => {
     const viewer = new Viewer(host.current!);
@@ -30,6 +30,8 @@ export function ViewerCanvas({ state, dispatch, viewerRef }: Props) {
   useEffect(() => viewer?.setHidden(hidden), [viewer, model, hidden]);
   useEffect(() => viewer?.select(selected), [viewer, model, selected]);
   useEffect(() => viewer?.setTool(tool), [viewer, tool]);
+  useEffect(() => viewer?.setMeasureMode(measureMode), [viewer, model, measureMode]);
+  useEffect(() => viewer?.setUnit(unit), [viewer, unit]);
   useEffect(() => viewer?.setSection(section), [viewer, model, section]);
   useEffect(() => viewer?.setEdgesVisible(edges), [viewer, edges]);
   useEffect(() => viewer?.setOrthographic(ortho), [viewer, ortho]);

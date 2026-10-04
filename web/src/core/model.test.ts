@@ -1,17 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import { isolate } from '../ui/state';
-import { apOf, decodeModel, lengthUnit, type RawModel } from './model';
+import { apOf, decodeModel, type RawModel } from './model';
 
 function rawFixture(): { raw: RawModel; geometry: ArrayBuffer } {
   // One triangle prototype: 3 positions, 3 normals, 3 indices, 1 edge segment.
   const pos = [0, 0, 0, 1, 0, 0, 0, 1, 0];
   const nrm = [0, 0, 1, 0, 0, 1, 0, 0, 1];
   const edg = [0, 0, 0, 1, 0, 0];
-  const buf = new ArrayBuffer((pos.length + nrm.length + 3 + edg.length) * 4);
+  const buf = new ArrayBuffer(120 + 7 * 8 + 9 * 8);
   new Float32Array(buf, 0, 9).set(pos);
   new Float32Array(buf, 36, 9).set(nrm);
   new Uint32Array(buf, 72, 3).set([0, 1, 2]);
   new Float32Array(buf, 84, 6).set(edg);
+  // 108: faceStarts [0], 112: edgeStarts [0], 120: faceData (7 doubles), 176: edgeData (9 doubles)
+  new Float64Array(buf, 120, 7).set([1, 0, 0, 0, 0, 0, 1]);
+  new Float64Array(buf, 176, 9).set([1, 1, 0, 0, 0, 0, 0, 0, 0]);
   const raw: RawModel = {
     schema: 'AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF { 1 0 10303 442 1 1 4 }',
     fileUnit: 'MILLIMETRE',
@@ -21,7 +24,19 @@ function rawFixture(): { raw: RawModel; geometry: ArrayBuffer } {
       { name: 'a', parent: 0, proto: 0, color: -1 },
       { name: 'b', parent: 0, proto: 0, color: 0 },
     ],
-    protos: [{ positions: [0, 9], normals: [36, 9], indices: [72, 3], edges: [84, 6], groups: [[0, 3, -1]] }],
+    protos: [
+      {
+        positions: [0, 9],
+        normals: [36, 9],
+        indices: [72, 3],
+        edges: [84, 6],
+        faceStarts: [108, 1],
+        edgeStarts: [112, 1],
+        faceData: [120, 7],
+        edgeData: [176, 9],
+        groups: [[0, 3, -1]],
+      },
+    ],
   };
   return { raw, geometry: buf };
 }
@@ -38,6 +53,9 @@ describe('decodeModel', () => {
     expect(m.nodes[0].children).toEqual([1, 2]);
     expect(m.triangles).toBe(2); // two instances of one triangle
     expect(m.ap).toBe('AP242');
+    expect(m.unit).toBe('mm');
+    expect(Array.from(m.protos[0].faceData)).toEqual([1, 0, 0, 0, 0, 0, 1]);
+    expect(Array.from(m.protos[0].edgeData)).toEqual([1, 1, 0, 0, 0, 0, 0, 0, 0]);
   });
 });
 
@@ -49,16 +67,6 @@ describe('apOf', () => {
     ['AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF', 'AP242'],
     ['IFC4', 'unknown'],
   ])('%s → %s', (schema, ap) => expect(apOf(schema)).toBe(ap));
-});
-
-describe('lengthUnit', () => {
-  it.each([
-    ['MILLIMETRE', 'mm', 1],
-    ['INCH', 'in', 1 / 25.4],
-    ['METRE', 'm', 0.001],
-    ['CENTIMETRE', 'cm', 0.1],
-    ['', 'mm', 1],
-  ])('%s', (name, label, perMm) => expect(lengthUnit(name)).toEqual({ label, perMm }));
 });
 
 describe('isolate', () => {
