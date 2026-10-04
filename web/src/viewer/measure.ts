@@ -107,6 +107,7 @@ const COLOR = 0xffb020;
 
 export class Measure {
   private readonly group = new THREE.Group();
+  private readonly hoverGroup = new THREE.Group();
   private readonly label = document.createElement('div');
   private mode: MeasureMode = 'pointDistance';
   private unit: UnitId = 'mm';
@@ -125,9 +126,10 @@ export class Measure {
     polygonOffsetFactor: -1,
     polygonOffsetUnits: -1,
   });
+  private readonly hoverFaceMaterial = Object.assign(this.faceMaterial.clone(), { opacity: 0.2 });
 
   constructor(scene: THREE.Scene, container: HTMLElement) {
-    scene.add(this.group);
+    scene.add(this.group, this.hoverGroup);
     this.label.className = 'measure-label';
     this.label.hidden = true;
     container.appendChild(this.label);
@@ -156,7 +158,17 @@ export class Measure {
 
   clear(): void {
     this.picks = [];
+    this.setHover(null);
     this.update();
+  }
+
+  // Preview of the edge or face under the cursor. Returns whether anything changed.
+  setHover(pick: Pick | null): boolean {
+    if (!pick && !this.hoverGroup.children.length) return false;
+    clearGroup(this.hoverGroup);
+    const o = pick && this.highlight(pick, this.hoverFaceMaterial);
+    if (o) this.hoverGroup.add(o);
+    return true;
   }
 
   updateLabel(camera: THREE.Camera, canvas: HTMLCanvasElement): void {
@@ -171,6 +183,7 @@ export class Measure {
     this.markerMaterial.dispose();
     this.lineMaterial.dispose();
     this.faceMaterial.dispose();
+    this.hoverFaceMaterial.dispose();
     this.label.remove();
   }
 
@@ -184,21 +197,16 @@ export class Measure {
   }
 
   private rebuild(): void {
-    this.group.traverse((o) => {
-      if (o instanceof THREE.Mesh || o instanceof THREE.Line || o instanceof THREE.Points) o.geometry.dispose();
-    });
-    this.group.clear();
+    clearGroup(this.group);
 
     const add = (o: THREE.Object3D) => {
       o.renderOrder = 10;
       this.group.add(o);
     };
-    const geometry = (positions: Float32Array) =>
-      new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(positions, 3));
 
     for (const p of this.picks) {
-      if (p.kind === 'edge') add(new THREE.LineSegments(geometry(p.segments), this.lineMaterial));
-      if (p.kind === 'face') add(new THREE.Mesh(geometry(p.triangles), this.faceMaterial));
+      const o = this.highlight(p, this.faceMaterial);
+      if (o) add(o);
     }
     const markers = this.picks.filter((p) => p.kind === 'point').map((p) => p.point);
     if (this.result?.lines.length) {
@@ -207,4 +215,24 @@ export class Measure {
     }
     if (markers.length) add(new THREE.Points(new THREE.BufferGeometry().setFromPoints(markers), this.markerMaterial));
   }
+
+  private highlight(p: Pick, faceMaterial: THREE.Material): THREE.Object3D | null {
+    const geometry = (positions: Float32Array) =>
+      new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const o =
+      p.kind === 'edge'
+        ? new THREE.LineSegments(geometry(p.segments), this.lineMaterial)
+        : p.kind === 'face'
+          ? new THREE.Mesh(geometry(p.triangles), faceMaterial)
+          : null;
+    if (o) o.renderOrder = 10;
+    return o;
+  }
+}
+
+function clearGroup(group: THREE.Group): void {
+  group.traverse((o) => {
+    if (o instanceof THREE.Mesh || o instanceof THREE.Line || o instanceof THREE.Points) o.geometry.dispose();
+  });
+  group.clear();
 }

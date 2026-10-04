@@ -105,6 +105,8 @@ export class Viewer {
     const canvas = this.renderer.domElement;
     canvas.addEventListener('pointerdown', (e) => (this.pointerDown = { x: e.clientX, y: e.clientY }));
     canvas.addEventListener('pointerup', this.handleClick);
+    canvas.addEventListener('pointermove', this.handleHover);
+    canvas.addEventListener('pointerleave', () => this.setHover(null));
 
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(container);
@@ -389,6 +391,17 @@ export class Viewer {
     }
     this.requestRender();
   };
+
+  // Highlight the edge or face a click would pick; points get no preview.
+  private handleHover = (e: PointerEvent): void => {
+    const kind = this.measure.pickKind;
+    if (this.tool !== 'measure' || kind === 'point' || e.buttons) return this.setHover(null);
+    this.setHover(this.pick(kind, this.raycast(e.clientX, e.clientY), e));
+  };
+
+  private setHover(pick: Pick | null): void {
+    if (this.measure.setHover(pick)) this.requestRender();
+  }
 
   private raycaster(clientX: number, clientY: number): THREE.Raycaster {
     const rect = this.renderer.domElement.getBoundingClientRect();
