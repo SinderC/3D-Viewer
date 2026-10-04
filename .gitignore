@@ -1,0 +1,7 @@
+.DS_Store
+node_modules/
+dist/
+wasm/.emsdk/
+wasm/.deps/
+wasm/build/
+web/public/occt/
