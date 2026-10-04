@@ -6,3 +6,4 @@ wasm/.deps/
 wasm/build/
 web/public/occt/
 *.tsbuildinfo
+samples/
