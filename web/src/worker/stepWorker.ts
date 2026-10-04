@@ -15,7 +15,8 @@ const post = (msg: WorkerResponse, transfer: Transferable[] = []) => self.postMe
 let occt: Promise<OcctModule> | undefined;
 function loadOcct(): Promise<OcctModule> {
   // Served from public/ (built by wasm/scripts/build-bridge.sh), so it is not bundled.
-  const url = `${import.meta.env.BASE_URL}occt/occt-viewer.js`;
+  // Absolute so the dev server does not tag it with ?import, which it rejects for public files.
+  const url = new URL(`${import.meta.env.BASE_URL}occt/occt-viewer.js`, self.location.origin).href;
   occt ??= import(/* @vite-ignore */ url).then((m) => m.default());
   return occt;
 }
