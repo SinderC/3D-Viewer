@@ -22,6 +22,32 @@ function apOf(schema) {
   return '?';
 }
 
+// Fraction of mesh edges (after welding coincident vertices, ignoring zero-area triangles)
+// not shared by exactly two triangles.
+// Section caps need closed meshes, so this should be ~0 for solids.
+function openEdgeRatio(geometry, proto) {
+  const pos = new Float32Array(geometry, proto.positions[0], proto.positions[1]);
+  const idx = new Uint32Array(geometry, proto.indices[0], proto.indices[1]);
+  const weld = new Map();
+  const id = (i) => {
+    const key = `${pos[i * 3]},${pos[i * 3 + 1]},${pos[i * 3 + 2]}`;
+    if (!weld.has(key)) weld.set(key, weld.size);
+    return weld.get(key);
+  };
+  const ids = Array.from(idx, id);
+  const edges = new Map();
+  for (let t = 0; t < ids.length; t += 3) {
+    if (ids[t] === ids[t + 1] || ids[t + 1] === ids[t + 2] || ids[t + 2] === ids[t]) continue; // zero-area
+    for (const [a, b] of [[ids[t], ids[t + 1]], [ids[t + 1], ids[t + 2]], [ids[t + 2], ids[t]]]) {
+      const key = a < b ? `${a},${b}` : `${b},${a}`;
+      edges.set(key, (edges.get(key) ?? 0) + 1);
+    }
+  }
+  let open = 0;
+  for (const n of edges.values()) if (n !== 2) open++;
+  return edges.size ? open / edges.size : 0;
+}
+
 const occt = await createOcctViewer();
 const rows = [];
 let failed = 0;
@@ -36,6 +62,7 @@ for (const target of targets) {
       Object.assign(row, { status: 'FAIL', note: res.error });
     } else {
       const model = JSON.parse(res.json);
+      const geometry = res.geometry.slice().buffer;
       const tris = model.protos.reduce((n, p) => n + p.indices[1] / 3, 0);
       const edges = model.protos.reduce((n, p) => n + p.edges[1] / 6, 0);
       const ok = tris > 0 && model.nodes.length > 0 && res.geometry.byteLength > 0;
@@ -48,6 +75,7 @@ for (const target of targets) {
         tris,
         edges,
         colors: model.colors.length,
+        open: model.protos.map((p) => (openEdgeRatio(geometry, p) * 100).toFixed(1) + '%').join(' '),
       });
     }
     if (row.status !== 'ok') failed++;

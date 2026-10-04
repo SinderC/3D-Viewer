@@ -4,6 +4,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from 'three-mesh-bvh';
 import type { Model } from '../core/model';
 import { Measure } from './measure';
+import { buildSectionCaps, disposeCaps } from './section';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
@@ -46,6 +47,11 @@ export class Viewer {
   private readonly modelRoot = new THREE.Group();
   private readonly measure: Measure;
   private readonly clipPlane = new THREE.Plane();
+  // Shared by all clipped materials; empty when the section is off. Caps are not clipped.
+  private readonly clipping: THREE.Plane[] = [];
+  private caps = new THREE.Group();
+  private capMaterials = new Map<number, THREE.MeshStandardMaterial>();
+  private readonly capOutline = new THREE.LineBasicMaterial({ color: 0x1e2026 });
   private readonly resizeObserver: ResizeObserver;
 
   private nodeObjects: THREE.Object3D[] = [];
@@ -74,6 +80,9 @@ export class Viewer {
   constructor(private readonly container: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setPixelRatio(window.devicePixelRatio);
+    this.renderer.localClippingEnabled = true;
+    this.edgeMaterial.clippingPlanes = this.clipping;
+    this.highlight.clippingPlanes = this.clipping;
     container.appendChild(this.renderer.domElement);
 
     this.scene.background = new THREE.Color(0x2a2d34);
@@ -84,6 +93,7 @@ export class Viewer {
     this.camera.add(this.light);
     this.light.position.set(0.5, 1, 1);
     this.scene.add(this.modelRoot);
+    this.scene.add(this.caps);
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.addEventListener('change', this.requestRender);
@@ -104,6 +114,7 @@ export class Viewer {
     this.clear();
     this.controls.dispose();
     this.measure.dispose();
+    this.capOutline.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }
@@ -176,10 +187,14 @@ export class Viewer {
       polygonOffset: true,
       polygonOffsetFactor: 1,
       polygonOffsetUnits: 1,
+      clippingPlanes: this.clipping,
     });
   }
 
   private clear(): void {
+    this.clearCaps();
+    this.capMaterials.forEach((m) => m.dispose());
+    this.capMaterials.clear();
     const geometries = new Set<THREE.BufferGeometry>();
     this.modelRoot.traverse((o) => {
       if (o instanceof THREE.Mesh || o instanceof THREE.LineSegments) geometries.add(o.geometry);
@@ -204,6 +219,7 @@ export class Viewer {
 
   setHidden(hidden: ReadonlySet<number>): void {
     this.nodeObjects.forEach((o, id) => (o.visible = !hidden.has(id)));
+    this.updateCaps();
     this.requestRender();
   }
 
@@ -233,15 +249,44 @@ export class Viewer {
   }
 
   setSection({ axis, position, flip }: Section): void {
-    if (!axis || this.bounds.isEmpty()) {
-      this.renderer.clippingPlanes = [];
-    } else {
+    this.clipping.length = 0;
+    if (axis && !this.bounds.isEmpty()) {
       const n = AXES[axis].clone().multiplyScalar(flip ? 1 : -1);
       const at = this.bounds.min.clone().lerp(this.bounds.max, position);
       this.clipPlane.setFromNormalAndCoplanarPoint(n, at);
-      this.renderer.clippingPlanes = [this.clipPlane];
+      this.clipping.push(this.clipPlane);
     }
+    this.updateCaps();
     this.requestRender();
+  }
+
+  // Solid-looking cut: fill each visible part's cross-section with its own colour.
+  private updateCaps(): void {
+    this.clearCaps();
+    if (!this.clipping.length) return;
+    this.caps = buildSectionCaps(this.meshes.filter(isShown), this.clipPlane, {
+      material: (mesh) => this.capMaterial(mesh),
+      outline: this.capOutline,
+    });
+    this.scene.add(this.caps);
+  }
+
+  private clearCaps(): void {
+    disposeCaps(this.caps);
+    this.scene.remove(this.caps);
+    this.caps = new THREE.Group();
+  }
+
+  private capMaterial(mesh: THREE.Mesh): THREE.MeshStandardMaterial {
+    const base = mesh.userData.baseMaterial as THREE.MeshStandardMaterial | THREE.MeshStandardMaterial[];
+    const color = (Array.isArray(base) ? base[0] : base).color;
+    const key = color.getHex();
+    let m = this.capMaterials.get(key);
+    if (!m) {
+      m = new THREE.MeshStandardMaterial({ color, roughness: 0.9, metalness: 0, side: THREE.DoubleSide });
+      this.capMaterials.set(key, m);
+    }
+    return m;
   }
 
   // ---------------------------------------------------------------------------
@@ -327,7 +372,7 @@ export class Viewer {
     const ndc = new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
     const raycaster = new THREE.Raycaster();
     raycaster.setFromCamera(ndc, this.camera);
-    const clipped = this.renderer.clippingPlanes.length > 0;
+    const clipped = this.clipping.length > 0;
     return raycaster
       .intersectObjects(this.meshes.filter(isShown), false)
       .find((h) => !clipped || this.clipPlane.distanceToPoint(h.point) >= 0);
