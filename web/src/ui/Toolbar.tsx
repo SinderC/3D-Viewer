@@ -1,6 +1,7 @@
 import type { Dispatch, RefObject } from 'react';
 import { UNITS, type UnitId } from '../core/units';
 import { MEASURE_MODES, type MeasureMode } from '../viewer/measure';
+import { QUALITY, type Quality } from '../worker/protocol';
 import type { Axis, ViewName, Viewer } from '../viewer/Viewer';
 import type { Action, State } from './state';
 
@@ -9,11 +10,13 @@ interface Props {
   dispatch: Dispatch<Action>;
   viewer: RefObject<Viewer | null>;
   onOpen: () => void;
+  quality: Quality;
+  onQuality: (q: Quality) => void;
 }
 
 const VIEWS: ViewName[] = ['iso', 'front', 'top', 'right'];
 
-export function Toolbar({ state, dispatch, viewer, onOpen }: Props) {
+export function Toolbar({ state, dispatch, viewer, onOpen, quality, onQuality }: Props) {
   const ready = state.status === 'ready';
   const { section } = state;
   return (
@@ -21,6 +24,16 @@ export function Toolbar({ state, dispatch, viewer, onOpen }: Props) {
       <button onClick={onOpen} className="primary">
         Open STEP…
       </button>
+      <label title="Mesh quality (reloads the model)">
+        Quality{' '}
+        <select value={quality} disabled={state.status === 'loading'} onChange={(e) => onQuality(e.target.value as Quality)}>
+          {Object.entries(QUALITY).map(([id, { label }]) => (
+            <option key={id} value={id}>
+              {label}
+            </option>
+          ))}
+        </select>
+      </label>
       <fieldset disabled={!ready}>
         <span className="sep" />
         <button onClick={() => viewer.current?.fit()} title="Fit all (F)">

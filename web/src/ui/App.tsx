@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import type { Viewer } from '../viewer/Viewer';
 import { loadStep } from '../worker/loadStep';
+import { QUALITY, type Quality } from '../worker/protocol';
 import { ModelTree } from './ModelTree';
-import { initialState, reducer } from './state';
+import { initialState, reducer, type State } from './state';
 import { Toolbar } from './Toolbar';
 import { ViewerCanvas } from './ViewerCanvas';
 
@@ -16,26 +17,54 @@ declare global {
   }
 }
 
-const STAGES: Record<string, string> = { read: 'Parsing', transfer: 'Translating' };
+const QUALITY_KEY = 'quality';
+
+// Storage can be unavailable (private mode, blocked site data); the setting is a convenience.
+function storedQuality(): Quality {
+  try {
+    const q = localStorage.getItem(QUALITY_KEY);
+    if (q && q in QUALITY) return q as Quality;
+  } catch {}
+  return 'normal';
+}
+
+const STAGES: Record<string, string> = { read: 'Parsing', transfer: 'Translating', mesh: 'Meshing' };
 
 export function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
   const viewer = useRef<Viewer | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
+  const [quality, setQuality] = useState<Quality>(storedQuality);
+  const lastFile = useRef<File | null>(null);
 
-  const open = useCallback(async (file: File) => {
-    dispatch({ type: 'loadStart', fileName: file.name });
-    const t0 = performance.now();
+  const open = useCallback(
+    async (file: File, q: Quality = quality) => {
+      lastFile.current = file;
+      dispatch({ type: 'loadStart', fileName: file.name });
+      const t0 = performance.now();
+      try {
+        const model = await loadStep(
+          await file.arrayBuffer(),
+          (stage, percent) => dispatch({ type: 'progress', stage, percent }),
+          QUALITY[q].options,
+        );
+        dispatch({ type: 'loaded', model, ms: Math.round(performance.now() - t0) });
+      } catch (e) {
+        dispatch({ type: 'failed', error: e instanceof Error ? e.message : String(e) });
+      }
+    },
+    [quality],
+  );
+
+  // Quality is applied at load time, so reload the open model with the new setting.
+  const changeQuality = (q: Quality) => {
+    setQuality(q);
     try {
-      const model = await loadStep(await file.arrayBuffer(), (stage, percent) =>
-        dispatch({ type: 'progress', stage, percent }),
-      );
-      dispatch({ type: 'loaded', model, ms: Math.round(performance.now() - t0) });
-    } catch (e) {
-      dispatch({ type: 'failed', error: e instanceof Error ? e.message : String(e) });
-    }
-  }, []);
+      localStorage.setItem(QUALITY_KEY, q);
+    } catch {}
+    if (lastFile.current) open(lastFile.current, q);
+  };
 
   // Files opened via the OS when installed as a PWA.
   useEffect(() => {
@@ -75,7 +104,14 @@ export function App() {
         if (file) open(file);
       }}
     >
-      <Toolbar state={state} dispatch={dispatch} viewer={viewer} onOpen={() => fileInput.current?.click()} />
+      <Toolbar
+        state={state}
+        dispatch={dispatch}
+        viewer={viewer}
+        onOpen={() => fileInput.current?.click()}
+        quality={quality}
+        onQuality={changeQuality}
+      />
       <input
         ref={fileInput}
         type="file"
@@ -125,11 +161,7 @@ export function App() {
         {status === 'loading' && (
           <div className="overlay">
             <p>Loading {state.fileName}…</p>
-            {state.progress && (
-              <p className="muted">
-                {STAGES[state.progress.stage] ?? state.progress.stage} {state.progress.percent}%
-              </p>
-            )}
+            <LoadProgress key={state.fileName} progress={state.progress} />
           </div>
         )}
         {status === 'error' && (
@@ -141,5 +173,24 @@ export function App() {
         {dragging && <div className="overlay drop">Drop to open</div>}
       </main>
     </div>
+  );
+}
+
+// Stage, percent when known, and elapsed time: some stages run long without measurable progress.
+function LoadProgress({ progress }: { progress: State['progress'] }) {
+  const [t0] = useState(() => performance.now());
+  const [, tick] = useReducer((n: number) => n + 1, 0);
+  useEffect(() => {
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, []);
+  const seconds = Math.floor((performance.now() - t0) / 1000);
+  const stage = progress ? (STAGES[progress.stage] ?? progress.stage) : 'Starting';
+  const percent = progress && progress.percent >= 0 ? ` ${progress.percent}%` : '…';
+  return (
+    <p className="muted">
+      {stage}
+      {percent} · {seconds} s
+    </p>
   );
 }

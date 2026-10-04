@@ -5,6 +5,15 @@ export interface LoadOptions {
   angularDeflection?: number;
 }
 
+export type Quality = 'coarse' | 'normal' | 'fine';
+
+// Mesh density presets. Normal uses the bridge defaults.
+export const QUALITY: Record<Quality, { label: string; options: LoadOptions }> = {
+  coarse: { label: 'Coarse', options: { linearDeflection: 0.003, angularDeflection: 0.8 } },
+  normal: { label: 'Normal', options: {} },
+  fine: { label: 'Fine', options: { linearDeflection: 0.001, angularDeflection: 0.35 } },
+};
+
 export type WorkerRequest = { type: 'open'; bytes: ArrayBuffer; options?: LoadOptions };
 
 export type WorkerResponse =

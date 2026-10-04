@@ -15,13 +15,12 @@
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
 #include <Bnd_Box.hxx>
+#include <DESTEP_Parameters.hxx>
 #include <GCPnts_AbscissaPoint.hxx>
 #include <HeaderSection_FileSchema.hxx>
 #include <Interface_HArray1OfHAsciiString.hxx>
 #include <Message.hxx>
 #include <Message_Messenger.hxx>
-#include <Message_ProgressIndicator.hxx>
-#include <Message_ProgressScope.hxx>
 #include <Poly_PolygonOnTriangulation.hxx>
 #include <Poly_Triangulation.hxx>
 #include <STEPCAFControl_Reader.hxx>
@@ -69,7 +68,7 @@ using RGBA = std::array<float, 4>;
 struct Options
 {
   double linearDeflection  = 0.001; // relative to the part's bounding-box diagonal
-  double angularDeflection = 0.35;  // radians
+  double angularDeflection = 0.5;   // radians
 };
 
 // ---------------------------------------------------------------------------
@@ -125,40 +124,55 @@ Range append(const std::vector<T>& data)
 // ---------------------------------------------------------------------------
 // Progress → JS callback
 
-class JsProgress : public Message_ProgressIndicator
+// percent is -1 when the stage has no measurable progress.
+class Progress
 {
 public:
-  explicit JsProgress(val cb) : myCb(std::move(cb)) {}
+  explicit Progress(val cb) : myCb(std::move(cb)) {}
 
-  void Show(const Message_ProgressScope&, const Standard_Boolean) override
+  void operator()(const std::string& stage, int pct)
   {
-    const int pct = static_cast<int>(GetPosition() * 100.0);
-    if (pct != myLast && !myCb.isUndefined())
-    {
-      myLast = pct;
-      myCb(myStage, pct);
-    }
-  }
-
-  void SetStage(const std::string& s)
-  {
-    myStage = s;
-    myLast  = -1;
+    if (myCb.isUndefined() || (stage == myStage && pct == myLast))
+      return;
+    myStage = stage;
+    myLast  = pct;
+    myCb(stage, pct);
   }
 
 private:
   val         myCb;
-  std::string myStage = "read";
-  int         myLast  = -1;
+  std::string myStage;
+  int         myLast = -1;
 };
 
 // ---------------------------------------------------------------------------
 // Helpers
 
+// Hands the parser the file in chunks so read progress can be reported as bytes consumed.
 class MemBuf : public std::streambuf
 {
 public:
-  MemBuf(char* p, size_t n) { setg(p, p, p + n); }
+  MemBuf(char* p, size_t n, Progress& progress) : myBegin(p), myEnd(p + n), myProgress(progress)
+  {
+    setg(p, p, p);
+  }
+
+protected:
+  int_type underflow() override
+  {
+    char* cur = egptr();
+    if (cur == myEnd)
+      return traits_type::eof();
+    myProgress("read", int(100.0 * (cur - myBegin) / (myEnd - myBegin)));
+    setg(cur, cur, std::min(cur + kChunk, myEnd));
+    return traits_type::to_int_type(*cur);
+  }
+
+private:
+  static constexpr size_t kChunk = 1 << 20;
+  char*                   myBegin;
+  char*                   myEnd;
+  Progress&               myProgress;
 };
 
 std::string labelName(const TDF_Label& l)
@@ -217,8 +231,9 @@ void trsfToMatrix(const gp_Trsf& t, double m[16])
 class Builder
 {
 public:
-  Builder(const Handle(TDocStd_Document)& doc, const Options& opts)
+  Builder(const Handle(TDocStd_Document)& doc, const Options& opts, Progress& progress)
       : myOpts(opts),
+        myProgress(progress),
         myShapes(XCAFDoc_DocumentTool::ShapeTool(doc->Main())),
         myColors(XCAFDoc_DocumentTool::ColorTool(doc->Main()))
   {
@@ -226,6 +241,14 @@ public:
 
   void build()
   {
+    // Every part definition is meshed once; count them so meshing can report progress.
+    TDF_LabelSequence all;
+    myShapes->GetShapes(all);
+    for (const TDF_Label& l : all)
+      if (!XCAFDoc_ShapeTool::IsAssembly(l))
+        ++myPartCount;
+    myProgress("mesh", 0);
+
     TDF_LabelSequence roots;
     myShapes->GetFreeShapes(roots);
     for (const TDF_Label& root : roots)
@@ -312,6 +335,7 @@ private:
     if (idx >= 0)
       myProtos.push_back(std::move(proto));
     myProtoByEntry[entry.ToCString()] = idx;
+    myProgress("mesh", int(100 * std::min(++myPartsMeshed, myPartCount) / std::max(myPartCount, 1)));
     return idx;
   }
 
@@ -534,6 +558,9 @@ private:
   }
 
   Options                    myOpts;
+  Progress&                  myProgress;
+  int                        myPartCount   = 0;
+  int                        myPartsMeshed = 0;
   Handle(XCAFDoc_ShapeTool)  myShapes;
   Handle(XCAFDoc_ColorTool)  myColors;
   std::vector<Node>          myNodes;
@@ -653,7 +680,7 @@ val readStep(const std::string& bytes, val jsOptions, val onProgress)
   val result = val::object();
   try
   {
-    Handle(JsProgress) progress = new JsProgress(onProgress);
+    Progress progress(onProgress);
 
     Handle(TDocStd_Document) doc;
     XCAFApp_Application::GetApplication()->NewDocument("BinXCAF", doc);
@@ -665,7 +692,7 @@ val readStep(const std::string& bytes, val jsOptions, val onProgress)
     reader.SetGDTMode(false); // PMI out of scope for now
     reader.SetPropsMode(false);
 
-    MemBuf       buf(const_cast<char*>(bytes.data()), bytes.size());
+    MemBuf       buf(const_cast<char*>(bytes.data()), bytes.size(), progress);
     std::istream stream(&buf);
     if (reader.ReadStream("model.stp", stream) != IFSelect_RetDone)
       throw std::runtime_error("Not a readable STEP file");
@@ -673,11 +700,23 @@ val readStep(const std::string& bytes, val jsOptions, val onProgress)
     const std::string schema = fileSchema(reader.ChangeReader().StepModel());
     const std::string unit   = fileLengthUnit(reader.ChangeReader());
 
-    progress->SetStage("transfer");
-    if (!reader.Transfer(doc, progress->Start()))
+    // Skip the self-intersection fixes: they cost ~13% of a large assembly's load and made
+    // no visible difference on the samples. Set after reading, which creates the actor that takes them.
+    using FixMode             = DE_ShapeFixParameters::FixMode;
+    DE_ShapeFixParameters fix = DESTEP_Parameters::GetDefaultShapeFixParameters();
+    fix.FixSelfIntersectionMode             = FixMode::NotFix;
+    fix.FixSelfIntersectingEdgeMode         = FixMode::NotFix;
+    fix.FixIntersectingEdgesMode            = FixMode::NotFix;
+    fix.FixNonAdjacentIntersectingEdgesMode = FixMode::NotFix;
+    fix.FixIntersectingWiresMode            = FixMode::NotFix;
+    reader.SetShapeFixParameters(fix);
+
+    // OCCT's transfer progress stalls for most of the stage on single-root assemblies; don't show it.
+    progress("transfer", -1);
+    if (!reader.Transfer(doc))
       throw std::runtime_error("STEP transfer failed");
 
-    Builder builder(doc, opts);
+    Builder builder(doc, opts, progress);
     builder.build();
 
     result.set("json", toJson(schema, unit, builder));
