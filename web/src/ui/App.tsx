@@ -48,7 +48,7 @@ export function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
-      if (e.key === 'f') viewer.current?.setView('iso');
+      if (e.key === 'f') viewer.current?.fit();
       if (e.key === 'm') dispatch({ type: 'setTool', tool: state.tool === 'measure' ? 'select' : 'measure' });
       if (e.key === 'Escape') {
         dispatch({ type: 'setTool', tool: 'select' });

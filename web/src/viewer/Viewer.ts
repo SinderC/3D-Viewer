@@ -293,12 +293,21 @@ export class Viewer {
   // Camera
 
   setView(view: ViewName): void {
+    this.frame(VIEW_DIRS[view]);
+  }
+
+  /** Fit the visible geometry while keeping the current viewing direction. */
+  fit(): void {
+    this.frame(this.camera.position.clone().sub(this.controls.target).normalize());
+  }
+
+  private frame(dir: THREE.Vector3): void {
     const sphere = this.visibleBounds().getBoundingSphere(new THREE.Sphere());
     const r = Math.max(sphere.radius, 1e-3);
     const distance = r / Math.sin(THREE.MathUtils.degToRad(this.perspective.fov / 2));
 
     for (const cam of [this.perspective, this.ortho]) {
-      cam.position.copy(sphere.center).addScaledVector(VIEW_DIRS[view], distance);
+      cam.position.copy(sphere.center).addScaledVector(dir, distance);
       cam.near = distance / 100;
       cam.far = distance * 100;
     }

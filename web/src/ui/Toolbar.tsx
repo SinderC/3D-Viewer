@@ -21,7 +21,7 @@ export function Toolbar({ state, dispatch, viewer, onOpen }: Props) {
       </button>
       <fieldset disabled={!ready}>
         <span className="sep" />
-        <button onClick={() => viewer.current?.setView('iso')} title="Fit all (F)">
+        <button onClick={() => viewer.current?.fit()} title="Fit all (F)">
           Fit
         </button>
         {VIEWS.map((v) => (
