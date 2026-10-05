@@ -25,6 +25,9 @@
 #include <Interface_HArray1OfHAsciiString.hxx>
 #include <Message.hxx>
 #include <Message_Messenger.hxx>
+#include <NCollection_DataMap.hxx>
+#include <NCollection_IndexedDataMap.hxx>
+#include <NCollection_Sequence.hxx>
 #include <Poly_PolygonOnTriangulation.hxx>
 #include <Poly_Triangulation.hxx>
 #include <RWGltf_CafReader.hxx>
@@ -33,15 +36,13 @@
 #include <STEPCAFControl_Reader.hxx>
 #include <STEPControl_Reader.hxx>
 #include <StepData_StepModel.hxx>
-#include <TColStd_SequenceOfAsciiString.hxx>
-#include <TDF_LabelSequence.hxx>
 #include <TDF_Tool.hxx>
 #include <TDataStd_Name.hxx>
 #include <TDocStd_Document.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
-#include <TopTools_DataMapOfShapeInteger.hxx>
-#include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
+#include <NCollection_List.hxx>
+#include <TopTools_ShapeMapHasher.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Compound.hxx>
 #include <TopoDS_Edge.hxx>
@@ -52,7 +53,6 @@
 #include <XCAFDoc_DocumentTool.hxx>
 #include <XCAFDoc_ShapeTool.hxx>
 #include <XCAFPrs.hxx>
-#include <XCAFPrs_IndexedDataMapOfShapeStyle.hxx>
 #include <XCAFPrs_Style.hxx>
 
 #include <emscripten/bind.h>
@@ -69,6 +69,11 @@
 #include <vector>
 
 using emscripten::val;
+
+using LabelSequence = NCollection_Sequence<TDF_Label>;
+using FaceColorMap  = NCollection_DataMap<TopoDS_Shape, int, TopTools_ShapeMapHasher>;
+using ShapeStyleMap = NCollection_IndexedDataMap<TopoDS_Shape, XCAFPrs_Style, TopTools_ShapeMapHasher>;
+using EdgeFacesMap  = NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>, TopTools_ShapeMapHasher>;
 
 namespace
 {
@@ -252,14 +257,14 @@ public:
   void build()
   {
     // Every part definition is meshed once; count them so meshing can report progress.
-    TDF_LabelSequence all;
+    LabelSequence all;
     myShapes->GetShapes(all);
     for (const TDF_Label& l : all)
       if (!XCAFDoc_ShapeTool::IsAssembly(l))
         ++myPartCount;
     myProgress("mesh", 0);
 
-    TDF_LabelSequence roots;
+    LabelSequence roots;
     myShapes->GetFreeShapes(roots);
     for (const TDF_Label& root : roots)
       visit(root, -1);
@@ -323,8 +328,8 @@ private:
 
     if (assembly)
     {
-      TDF_LabelSequence comps;
-      XCAFDoc_ShapeTool::GetComponents(def, comps, Standard_False);
+      LabelSequence comps;
+      XCAFDoc_ShapeTool::GetComponents(def, comps, false);
       for (const TDF_Label& c : comps)
         visit(c, id);
     }
@@ -373,9 +378,9 @@ private:
         const double diag = box.IsVoid() ? 1.0 : std::sqrt(box.SquareExtent());
         BRepMesh_IncrementalMesh(toMesh,
                                  std::max(diag * myOpts.linearDeflection, 1e-4),
-                                 Standard_False,
+                                 false,
                                  myOpts.angularDeflection,
-                                 Standard_False);
+                                 false);
       }
     }
 
@@ -449,16 +454,16 @@ private:
   }
 
   // Styles from the part and its sub-shape labels; larger shapes first so faces override solids.
-  TopTools_DataMapOfShapeInteger faceStyles(const TDF_Label&    def,
+  FaceColorMap faceStyles(const TDF_Label&    def,
                                             const TopoDS_Shape& shape,
                                             int&                partColor)
   {
-    TopTools_DataMapOfShapeInteger     result;
-    XCAFPrs_IndexedDataMapOfShapeStyle     styles;
+    FaceColorMap     result;
+    ShapeStyleMap     styles;
     XCAFPrs::CollectStyleSettings(def, TopLoc_Location(), styles);
 
     std::vector<std::pair<TopoDS_Shape, int>> entries;
-    for (XCAFPrs_IndexedDataMapOfShapeStyle::Iterator it(styles); it.More(); it.Next())
+    for (ShapeStyleMap::Iterator it(styles); it.More(); it.Next())
     {
       const XCAFPrs_Style& st = it.Value();
       if (!st.IsSetColorSurf())
@@ -529,7 +534,7 @@ private:
                            std::vector<uint32_t>& starts,
                            std::vector<double>&   data)
   {
-    TopTools_IndexedDataMapOfShapeListOfShape edgeFaces;
+    EdgeFacesMap edgeFaces;
     TopExp::MapShapesAndAncestors(shape, TopAbs_EDGE, TopAbs_FACE, edgeFaces);
 
     for (int i = 1; i <= edgeFaces.Extent(); ++i)
@@ -550,7 +555,7 @@ private:
         continue;
 
       const gp_Trsf               t     = loc.Transformation();
-      const TColStd_Array1OfInteger& nodes = poly->Nodes();
+      const NCollection_Array1<int>& nodes = poly->Nodes();
       if (nodes.Length() < 2)
         continue;
       starts.push_back(uint32_t(out.size() / 6));
@@ -619,7 +624,7 @@ std::string fileSchema(const Handle(StepData_StepModel)& model)
 
 std::string fileLengthUnit(STEPControl_Reader& reader)
 {
-  TColStd_SequenceOfAsciiString len, ang, solid;
+  NCollection_Sequence<TCollection_AsciiString> len, ang, solid;
   reader.FileUnits(len, ang, solid);
   return len.IsEmpty() ? std::string() : std::string(len.First().ToCString());
 }
@@ -743,8 +748,8 @@ Source readVrmlDoc(const std::string& bytes, const Handle(TDocStd_Document)& doc
 
 TDF_Label addShape(const Handle(TDocStd_Document)& doc, const TopoDS_Shape& shape, const std::string& name)
 {
-  const TDF_Label l = XCAFDoc_DocumentTool::ShapeTool(doc->Main())->AddShape(shape, Standard_True);
-  TDataStd_Name::Set(l, TCollection_ExtendedString(name.c_str(), Standard_True));
+  const TDF_Label l = XCAFDoc_DocumentTool::ShapeTool(doc->Main())->AddShape(shape, true);
+  TDataStd_Name::Set(l, TCollection_ExtendedString(name.c_str(), true));
   return l;
 }
 
@@ -917,7 +922,7 @@ val readModel(const std::string& bytes, const std::string& fileName, val jsOptio
   }
   catch (const Standard_Failure& e)
   {
-    result.set("error", std::string("OCCT: ") + e.GetMessageString());
+    result.set("error", std::string("OCCT: ") + e.what());
   }
   catch (const std::exception& e)
   {

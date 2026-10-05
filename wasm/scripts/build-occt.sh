@@ -31,7 +31,6 @@ emcmake cmake -S "$OCCT_SRC" -B "$OCCT_BUILD" -G "Unix Makefiles" \
   -DBUILD_MODULE_Visualization=OFF \
   -DBUILD_MODULE_ApplicationFramework=OFF \
   -DBUILD_MODULE_DataExchange=OFF \
-  -DBUILD_MODULE_DETools=OFF \
   -DBUILD_MODULE_Draw=OFF \
   -DBUILD_ADDITIONAL_TOOLKITS="$TOOLKITS" \
   -DBUILD_DOC_Overview=OFF \

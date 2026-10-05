@@ -27,7 +27,7 @@ jobs:
         with:
           path: |
             wasm/.emsdk
-            wasm/.deps/occt-install
+            wasm/.deps/occt-install-*
           key: occt-${{ runner.os }}-${{ hashFiles('wasm/scripts/env.sh', 'wasm/scripts/setup-emsdk.sh', 'wasm/scripts/build-occt.sh') }}
 
       - name: Build Emscripten SDK and OCCT

@@ -4,9 +4,8 @@ project(occt_viewer CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(OpenCASCADE REQUIRED CONFIG NO_DEFAULT_PATH
-  PATHS "${CMAKE_CURRENT_SOURCE_DIR}/.deps/occt-install"
-  CMAKE_FIND_ROOT_PATH_BOTH)
+# OpenCASCADE_DIR is passed by scripts/build-bridge.sh (install dir of the pinned OCCT version).
+find_package(OpenCASCADE REQUIRED CONFIG NO_DEFAULT_PATH CMAKE_FIND_ROOT_PATH_BOTH)
 
 add_executable(occt-viewer src/bridge.cpp)
 target_link_libraries(occt-viewer PRIVATE
