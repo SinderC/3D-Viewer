@@ -1,16 +1,17 @@
-// Loads every STEP file under samples/ through the WASM bridge and reports per-file stats.
+// Loads every supported model file under samples/ through the WASM bridge and reports per-file stats.
 // Usage: node wasm/test/smoke.mjs [dir-or-file ...]
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, basename, extname } from 'node:path';
+import { join, basename } from 'node:path';
 import createOcctViewer from '../build/occt-viewer.js';
+import { isSupported } from '../../web/src/core/formats.ts';
 
 const root = new URL('../../samples', import.meta.url).pathname;
 const targets = process.argv.length > 2 ? process.argv.slice(2) : [root];
 
-function* stepFiles(p) {
+function* modelFiles(p) {
   if (statSync(p).isDirectory()) {
-    for (const e of readdirSync(p).sort()) yield* stepFiles(join(p, e));
-  } else if (/^\.(stp|step)$/i.test(extname(p))) {
+    for (const e of readdirSync(p).sort()) yield* modelFiles(join(p, e));
+  } else if (isSupported(p)) {
     yield p;
   }
 }
@@ -74,9 +75,9 @@ const rows = [];
 let failed = 0;
 
 for (const target of targets) {
-  for (const file of stepFiles(target)) {
+  for (const file of modelFiles(target)) {
     const t0 = performance.now();
-    const res = occt.readStep(readFileSync(file), {}, undefined);
+    const res = occt.readModel(readFileSync(file), basename(file), {}, undefined);
     const ms = Math.round(performance.now() - t0);
     const row = { file: basename(file), ms };
     if (res.error) {
@@ -90,7 +91,7 @@ for (const target of targets) {
       const ok = tris > 0 && model.nodes.length > 0 && res.geometry.byteLength > 0 && measureOk;
       Object.assign(row, {
         status: ok ? 'ok' : 'FAIL',
-        ap: apOf(model.schema),
+        format: model.format === 'STEP' ? `STEP ${apOf(model.schema)}` : model.format,
         unit: model.fileUnit,
         nodes: model.nodes.length,
         protos: model.protos.length,

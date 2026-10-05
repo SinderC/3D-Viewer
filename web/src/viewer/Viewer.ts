@@ -1,4 +1,4 @@
-// Imperative Three.js scene for a decoded STEP model. React owns one instance via a ref.
+// Imperative Three.js scene for a decoded model. React owns one instance via a ref.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from 'three-mesh-bvh';
@@ -20,7 +20,7 @@ export interface Section {
   flip: boolean;
 }
 
-// STEP models are Z-up.
+// Models are Z-up (the bridge converts Y-up mesh formats).
 const VIEW_DIRS: Record<ViewName, THREE.Vector3> = {
   iso: new THREE.Vector3(1, -1, 0.8).normalize(),
   front: new THREE.Vector3(0, -1, 0),

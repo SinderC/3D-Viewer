@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import type { Viewer } from '../viewer/Viewer';
-import { loadStep } from '../worker/loadStep';
+import { EXTENSIONS, isSupported } from '../core/formats';
+import { loadModel } from '../worker/loadModel';
 import { QUALITY, type Quality } from '../worker/protocol';
 import { ModelTree } from './ModelTree';
 import { initialState, reducer, type State } from './state';
@@ -42,10 +43,15 @@ export function App() {
     async (file: File, q: Quality = quality) => {
       lastFile.current = file;
       dispatch({ type: 'loadStart', fileName: file.name });
+      if (!isSupported(file.name)) {
+        dispatch({ type: 'failed', error: `Unsupported file type. Supported: ${EXTENSIONS.join(' ')}` });
+        return;
+      }
       const t0 = performance.now();
       try {
-        const model = await loadStep(
+        const model = await loadModel(
           await file.arrayBuffer(),
+          file.name,
           (stage, percent) => dispatch({ type: 'progress', stage, percent }),
           QUALITY[q].options,
         );
@@ -115,7 +121,7 @@ export function App() {
       <input
         ref={fileInput}
         type="file"
-        accept=".stp,.step,.STP,.STEP"
+        accept={EXTENSIONS.join(',')}
         hidden
         onChange={(e) => {
           const file = e.target.files?.[0];
@@ -131,7 +137,7 @@ export function App() {
               <dt>File</dt>
               <dd title={state.fileName}>{state.fileName}</dd>
               <dt>Format</dt>
-              <dd title={model.schema}>STEP {model.ap}</dd>
+              <dd title={model.schema || undefined}>{model.format}</dd>
               <dt>Units</dt>
               <dd>{model.unit}</dd>
               <dt>Parts</dt>
@@ -153,7 +159,7 @@ export function App() {
         {status === 'idle' && (
           <div className="overlay">
             <p>
-              Drop a STEP file (AP203, AP214, AP242) here or use <b>Open STEP…</b>
+              Drop a STEP, IGES, glTF, OBJ, STL, VRML or BREP file here or use <b>Open…</b>
             </p>
             <p className="muted">Files are processed locally in your browser and never uploaded.</p>
           </div>

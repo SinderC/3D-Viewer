@@ -16,6 +16,7 @@ function rawFixture(): { raw: RawModel; geometry: ArrayBuffer } {
   new Float64Array(buf, 120, 7).set([1, 0, 0, 0, 0, 0, 1]);
   new Float64Array(buf, 176, 9).set([1, 1, 0, 0, 0, 0, 0, 0, 0]);
   const raw: RawModel = {
+    format: 'STEP',
     schema: 'AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF { 1 0 10303 442 1 1 4 }',
     fileUnit: 'MILLIMETRE',
     colors: [[1, 0, 0, 1]],
@@ -52,7 +53,7 @@ describe('decodeModel', () => {
     expect(m.roots).toEqual([0]);
     expect(m.nodes[0].children).toEqual([1, 2]);
     expect(m.triangles).toBe(2); // two instances of one triangle
-    expect(m.ap).toBe('AP242');
+    expect(m.format).toBe('STEP AP242');
     expect(m.unit).toBe('mm');
     expect(Array.from(m.protos[0].faceData)).toEqual([1, 0, 0, 0, 0, 0, 1]);
     expect(Array.from(m.protos[0].edgeData)).toEqual([1, 1, 0, 0, 0, 0, 0, 0, 0]);

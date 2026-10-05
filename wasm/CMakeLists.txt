@@ -9,7 +9,8 @@ find_package(OpenCASCADE REQUIRED CONFIG NO_DEFAULT_PATH
   CMAKE_FIND_ROOT_PATH_BOTH)
 
 add_executable(occt-viewer src/bridge.cpp)
-target_link_libraries(occt-viewer PRIVATE TKDESTEP TKXCAF TKMesh)
+target_link_libraries(occt-viewer PRIVATE
+  TKDESTEP TKDEIGES TKDEGLTF TKDEOBJ TKDESTL TKDEVRML TKRWMesh TKXCAF TKMesh)
 # Must match the OCCT build (see scripts/build-occt.sh).
 target_compile_options(occt-viewer PRIVATE -fwasm-exceptions -UOCC_CONVERT_SIGNALS)
 target_link_options(occt-viewer PRIVATE
@@ -22,6 +23,6 @@ target_link_options(occt-viewer PRIVATE
   -sALLOW_MEMORY_GROWTH=1
   -sMAXIMUM_MEMORY=4GB
   -sSTACK_SIZE=4MB
-  -sFILESYSTEM=0
+  -sFILESYSTEM=1 # MEMFS: the IGES reader and glTF buffers are read by file name
   -sDYNAMIC_EXECUTION=0)
 set_target_properties(occt-viewer PROPERTIES SUFFIX ".js")

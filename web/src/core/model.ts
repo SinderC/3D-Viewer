@@ -4,7 +4,8 @@ import { fileUnit, type UnitId } from './units';
 type Range = [offset: number, count: number];
 
 export interface RawModel {
-  schema: string;
+  format: string; // STEP, IGES, glTF, OBJ, STL, VRML, BREP
+  schema: string; // STEP only
   fileUnit: string;
   colors: [number, number, number, number][];
   nodes: { name: string; parent: number; proto: number; color: number; matrix?: number[] }[];
@@ -52,7 +53,8 @@ export interface ModelNode {
 
 export interface Model {
   schema: string;
-  ap: 'AP203' | 'AP214' | 'AP242' | 'unknown';
+  /** Display label, e.g. "STEP AP242" or "glTF". */
+  format: string;
   unit: UnitId; // the file's length unit
   colors: RawModel['colors'];
   nodes: ModelNode[];
@@ -61,11 +63,16 @@ export interface Model {
   triangles: number;
 }
 
-export function apOf(schema: string): Model['ap'] {
+export function apOf(schema: string): 'AP203' | 'AP214' | 'AP242' | 'unknown' {
   if (/AP242/i.test(schema)) return 'AP242';
   if (/AUTOMOTIVE_DESIGN/i.test(schema)) return 'AP214';
   if (/AP203|CONFIG_CONTROL_DESIGN/i.test(schema)) return 'AP203';
   return 'unknown';
+}
+
+function formatLabel({ format, schema }: RawModel): string {
+  const ap = format === 'STEP' ? apOf(schema) : 'unknown';
+  return ap === 'unknown' ? format : `${format} ${ap}`;
 }
 
 export function decodeModel(raw: RawModel, geometry: ArrayBuffer): Model {
@@ -94,7 +101,7 @@ export function decodeModel(raw: RawModel, geometry: ArrayBuffer): Model {
 
   return {
     schema: raw.schema,
-    ap: apOf(raw.schema),
+    format: formatLabel(raw),
     unit: fileUnit(raw.fileUnit),
     colors: raw.colors,
     nodes,

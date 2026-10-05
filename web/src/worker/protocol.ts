@@ -14,7 +14,7 @@ export const QUALITY: Record<Quality, { label: string; options: LoadOptions }> =
   fine: { label: 'Fine', options: { linearDeflection: 0.001, angularDeflection: 0.35 } },
 };
 
-export type WorkerRequest = { type: 'open'; bytes: ArrayBuffer; options?: LoadOptions };
+export type WorkerRequest = { type: 'open'; bytes: ArrayBuffer; fileName: string; options?: LoadOptions };
 
 export type WorkerResponse =
   | { type: 'progress'; stage: string; percent: number }

@@ -5,3 +5,6 @@ version 2.1 with additional exception (https://dev.opencascade.org/resources/lic
 The compiled library is distributed as web/public/occt/occt-viewer.wasm. To rebuild it against a
 modified OCCT, change OCCT_SRC in wasm/scripts/env.sh and run wasm/scripts/build-occt.sh and
 wasm/scripts/build-bridge.sh.
+
+It also includes RapidJSON (https://rapidjson.org/), Copyright (c) 2015 THL A29 Limited, a Tencent
+company, and Milo Yip, licensed under the MIT License, used by OCCT's glTF reader.

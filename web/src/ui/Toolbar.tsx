@@ -22,7 +22,7 @@ export function Toolbar({ state, dispatch, viewer, onOpen, quality, onQuality }:
   return (
     <header className="toolbar">
       <button onClick={onOpen} className="primary">
-        Open STEP…
+        Open…
       </button>
       <label title="Mesh quality (reloads the model)">
         Quality{' '}

@@ -3,8 +3,9 @@
 import type { WorkerRequest, WorkerResponse } from './protocol';
 
 interface OcctModule {
-  readStep(
+  readModel(
     bytes: Uint8Array,
+    fileName: string,
     options: object,
     onProgress: (stage: string, percent: number) => void,
   ): { json?: string; geometry?: Uint8Array; error?: string };
@@ -24,8 +25,11 @@ function loadOcct(): Promise<OcctModule> {
 self.onmessage = async ({ data }: MessageEvent<WorkerRequest>) => {
   try {
     const module = await loadOcct();
-    const res = module.readStep(new Uint8Array(data.bytes), data.options ?? {}, (stage, percent) =>
-      post({ type: 'progress', stage, percent }),
+    const res = module.readModel(
+      new Uint8Array(data.bytes),
+      data.fileName,
+      data.options ?? {},
+      (stage, percent) => post({ type: 'progress', stage, percent }),
     );
     if (res.error || !res.json || !res.geometry) throw new Error(res.error ?? 'Empty result');
     // The view aliases WASM memory; copy it into a transferable buffer.

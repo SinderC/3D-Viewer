@@ -1,10 +1,11 @@
-// STEP (AP203/AP214/AP242) → mesh bridge for the browser.
+// STEP / IGES / BREP / glTF / OBJ / STL / VRML → mesh bridge for the browser.
 //
-// readStep(bytes, options) returns { json, geometry }:
-//   json     — model description (schema, units, node tree, prototypes, colors)
+// readModel(bytes, fileName, options) returns { json, geometry }:
+//   json     — model description (format, schema, units, node tree, prototypes, colors)
 //   geometry — Uint8Array view over one packed buffer; JSON offsets point into it.
 //              The view aliases WASM memory and is valid until the next call: copy it.
 //
+// Every format is read into an XCAF document; the Builder turns that into the output.
 // Geometry is meshed once per prototype (part definition) and shared by all instances.
 
 #include <BRepAdaptor_Curve.hxx>
@@ -12,17 +13,23 @@
 #include <BRepBndLib.hxx>
 #include <BRepLib_ToolTriangulatedShape.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
+#include <BRepTools.hxx>
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
 #include <Bnd_Box.hxx>
 #include <DESTEP_Parameters.hxx>
 #include <GCPnts_AbscissaPoint.hxx>
 #include <HeaderSection_FileSchema.hxx>
+#include <IGESCAFControl_Reader.hxx>
+#include <IGESData_IGESModel.hxx>
 #include <Interface_HArray1OfHAsciiString.hxx>
 #include <Message.hxx>
 #include <Message_Messenger.hxx>
 #include <Poly_PolygonOnTriangulation.hxx>
 #include <Poly_Triangulation.hxx>
+#include <RWGltf_CafReader.hxx>
+#include <RWObj_CafReader.hxx>
+#include <RWStl.hxx>
 #include <STEPCAFControl_Reader.hxx>
 #include <STEPControl_Reader.hxx>
 #include <StepData_StepModel.hxx>
@@ -39,6 +46,7 @@
 #include <TopoDS_Compound.hxx>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
+#include <VrmlAPI_CafReader.hxx>
 #include <XCAFApp_Application.hxx>
 #include <XCAFDoc_ColorTool.hxx>
 #include <XCAFDoc_DocumentTool.hxx>
@@ -52,7 +60,9 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cstdio>
+#include <fstream>
 #include <map>
 #include <sstream>
 #include <string>
@@ -569,8 +579,32 @@ private:
   std::map<std::string, int> myProtoByEntry;
 };
 
-// ---------------------------------------------------------------------------
-// Header info
+// Readers: each fills the XCAF document and describes the source.
+
+struct Source
+{
+  std::string format;
+  std::string schema; // STEP only
+  std::string unit;   // file length unit name as in STEP ("MILLIMETRE", "INCH", ...); empty = mm
+};
+
+// OCCT's IGES reader (and glTF buffers, read lazily by file name) need a real file: MEMFS.
+class TempFile
+{
+public:
+  TempFile(const std::string& ext, const std::string& bytes) : myPath("/tmp/model" + ext)
+  {
+    std::ofstream(myPath, std::ios::binary).write(bytes.data(), std::streamsize(bytes.size()));
+  }
+  ~TempFile() { std::remove(myPath.c_str()); }
+  TempFile(const TempFile&)            = delete;
+  TempFile& operator=(const TempFile&) = delete;
+
+  const char* path() const { return myPath.c_str(); }
+
+private:
+  std::string myPath;
+};
 
 std::string fileSchema(const Handle(StepData_StepModel)& model)
 {
@@ -590,6 +624,191 @@ std::string fileLengthUnit(STEPControl_Reader& reader)
   return len.IsEmpty() ? std::string() : std::string(len.First().ToCString());
 }
 
+Source readStepDoc(const std::string& bytes, const Handle(TDocStd_Document)& doc, Progress& progress)
+{
+  STEPCAFControl_Reader reader;
+  reader.SetNameMode(true);
+  reader.SetColorMode(true);
+  reader.SetLayerMode(true);
+  reader.SetGDTMode(false); // PMI out of scope for now
+  reader.SetPropsMode(false);
+
+  MemBuf       buf(const_cast<char*>(bytes.data()), bytes.size(), progress);
+  std::istream stream(&buf);
+  if (reader.ReadStream("model.stp", stream) != IFSelect_RetDone)
+    throw std::runtime_error("Not a readable STEP file");
+
+  Source src{"STEP", fileSchema(reader.ChangeReader().StepModel()), fileLengthUnit(reader.ChangeReader())};
+
+  // Skip the self-intersection fixes: they cost ~13% of a large assembly's load and made
+  // no visible difference on the samples. Set after reading, which creates the actor that takes them.
+  using FixMode             = DE_ShapeFixParameters::FixMode;
+  DE_ShapeFixParameters fix = DESTEP_Parameters::GetDefaultShapeFixParameters();
+  fix.FixSelfIntersectionMode             = FixMode::NotFix;
+  fix.FixSelfIntersectingEdgeMode         = FixMode::NotFix;
+  fix.FixIntersectingEdgesMode            = FixMode::NotFix;
+  fix.FixNonAdjacentIntersectingEdgesMode = FixMode::NotFix;
+  fix.FixIntersectingWiresMode            = FixMode::NotFix;
+  reader.SetShapeFixParameters(fix);
+
+  // OCCT's transfer progress stalls for most of the stage on single-root assemblies; don't show it.
+  progress("transfer", -1);
+  if (!reader.Transfer(doc))
+    throw std::runtime_error("STEP transfer failed");
+  return src;
+}
+
+// IGES global section unit flag → STEP-style unit name.
+std::string igesUnit(int flag)
+{
+  switch (flag)
+  {
+    case 1: return "INCH";
+    case 2: return "MILLIMETRE";
+    case 4: return "FOOT";
+    case 6: return "METRE";
+    case 10: return "CENTIMETRE";
+    default: return {};
+  }
+}
+
+Source readIgesDoc(const std::string& bytes, const Handle(TDocStd_Document)& doc, Progress& progress)
+{
+  progress("read", -1);
+  IGESCAFControl_Reader reader;
+  reader.SetNameMode(true);
+  reader.SetColorMode(true);
+  reader.SetLayerMode(true);
+  {
+    TempFile file(".igs", bytes);
+    if (reader.ReadFile(file.path()) != IFSelect_RetDone)
+      throw std::runtime_error("Not a readable IGES file");
+  }
+  Source src{"IGES", {}, {}};
+  if (auto model = Handle(IGESData_IGESModel)::DownCast(reader.Model()); !model.IsNull())
+    src.unit = igesUnit(model->GlobalSection().UnitFlag());
+
+  progress("transfer", -1);
+  if (!reader.Transfer(doc))
+    throw std::runtime_error("IGES transfer failed");
+  return src;
+}
+
+// Mesh formats. Output is in mm and Z-up like the rest; readers convert from their file conventions.
+Source readMeshDoc(RWMesh_CafReader&              reader,
+                   Source                         src,
+                   const std::string&             ext,
+                   const std::string&             bytes,
+                   const Handle(TDocStd_Document)& doc,
+                   Progress&                      progress)
+{
+  progress("read", -1);
+  reader.SetDocument(doc);
+  reader.SetSystemLengthUnit(0.001);
+  reader.SetSystemCoordinateSystem(RWMesh_CoordinateSystem_Zup);
+  TempFile file(ext, bytes);
+  if (!reader.Perform(file.path(), Message_ProgressRange()))
+    throw std::runtime_error("Not a readable " + src.format + " file");
+  return src;
+}
+
+Source readGltfDoc(const std::string& ext, const std::string& bytes, const Handle(TDocStd_Document)& doc, Progress& progress)
+{
+  RWGltf_CafReader reader; // glTF is defined in metres, Y-up
+  if (ext == ".glb")
+    return readMeshDoc(reader, {"glTF", {}, "METRE"}, ext, bytes, doc, progress);
+
+  // OCCT only decodes octet-stream data URIs; the spec also allows gltf-buffer.
+  static const std::string kSpecUri = "data:application/gltf-buffer;base64,";
+  static const std::string kOcctUri = "data:application/octet-stream;base64,";
+  std::string json = bytes;
+  for (size_t at = json.find(kSpecUri); at != std::string::npos; at = json.find(kSpecUri, at))
+    json.replace(at, kSpecUri.size(), kOcctUri);
+  return readMeshDoc(reader, {"glTF", {}, "METRE"}, ext, json, doc, progress);
+}
+
+Source readObjDoc(const std::string& bytes, const Handle(TDocStd_Document)& doc, Progress& progress)
+{
+  RWObj_CafReader reader; // OBJ has no units; OCCT assumes Y-up
+  return readMeshDoc(reader, {"OBJ", {}, {}}, ".obj", bytes, doc, progress);
+}
+
+Source readVrmlDoc(const std::string& bytes, const Handle(TDocStd_Document)& doc, Progress& progress)
+{
+  // VRML is metres by spec, but CAD exporters rarely honour it; coordinates are taken as mm.
+  VrmlAPI_CafReader reader;
+  reader.SetFileLengthUnit(1.0); // VrmlData multiplies coordinates by this
+  return readMeshDoc(reader, {"VRML", {}, {}}, ".wrl", bytes, doc, progress);
+}
+
+TDF_Label addShape(const Handle(TDocStd_Document)& doc, const TopoDS_Shape& shape, const std::string& name)
+{
+  const TDF_Label l = XCAFDoc_DocumentTool::ShapeTool(doc->Main())->AddShape(shape, Standard_True);
+  TDataStd_Name::Set(l, TCollection_ExtendedString(name.c_str(), Standard_True));
+  return l;
+}
+
+Source readStlDoc(const std::string& bytes, const std::string& name, const Handle(TDocStd_Document)& doc, Progress& progress)
+{
+  progress("read", -1);
+  Handle(Poly_Triangulation) tri;
+  {
+    TempFile file(".stl", bytes);
+    tri = RWStl::ReadFile(file.path(), 30.0 * M_PI / 180.0); // split nodes at creases for flat shading there
+  }
+  if (tri.IsNull() || tri->NbTriangles() == 0)
+    throw std::runtime_error("Not a readable STL file");
+  TopoDS_Face face;
+  BRep_Builder().MakeFace(face, tri);
+  addShape(doc, face, name);
+  return {"STL", {}, {}}; // no units in STL; taken as mm
+}
+
+Source readBrepDoc(const std::string& bytes, const std::string& name, const Handle(TDocStd_Document)& doc, Progress& progress)
+{
+  progress("read", -1);
+  std::istringstream stream(bytes);
+  TopoDS_Shape       shape;
+  BRepTools::Read(shape, stream, BRep_Builder());
+  if (shape.IsNull())
+    throw std::runtime_error("Not a readable BREP file");
+  addShape(doc, shape, name);
+  return {"BREP", {}, {}};
+}
+
+std::string lowerExtension(const std::string& fileName)
+{
+  const size_t dot = fileName.rfind('.');
+  std::string  ext = dot == std::string::npos ? std::string() : fileName.substr(dot);
+  for (char& c : ext)
+    c = char(std::tolower(static_cast<unsigned char>(c)));
+  return ext;
+}
+
+Source readDoc(const std::string&              bytes,
+               const std::string&              fileName,
+               const Handle(TDocStd_Document)& doc,
+               Progress&                       progress)
+{
+  const std::string ext  = lowerExtension(fileName);
+  const std::string name = fileName.substr(0, fileName.size() - ext.size());
+  if (ext == ".stp" || ext == ".step")
+    return readStepDoc(bytes, doc, progress);
+  if (ext == ".igs" || ext == ".iges")
+    return readIgesDoc(bytes, doc, progress);
+  if (ext == ".gltf" || ext == ".glb")
+    return readGltfDoc(ext, bytes, doc, progress);
+  if (ext == ".obj")
+    return readObjDoc(bytes, doc, progress);
+  if (ext == ".wrl" || ext == ".vrml")
+    return readVrmlDoc(bytes, doc, progress);
+  if (ext == ".stl")
+    return readStlDoc(bytes, name, doc, progress);
+  if (ext == ".brep" || ext == ".brp")
+    return readBrepDoc(bytes, name, doc, progress);
+  throw std::runtime_error("Unsupported file type: " + (ext.empty() ? fileName : ext));
+}
+
 // ---------------------------------------------------------------------------
 // JSON
 
@@ -598,11 +817,12 @@ void writeRange(std::ostringstream& o, const char* key, const Range& r)
   o << '"' << key << "\":[" << r.offset << ',' << r.count << ']';
 }
 
-std::string toJson(const std::string& schema, const std::string& unit, const Builder& b)
+std::string toJson(const Source& src, const Builder& b)
 {
   std::ostringstream o;
   o.precision(9);
-  o << "{\"schema\":\"" << jsonEscape(schema) << "\",\"fileUnit\":\"" << jsonEscape(unit) << "\",";
+  o << "{\"format\":\"" << src.format << "\",\"schema\":\"" << jsonEscape(src.schema)
+    << "\",\"fileUnit\":\"" << jsonEscape(src.unit) << "\",";
 
   o << "\"colors\":[";
   for (size_t i = 0; i < b.colors().size(); ++i)
@@ -658,7 +878,7 @@ std::string toJson(const std::string& schema, const std::string& unit, const Bui
 // ---------------------------------------------------------------------------
 // Entry point
 
-val readStep(const std::string& bytes, val jsOptions, val onProgress)
+val readModel(const std::string& bytes, const std::string& fileName, val jsOptions, val onProgress)
 {
   Options opts;
   if (!jsOptions.isUndefined() && !jsOptions.isNull())
@@ -685,41 +905,12 @@ val readStep(const std::string& bytes, val jsOptions, val onProgress)
     Handle(TDocStd_Document) doc;
     XCAFApp_Application::GetApplication()->NewDocument("BinXCAF", doc);
 
-    STEPCAFControl_Reader reader;
-    reader.SetNameMode(true);
-    reader.SetColorMode(true);
-    reader.SetLayerMode(true);
-    reader.SetGDTMode(false); // PMI out of scope for now
-    reader.SetPropsMode(false);
-
-    MemBuf       buf(const_cast<char*>(bytes.data()), bytes.size(), progress);
-    std::istream stream(&buf);
-    if (reader.ReadStream("model.stp", stream) != IFSelect_RetDone)
-      throw std::runtime_error("Not a readable STEP file");
-
-    const std::string schema = fileSchema(reader.ChangeReader().StepModel());
-    const std::string unit   = fileLengthUnit(reader.ChangeReader());
-
-    // Skip the self-intersection fixes: they cost ~13% of a large assembly's load and made
-    // no visible difference on the samples. Set after reading, which creates the actor that takes them.
-    using FixMode             = DE_ShapeFixParameters::FixMode;
-    DE_ShapeFixParameters fix = DESTEP_Parameters::GetDefaultShapeFixParameters();
-    fix.FixSelfIntersectionMode             = FixMode::NotFix;
-    fix.FixSelfIntersectingEdgeMode         = FixMode::NotFix;
-    fix.FixIntersectingEdgesMode            = FixMode::NotFix;
-    fix.FixNonAdjacentIntersectingEdgesMode = FixMode::NotFix;
-    fix.FixIntersectingWiresMode            = FixMode::NotFix;
-    reader.SetShapeFixParameters(fix);
-
-    // OCCT's transfer progress stalls for most of the stage on single-root assemblies; don't show it.
-    progress("transfer", -1);
-    if (!reader.Transfer(doc))
-      throw std::runtime_error("STEP transfer failed");
+    const Source src = readDoc(bytes, fileName, doc, progress);
 
     Builder builder(doc, opts, progress);
     builder.build();
 
-    result.set("json", toJson(schema, unit, builder));
+    result.set("json", toJson(src, builder));
     result.set("geometry", val(emscripten::typed_memory_view(gGeometry.size(), gGeometry.data())));
 
     XCAFApp_Application::GetApplication()->Close(doc);
@@ -739,5 +930,5 @@ val readStep(const std::string& bytes, val jsOptions, val onProgress)
 
 EMSCRIPTEN_BINDINGS(occt_viewer)
 {
-  emscripten::function("readStep", &readStep);
+  emscripten::function("readModel", &readModel);
 }
