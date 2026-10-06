@@ -4,7 +4,7 @@ import { fileUnit, type UnitId } from './units';
 type Range = [offset: number, count: number];
 
 export interface RawModel {
-  format: string; // STEP, IGES, glTF, OBJ, STL, VRML, BREP
+  format: string; // STEP, IGES, JT, glTF, OBJ, STL, VRML, BREP
   schema: string; // STEP only
   fileUnit: string;
   colors: [number, number, number, number][];

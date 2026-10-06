@@ -1,4 +1,4 @@
-// STEP / IGES / BREP / glTF / OBJ / STL / VRML → mesh bridge for the browser.
+// STEP / IGES / BREP / JT / glTF / OBJ / STL / VRML → mesh bridge for the browser.
 //
 // readModel(bytes, fileName, options) returns { json, geometry }:
 //   json     — model description (format, schema, units, node tree, prototypes, colors)
@@ -54,6 +54,8 @@
 #include <XCAFDoc_ShapeTool.hxx>
 #include <XCAFPrs.hxx>
 #include <XCAFPrs_Style.hxx>
+
+#include "jt_reader.h"
 
 #include <emscripten/bind.h>
 #include <emscripten/val.h>
@@ -593,7 +595,7 @@ struct Source
   std::string unit;   // file length unit name as in STEP ("MILLIMETRE", "INCH", ...); empty = mm
 };
 
-// OCCT's IGES reader (and glTF buffers, read lazily by file name) need a real file: MEMFS.
+// OCCT's IGES reader, TKJT (and glTF buffers, read lazily by file name) need a real file: MEMFS.
 class TempFile
 {
 public:
@@ -781,6 +783,13 @@ Source readBrepDoc(const std::string& bytes, const std::string& name, const Hand
   return {"BREP", {}, {}};
 }
 
+Source readJtDoc(const std::string& bytes, const Handle(TDocStd_Document)& doc, Progress& progress)
+{
+  progress("read", -1);
+  TempFile file(".jt", bytes);
+  return {"JT", {}, readJt(file.path(), doc)};
+}
+
 std::string lowerExtension(const std::string& fileName)
 {
   const size_t dot = fileName.rfind('.');
@@ -811,6 +820,8 @@ Source readDoc(const std::string&              bytes,
     return readStlDoc(bytes, name, doc, progress);
   if (ext == ".brep" || ext == ".brp")
     return readBrepDoc(bytes, name, doc, progress);
+  if (ext == ".jt")
+    return readJtDoc(bytes, doc, progress);
   throw std::runtime_error("Unsupported file type: " + (ext.empty() ? fileName : ext));
 }
 

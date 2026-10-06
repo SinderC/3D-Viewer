@@ -44,7 +44,7 @@ export default defineConfig({
       manifest: {
         name: '3D Viewer',
         short_name: '3D Viewer',
-        description: 'Offline CAD and mesh viewer (STEP, IGES, glTF, OBJ, STL, VRML). Files never leave your device.',
+        description: 'Offline CAD and mesh viewer (STEP, IGES, JT, glTF, OBJ, STL, VRML). Files never leave your device.',
         theme_color: '#1b1d22',
         background_color: '#1b1d22',
         display: 'standalone',

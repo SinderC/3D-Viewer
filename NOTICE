@@ -8,3 +8,12 @@ wasm/scripts/build-bridge.sh.
 
 It also includes RapidJSON (https://rapidjson.org/), Copyright (c) 2015 THL A29 Limited, a Tencent
 company, and Milo Yip, licensed under the MIT License, used by OCCT's glTF reader.
+
+It also includes TKJT, the JT reader from PyOpenJt (https://github.com/jriegel/PyOpenJt),
+Copyright (c) 2013-2015 OPEN CASCADE SAS and (c) 2024 Juergen Riegel, licensed under the GNU General
+Public License version 2 or later, with the changes in wasm/patches. Because of this the compiled
+occt-viewer.wasm, and the application as a whole, are distributed under GPL-2.0-or-later (see LICENSE).
+
+It also includes liblzma from XZ Utils (https://tukaani.org/xz/), licensed under the BSD Zero Clause
+License, and zlib (https://zlib.net/), Copyright (c) 1995-2024 Jean-loup Gailly and Mark Adler,
+licensed under the zlib License.

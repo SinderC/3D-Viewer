@@ -159,7 +159,7 @@ export function App() {
         {status === 'idle' && (
           <div className="overlay">
             <p>
-              Drop a STEP, IGES, glTF, OBJ, STL, VRML or BREP file here or use <b>Open…</b>
+              Drop a STEP, IGES, JT, glTF, OBJ, STL, VRML or BREP file here or use <b>Open…</b>
             </p>
             <p className="muted">Files are processed locally in your browser and never uploaded.</p>
           </div>

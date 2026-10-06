@@ -1,0 +1,1029 @@
+Changes to TKJT (PyOpenJt 21faef4) for the 3D Viewer. Applied by wasm/scripts/build-jt-deps.sh.
+
+- JT 10 (ISO 14306-4) reading, verified on NX-written 10.3 and 10.5 files:
+  one-byte element version numbers (JtData_Reader::ReadVersion), removed reserved fields
+  (Partition, Base Shape, LOD), Partition version byte, late-loaded property v2 without the
+  reserved field, base attribute field-final flags, full RGBA materials, the embedded element
+  header before TopoMesh data, single 32-bit "Face Attribute Mask 8" array, BitLengthCodec3T
+  (nibbler) bit-length codec, JT 10 probability contexts with escape flags and optional
+  out-of-band data, binary (raw IEEE-754) vertex coordinates/normals, Move-to-Front codec.
+- JT_PROP_MEASUREMENT_UNITS is recorded (JtData_Model::MeasurementUnits).
+- Robustness: corrupt TopoMesh splits throw instead of reading out of bounds (ISO 14306
+  Annex E check missing in TKJT); LoadBytes pads buffers since bit readers read whole words.
+
+diff --git a/TKJT/src/JtAttribute/JtAttribute_Base.cxx b/TKJT/src/JtAttribute/JtAttribute_Base.cxx
+index b964b33..0b10e9a 100644
+--- a/TKJT/src/JtAttribute/JtAttribute_Base.cxx
++++ b/TKJT/src/JtAttribute/JtAttribute_Base.cxx
+@@ -38,11 +38,13 @@ Standard_Boolean JtAttribute_Base::Read (JtData_Reader& theReader)
+     return Standard_False;
+ 
+   if (theReader.Model()->MajorVersion() > 8
+-  && !theReader.ReadI16 (myVersion))
++  && !theReader.ReadVersion (myVersion))
+     return Standard_False;
+ 
++  Jt_U32 aFieldFinalFlags; // JT 10
+   return theReader.ReadU8  (myStateFlags)
+-      && theReader.ReadU32 (myFieldInhibitFlags);
++      && theReader.ReadU32 (myFieldInhibitFlags)
++      && (theReader.Model()->MajorVersion() < 10 || theReader.ReadU32 (aFieldFinalFlags));
+ }
+ 
+ //=======================================================================
+diff --git a/TKJT/src/JtAttribute/JtAttribute_GeometricTransform.cxx b/TKJT/src/JtAttribute/JtAttribute_GeometricTransform.cxx
+index 52a2eca..132937d 100644
+--- a/TKJT/src/JtAttribute/JtAttribute_GeometricTransform.cxx
++++ b/TKJT/src/JtAttribute/JtAttribute_GeometricTransform.cxx
+@@ -49,7 +49,7 @@ Standard_Boolean JtAttribute_GeometricTransform::Read (JtData_Reader& theReader)
+ 
+   Jt_I16 aVersion;
+   if (theReader.Model()->MajorVersion() > 8
+-  && !theReader.ReadI16 (aVersion))
++  && !theReader.ReadVersion (aVersion))
+     return Standard_False;
+ 
+   Standard_Integer aStoredValuesMask;
+diff --git a/TKJT/src/JtAttribute/JtAttribute_Material.cxx b/TKJT/src/JtAttribute/JtAttribute_Material.cxx
+index 7813b72..370aae7 100644
+--- a/TKJT/src/JtAttribute/JtAttribute_Material.cxx
++++ b/TKJT/src/JtAttribute/JtAttribute_Material.cxx
+@@ -62,14 +62,16 @@ Standard_Boolean JtAttribute_Material::Read (JtData_Reader& theReader)
+     return Standard_False;
+ 
+   if (theReader.Model()->MajorVersion() > 8
+-  && !theReader.ReadI16 (myVersion))
++  && !theReader.ReadVersion (myVersion))
+     return Standard_False;
+ 
++  // JT 10 always stores full RGBA colours.
++  const Standard_Boolean isCommonRGB = theReader.Model()->MajorVersion() < 10;
+   if (!theReader.ReadU16 (myDataFlags)
+-   || !readColor (theReader, myAmbientColor , (myDataFlags & 3) == 3)
++   || !readColor (theReader, myAmbientColor , isCommonRGB && (myDataFlags & 3) == 3)
+    || !readColor (theReader, myDiffuseColor)
+-   || !readColor (theReader, mySpecularColor, (myDataFlags & 5) == 5)
+-   || !readColor (theReader, myEmissionColor, (myDataFlags & 9) == 9)
++   || !readColor (theReader, mySpecularColor, isCommonRGB && (myDataFlags & 5) == 5)
++   || !readColor (theReader, myEmissionColor, isCommonRGB && (myDataFlags & 9) == 9)
+    || !theReader.ReadF32 (myShininess))
+     return Standard_False;
+ 
+diff --git a/TKJT/src/JtData/JtData_Model.cxx b/TKJT/src/JtData/JtData_Model.cxx
+index d157680..6485fcf 100644
+--- a/TKJT/src/JtData/JtData_Model.cxx
++++ b/TKJT/src/JtData/JtData_Model.cxx
+@@ -544,6 +544,10 @@ Standard_Boolean JtData_Model::readLSGData(JtData_Reader &theReader,
+                   Handle(JtProperty_String)::DownCast(aKeyProperty);
+               if (!aKeyStringProp.IsNull() && aKeyStringProp->Value() == anObjectNameKey)
+                 anObject->BindName(aStringProp->Value());
++              else if (!aKeyStringProp.IsNull() && myUnits.IsEmpty() &&
++                       (aKeyStringProp->Value() == "JT_PROP_MEASUREMENT_UNITS" ||
++                        aKeyStringProp->Value() == "JT_PROP_MEASUREMENT_UNITS::"))
++                myUnits = aStringProp->Value();
+             }
+           }//else
+            //   cerr << "Unknown Property\n";
+diff --git a/TKJT/src/JtData/JtData_Model.hxx b/TKJT/src/JtData/JtData_Model.hxx
+index 3759269..58b48ac 100644
+--- a/TKJT/src/JtData/JtData_Model.hxx
++++ b/TKJT/src/JtData/JtData_Model.hxx
+@@ -73,6 +73,7 @@ public:
+ 
+   //! Return minor version of Jt file.
+   Standard_Integer                  MinorVersion() const { return myMinorVersion; }
++  const TCollection_ExtendedString& MeasurementUnits() const { return myUnits; }
+ 
+   struct TocEntry {
+       TocEntry(const Jt_GUID& _GUID, uint64_t _Offset, uint32_t _Length, int _Type) :GUID(_GUID), Offset(_Offset), Length(_Length), Type(_Type) {}
+@@ -124,6 +125,7 @@ protected:
+ 
+   Standard_Integer           myMajorVersion;
+   Standard_Integer           myMinorVersion;
++  mutable TCollection_ExtendedString myUnits; //!< first JT_PROP_MEASUREMENT_UNITS value
+ 
+   NCollection_DataMap <Jt_GUID, Jt_U64, Jt_GUID> myTOC;
+ 
+diff --git a/TKJT/src/JtData/JtData_Reader.cxx b/TKJT/src/JtData/JtData_Reader.cxx
+index a4dd0e0..846bc25 100644
+--- a/TKJT/src/JtData/JtData_Reader.cxx
++++ b/TKJT/src/JtData/JtData_Reader.cxx
+@@ -15,7 +15,9 @@
+ // on <http://www.gnu.org/licenses/>.
+ 
+ #include <JtData_Reader.hxx>
++#include <JtData_Model.hxx>
+ #include <string>
++#include <cstring>
+ 
+ //=======================================================================
+ //function : JtData_Reader
+@@ -40,9 +42,11 @@ JtData_Reader::~JtData_Reader() {}
+ 
+ const void* JtData_Reader::LoadBytes (const Standard_Size theLength)
+ {
+-  void* aBuffer = Standard::Allocate (theLength);
++  // Zeroed padding: the bit readers fetch whole 32-bit words and may peek one past the data.
++  void* aBuffer = Standard::Allocate (theLength + 8);
+   if (!aBuffer)
+     return 0L;
++  memset (static_cast<char*> (aBuffer) + theLength, 0, 8);
+ 
+   if (!Read (aBuffer, theLength))
+   {
+@@ -64,6 +68,22 @@ void JtData_Reader::UnloadBytes (const void* theAddress)
+     Standard::Free (const_cast <void*&> (theAddress));
+ }
+ 
++//=======================================================================
++//function : ReadVersion
++//purpose  :
++//=======================================================================
++Standard_Boolean JtData_Reader::ReadVersion (Jt_I16& theVersion)
++{
++  if (myModel->MajorVersion() < 10)
++    return ReadI16 (theVersion);
++
++  Jt_U8 aVersion;
++  if (!ReadU8 (aVersion))
++    return Standard_False;
++  theVersion = aVersion;
++  return Standard_True;
++}
++
+ //=======================================================================
+ //function : ReadSbString
+ //purpose  : Read a 1-byte character string
+diff --git a/TKJT/src/JtData/JtData_Reader.hxx b/TKJT/src/JtData/JtData_Reader.hxx
+index 6409343..4c606e3 100644
+--- a/TKJT/src/JtData/JtData_Reader.hxx
++++ b/TKJT/src/JtData/JtData_Reader.hxx
+@@ -121,6 +121,9 @@ public:
+   //! Read a 2-byte character string into a std::wstring
+   Standard_Boolean ReadMbString(std::wstring& theString);
+ 
++  //! Read an element version number: I16 up to JT 9, one byte (U8/I8) from JT 10 (ISO 14306-4).
++  Standard_EXPORT Standard_Boolean ReadVersion (Jt_I16& theVersion);
++
+   Standard_Boolean ReadObject(char16_t &theObject)
+   {
+     Jt_I16 theValue;
+diff --git a/TKJT/src/JtDecode/JtDecode_Int32CDP.cxx b/TKJT/src/JtDecode/JtDecode_Int32CDP.cxx
+index db89295..b54a808 100644
+--- a/TKJT/src/JtDecode/JtDecode_Int32CDP.cxx
++++ b/TKJT/src/JtDecode/JtDecode_Int32CDP.cxx
+@@ -20,6 +20,7 @@
+ #include <JtDecode_ProbContext.hxx>
+ 
+ #include <JtDecode_Int32CDP_Null.hxx>
++#include <JtDecode_Int32CDP_MTF.hxx>
+ #include <JtDecode_Int32CDP_Bitlength.hxx>
+ #include <JtDecode_Int32CDP_Bitlength2.hxx>
+ #include <JtDecode_Int32CDP_Huffman.hxx>
+@@ -170,6 +171,20 @@ JtDecode_Int32CDP::EncodedDataHandle JtDecode_Int32CDP::loadCDP2 (JtData_Reader&
+       new JtDecode_Int32CDP_Chopper (aMSBData, aLSBData, aChop, aSpan, aBias));
+   }
+ 
++  // Move-to-front pseudo-codec (JT 10): window values and window offsets
++  if (aCodec == 5)
++  {
++    JtDecode_Int32CDP aValues, anOffsets;
++    if (!aValues.Load2 (theReader) || !anOffsets.Load2 (theReader))
++      return EncodedDataHandle();
++    if (anOffsets.GetOutValCount() != aValueCount)
++    {
++      ALARM ("Error: Move-to-front data size mismatch");
++      return EncodedDataHandle();
++    }
++    return EncodedDataHandle (new JtDecode_Int32CDP_MTF (aValues, anOffsets));
++  }
++
+   // Null, bitlength or arithmetic codec: read CodeText length
+   Jt_I32 aCodeTextLength;
+   if (!theReader.ReadI32 (aCodeTextLength) || aCodeTextLength <= 0)
+@@ -190,7 +205,7 @@ JtDecode_Int32CDP::EncodedDataHandle JtDecode_Int32CDP::loadCDP2 (JtData_Reader&
+   switch (aCodec)
+   {
+   case 1: // Bitlength codec
+-    aData = new JtDecode_Int32CDP_Bitlength2 (theReader);
++    aData = new JtDecode_Int32CDP_Bitlength2 (theReader, theReader.Model()->MajorVersion() >= 10);
+     break;
+ 
+   case 3: // Arithmetic codec
+@@ -213,20 +228,27 @@ JtDecode_Int32CDP::EncodedDataHandle JtDecode_Int32CDP::loadCDP2 (JtData_Reader&
+   if (aCodec == 3)
+   {
+     // read probability context
++    const bool isJt10 = theReader.Model()->MajorVersion() >= 10;
+     JtData_Vector<JtDecode_ProbContextI32> aProbContexts (1);
+     {
+       JtDecode_BitReader::Raw aContextReader (theReader);
+-      if (!aProbContexts[0].ReadMk2 (aContextReader))
++      if (!(isJt10 ? aProbContexts[0].ReadJt10 (aContextReader)
++                   : aProbContexts[0].ReadMk2  (aContextReader)))
+         return EncodedDataHandle();
+     }
++    // JT 10 writes out-of-band data only when the context has an escape symbol
++    const bool hasOOBData = !isJt10 || aProbContexts[0].HasEscape();
+     aData->SetProbContexts (aProbContexts.Move());
+ 
+     // load out-of-band data
+-    JtDecode_Int32CDP anOOBData;
+-    if (!anOOBData.Load2 (theReader))
+-      return EncodedDataHandle();
++    if (hasOOBData)
++    {
++      JtDecode_Int32CDP anOOBData;
++      if (!anOOBData.Load2 (theReader))
++        return EncodedDataHandle();
+ 
+-    aData->SetOOBData (anOOBData);
++      aData->SetOOBData (anOOBData);
++    }
+   }
+ 
+   return EncodedDataHandle (aData);
+diff --git a/TKJT/src/JtDecode/JtDecode_Int32CDP_Bitlength2.cxx b/TKJT/src/JtDecode/JtDecode_Int32CDP_Bitlength2.cxx
+index 584e62b..285c341 100644
+--- a/TKJT/src/JtDecode/JtDecode_Int32CDP_Bitlength2.cxx
++++ b/TKJT/src/JtDecode/JtDecode_Int32CDP_Bitlength2.cxx
+@@ -16,6 +16,9 @@
+ 
+ #include <JtDecode_Int32CDP_Bitlength2.hxx>
+ 
++#include <algorithm>
++#include <cstddef>
++
+ void JtDecode_Int32CDP_Bitlength2::decode (int32_t* theResultPtr, int32_t* theResultEnd)
+ {
+   // Analyze the variable-width tag
+@@ -25,8 +28,39 @@ void JtDecode_Int32CDP_Bitlength2::decode (int32_t* theResultPtr, int32_t* theRe
+     decodeFixedWidth    (theResultPtr, theResultEnd);
+ }
+ 
++int32_t JtDecode_Int32CDP_Bitlength2::readNibbler()
++{
++  uint32_t aValue = 0;
++  unsigned aShift = 0;
++  do
++  {
++    const uint32_t aNibble = ReadU32 (4);
++    if (aShift < 32)
++      aValue |= aNibble << aShift;
++    aShift += 4;
++  }
++  while (ReadBit());
++
++  // sign-extend from the number of bits read
++  if (aShift < 32)
++    return static_cast<int32_t> (aValue << (32 - aShift)) >> (32 - aShift);
++  return static_cast<int32_t> (aValue);
++}
++
+ void JtDecode_Int32CDP_Bitlength2::decodeFixedWidth (int32_t* theResultPtr, int32_t* theResultEnd)
+ {
++  if (myIsJt10)
++  {
++    const int32_t aMin = readNibbler();
++    const int32_t aMax = readNibbler();
++    unsigned aFieldWidth = 0; // bits in the unsigned range
++    for (uint32_t aRange = static_cast<uint32_t> (aMax) - static_cast<uint32_t> (aMin); aRange; aRange >>= 1)
++      aFieldWidth++;
++    while (theResultPtr < theResultEnd)
++      *theResultPtr++ = static_cast<int32_t> (ReadU32Or0 (aFieldWidth) + static_cast<uint32_t> (aMin));
++    return;
++  }
++
+   // Read the min and max symbols from the stream
+   unsigned aMinBits = ReadU32 (6); // number of bits in the minimum symbol
+   unsigned aMaxBits = ReadU32 (6); // number of bits in the maximum symbol
+@@ -58,9 +92,20 @@ void JtDecode_Int32CDP_Bitlength2::decodeFixedWidth (int32_t* theResultPtr, int3
+ void JtDecode_Int32CDP_Bitlength2::decodeVariableWidth (int32_t* theResultPtr, int32_t* theResultEnd)
+ {
+   // Read parameters
+-  int32_t  aMean         = ReadI32 (32);  // mean value
+-  unsigned aChgWidthBits = ReadU32 (3);
+-  unsigned aRunLenBits   = ReadU32 (3);
++  int32_t  aMean;
++  unsigned aChgWidthBits, aRunLenBits;
++  if (myIsJt10)
++  {
++    aMean         = readNibbler();
++    aChgWidthBits = 4;
++    aRunLenBits   = 4;
++  }
++  else
++  {
++    aMean         = ReadI32 (32);
++    aChgWidthBits = ReadU32 (3);
++    aRunLenBits   = ReadU32 (3);
++  }
+ 
+   signed aMaxDecr = -(1 << (aChgWidthBits - 1));     // -ve number
+   signed aMaxIncr =  (1 << (aChgWidthBits - 1)) - 1; // +ve number
+@@ -82,7 +127,7 @@ void JtDecode_Int32CDP_Bitlength2::decodeVariableWidth (int32_t* theResultPtr, i
+ 
+     // read the run length
+     uint32_t aRunLen = ReadU32 (aRunLenBits);
+-    int32_t* aRunEnd = theResultPtr + aRunLen;
++    int32_t* aRunEnd = theResultPtr + std::min<ptrdiff_t> (aRunLen, theResultEnd - theResultPtr);
+ 
+     // check if the field width is positive
+     if (aFieldWidth > 0)
+diff --git a/TKJT/src/JtDecode/JtDecode_Int32CDP_Bitlength2.hxx b/TKJT/src/JtDecode/JtDecode_Int32CDP_Bitlength2.hxx
+index ed5ee24..067773a 100644
+--- a/TKJT/src/JtDecode/JtDecode_Int32CDP_Bitlength2.hxx
++++ b/TKJT/src/JtDecode/JtDecode_Int32CDP_Bitlength2.hxx
+@@ -25,7 +25,10 @@ class JtDecode_Int32CDP_Bitlength2 : public JtDecode_Int32CDP_Bits
+ public:
+ 
+   //! Initialize the bitlength 2 dedoder by reader.
+-  JtDecode_Int32CDP_Bitlength2 (JtData_Reader& theReader) : JtDecode_Int32CDP_Bits (theReader) {}
++  //! JT 10 (ISO 14306-4 Annex C, BitLengthCodec3T) stores min/max/mean as 4-bit "nibbler"
++  //! values and uses fixed 4-bit block headers instead of JT 9's explicit bit counts.
++  JtDecode_Int32CDP_Bitlength2 (JtData_Reader& theReader, bool theIsJt10 = false)
++    : JtDecode_Int32CDP_Bits (theReader), myIsJt10 (theIsJt10) {}
+ 
+ protected:
+ 
+@@ -34,6 +37,11 @@ protected:
+ 
+   Standard_EXPORT void decodeVariableWidth (int32_t* theResultPtr, int32_t* theResultEnd);
+   Standard_EXPORT void decodeFixedWidth    (int32_t* theResultPtr, int32_t* theResultEnd);
++
++  //! Read a sign-extended value stored as 4-bit nibbles, each followed by a "more" bit.
++  int32_t readNibbler();
++
++  bool myIsJt10;
+ };
+ 
+ #endif
+diff --git a/TKJT/src/JtDecode/JtDecode_Int32CDP_MTF.cxx b/TKJT/src/JtDecode/JtDecode_Int32CDP_MTF.cxx
+new file mode 100644
+index 0000000..2354b8f
+--- /dev/null
++++ b/TKJT/src/JtDecode/JtDecode_Int32CDP_MTF.cxx
+@@ -0,0 +1,57 @@
++// JT format reading and visualization tools
++// Copyright (C) 2026 3D Viewer contributors
++//
++// This program is free software; you can redistribute it and/or modify
++// it under the terms of the GNU General Public License as published by
++// the Free Software Foundation, version 2 of the License, or any later
++// version.
++//
++// This program is distributed in the hope that it will be useful,
++// but WITHOUT ANY WARRANTY; without even the implied warranty of
++// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++// GNU General Public License for more details.
++//
++// Copy of the GNU General Public License is in LICENSE.txt and
++// on <http://www.gnu.org/licenses/>.
++
++#include <JtDecode_Int32CDP_MTF.hxx>
++
++int32_t JtDecode_Int32CDP_MTF::GetOutValCount() const
++{
++  return myOffsets.GetOutValCount();
++}
++
++JtDecode_Int32CDP_MTF::Decoded::Mover JtDecode_Int32CDP_MTF::Decode()
++{
++  Decoded aValues  (decodePackage (myValues));
++  Decoded aOffsets (decodePackage (myOffsets));
++
++  const int kWindow = 16;
++  int32_t   aWindow[kWindow];
++  int       aWindowSize = 0;
++  int32_t   aNextValue  = 0;
++
++  Decoded aResults (aOffsets.Count());
++  for (int32_t i = 0; i < aOffsets.Count(); i++)
++  {
++    const int32_t anOffset = aOffsets[i];
++    int32_t aValue;
++    int     aFrom;
++    if (anOffset < 0 || anOffset >= aWindowSize)
++    {
++      // escape: take the next new value; it enters the window at the front
++      aValue = aNextValue < aValues.Count() ? aValues[aNextValue++] : 0;
++      aFrom  = aWindowSize < kWindow ? aWindowSize++ : kWindow - 1;
++    }
++    else
++    {
++      aValue = aWindow[anOffset];
++      aFrom  = anOffset;
++    }
++    for (int k = aFrom; k > 0; k--) // move to front
++      aWindow[k] = aWindow[k - 1];
++    aWindow[0]  = aValue;
++    aResults[i] = aValue;
++  }
++  return aResults.Move();
++}
+diff --git a/TKJT/src/JtDecode/JtDecode_Int32CDP_MTF.hxx b/TKJT/src/JtDecode/JtDecode_Int32CDP_MTF.hxx
+new file mode 100644
+index 0000000..94cf6a8
+--- /dev/null
++++ b/TKJT/src/JtDecode/JtDecode_Int32CDP_MTF.hxx
+@@ -0,0 +1,42 @@
++// JT format reading and visualization tools
++// Copyright (C) 2026 3D Viewer contributors
++//
++// This program is free software; you can redistribute it and/or modify
++// it under the terms of the GNU General Public License as published by
++// the Free Software Foundation, version 2 of the License, or any later
++// version.
++//
++// This program is distributed in the hope that it will be useful,
++// but WITHOUT ANY WARRANTY; without even the implied warranty of
++// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++// GNU General Public License for more details.
++//
++// Copy of the GNU General Public License is in LICENSE.txt and
++// on <http://www.gnu.org/licenses/>.
++
++#ifndef _JtDecode_Int32CDP_MTF_HeaderFile
++#define _JtDecode_Int32CDP_MTF_HeaderFile
++
++#include <JtDecode_Int32CDP.hxx>
++
++//! Move-to-front pseudo-codec (JT 10, ISO 14306-4 11.2.1): the values are split into the
++//! values first seen ("window values") and, per value, its position in a 16-entry
++//! most-recently-used window or an escape meaning "next new value" ("window offsets").
++class JtDecode_Int32CDP_MTF : public JtDecode_Int32CDP::EncodedData
++{
++public:
++  JtDecode_Int32CDP_MTF (JtDecode_Int32CDP theValues, JtDecode_Int32CDP theOffsets)
++    : myValues (theValues), myOffsets (theOffsets) {}
++
++  //! Get expected count of output values.
++  Standard_EXPORT int32_t GetOutValCount() const Standard_OVERRIDE;
++
++  //! Decode the loaded data.
++  Standard_EXPORT Decoded::Mover Decode() Standard_OVERRIDE;
++
++private:
++  JtDecode_Int32CDP myValues;
++  JtDecode_Int32CDP myOffsets;
++};
++
++#endif
+diff --git a/TKJT/src/JtDecode/JtDecode_MeshCoderDriver.cxx b/TKJT/src/JtDecode/JtDecode_MeshCoderDriver.cxx
+index dd1efff..277bf31 100644
+--- a/TKJT/src/JtDecode/JtDecode_MeshCoderDriver.cxx
++++ b/TKJT/src/JtDecode/JtDecode_MeshCoderDriver.cxx
+@@ -15,6 +15,7 @@
+ // on <http://www.gnu.org/licenses/>.
+ 
+ #include <JtDecode_MeshCoderDriver.hxx>
++#include <JtData_Model.hxx>
+ 
+ #include <JtData_VectorRef.hxx>
+ 
+@@ -26,6 +27,7 @@
+ 
+ //#define NO_JT_MULTITHREADING
+ #include <JtData_Parallel.hxx>
++#include <Standard_Failure.hxx>
+ #include <JtDecode_Int32CDPScheduler.hxx>
+ 
+ #ifdef _MSC_VER
+@@ -784,6 +786,8 @@ int32_t JtDecode_MeshCodec::activateF (int32_t iVtx, int32_t iVSlot)
+   int32_t jFSlot;
+   // ioFace might return -2 as an error condition
+   int32_t iFace = ioFace (iVtx, iVSlot);
++  if (iFace < -1)
++    throw Standard_Failure ("JT mesh topology decoding failed");
+ 
+   if (iFace >= 0) // If a new active face
+   {
+@@ -798,6 +802,8 @@ int32_t JtDecode_MeshCodec::activateF (int32_t iVtx, int32_t iVSlot)
+   {
+     iFace = ioSplitFace (iVtx, iVSlot); // v's index in ActiveSet, returns v
+     jFSlot = ioSplitPos (iVtx, iVSlot); // Position of iVtx in v
++    if (iFace < 0 || jFSlot < 0) // corrupt or mis-decoded split (see ISO 14306 Annex E)
++      throw Standard_Failure ("JT mesh topology decoding failed");
+     _pDstVFM->setVtxFace (iVtx, iVSlot, iFace);
+     addVtxToFace (iVtx, iVSlot, iFace, jFSlot);
+   }
+@@ -1198,9 +1204,13 @@ JtDecode_MeshCoderDriver::LoadInputData (JtData_Reader& theReader)
+ {
+   InputData::Handle aData (new InputData);
+ 
++  // JT 10 has a single "Face Attribute Mask 8 (32 MSBs)" array where JT 9 had 30 + 4 MSB arrays.
++  const bool isJt10 = theReader.Model()->MajorVersion() >= 10;
+   JtData_VectorRef<JtDecode_Int32CDP> aVectorRef (*aData);
+   for (Standard_Size i = 0; i < aVectorRef.Count(); i++)
+   {
++    if (isJt10 && &aVectorRef[i] == &aData->_faceAttributeMask8_4)
++      continue;
+     if (!aVectorRef[i].Load2 (theReader))
+       return (InputData::Handle)0;
+   }
+@@ -1394,7 +1404,12 @@ int64_t JtDecode_MeshCoderDriver::_nextAttrMaskSymbol (int32_t iCCntx)
+     eSym = _vvuOutAttrMasks[iCCntx][readpos];
+   }
+ 
+-  if (iCCntx == 7)
++  if (iCCntx == 7 && _isJt10)
++  {
++    if (readpos < _faceAttributeMask8_30.Count())
++      eSym = (int64_t) (((uint64_t) (uint32_t) _faceAttributeMask8_30[readpos] << 32) | (uint32_t) eSym);
++  }
++  else if (iCCntx == 7)
+   {
+     eSym |= (((int64_t) _faceAttributeMask8_4 [readpos]) << 30) +
+             (((int64_t) _faceAttributeMask8_30[readpos]) << 30);
+diff --git a/TKJT/src/JtDecode/JtDecode_MeshCoderDriver.hxx b/TKJT/src/JtDecode/JtDecode_MeshCoderDriver.hxx
+index 70779d5..08e5d87 100644
+--- a/TKJT/src/JtDecode/JtDecode_MeshCoderDriver.hxx
++++ b/TKJT/src/JtDecode/JtDecode_MeshCoderDriver.hxx
+@@ -58,6 +58,9 @@ public:
+   
+   //! Decode and store input data.
+   Standard_EXPORT void SetInputData (InputData& theData);
++
++  //! JT 10 stores the context-8 face attribute masks' upper half as one 32-bit array.
++  void SetJt10 (bool theIsJt10) { _isJt10 = theIsJt10; }
+   
+   //! Decodes the mesh.
+   Standard_EXPORT void Decode (IndicesVec* theVertexIndices, IndicesVec* theNormalIndices);
+@@ -97,6 +100,7 @@ private:
+   int32_t _iSplitPosReadPos;
+ 
+   JtDecode_MeshDecoder* _pMeshDecoder;
++  bool                  _isJt10 = false;
+ };
+ 
+ #endif // _JtDecode_MeshCoderDriver_HeaderFile
+diff --git a/TKJT/src/JtDecode/JtDecode_ProbContext.cxx b/TKJT/src/JtDecode/JtDecode_ProbContext.cxx
+index fabdafc..8c147c5 100644
+--- a/TKJT/src/JtDecode/JtDecode_ProbContext.cxx
++++ b/TKJT/src/JtDecode/JtDecode_ProbContext.cxx
+@@ -42,6 +42,35 @@ Standard_Boolean JtDecode_ProbContextI32::ReadMk2 (JtDecode_BitReader::Raw& theR
+   return read (theReader, 16, 6, 6, 6, 0, 32);
+ }
+ 
++Standard_Boolean JtDecode_ProbContextI32::ReadJt10 (JtDecode_BitReader::Raw& theReader)
++{
++  // entry count{16}, occurrence count bits{6}, value bits{7}, min value{32}
++  if (!theReader.Load (16 + 6 + 7 + 32))
++    return Standard_False;
++
++  unsigned anEntryCount = theReader.ReadU32Or0 (16);
++  unsigned aOccBits     = theReader.ReadU32Or0 (6);
++  unsigned aValBits     = theReader.ReadU32Or0 (7);
++  int32_t  aMinValue    = theReader.ReadI32Or0 (32);
++
++  // entries: escape flag{1}, occurrence count, associated value - min value
++  if (!theReader.Load (anEntryCount * (1 + aOccBits + aValBits)))
++    return Standard_False;
++
++  myEntries.Allocate (anEntryCount);
++  myTotalCount = 0;
++  for (Standard_Size i = 0; i < anEntryCount; i++)
++  {
++    Entry& anEntry = myEntries[i];
++    anEntry.symbol          = theReader.ReadU32Or0 (1) ? -2 : 0; // -2 marks the escape symbol
++    anEntry.occCount        = theReader.ReadU32Or0 (aOccBits);
++    anEntry.associatedValue = theReader.ReadU32Or0 (aValBits) + aMinValue;
++    anEntry.nextContext     = 0;
++    myTotalCount += anEntry.occCount;
++  }
++  return Standard_True;
++}
++
+ Standard_Boolean JtDecode_ProbContextI32::read (JtDecode_BitReader::Raw& theReader,
+                                                 const unsigned theEntryCountWidth,
+                                                 const unsigned theSymBitsNumWidth,
+diff --git a/TKJT/src/JtDecode/JtDecode_ProbContext.hxx b/TKJT/src/JtDecode/JtDecode_ProbContext.hxx
+index 20e49f1..5877651 100644
+--- a/TKJT/src/JtDecode/JtDecode_ProbContext.hxx
++++ b/TKJT/src/JtDecode/JtDecode_ProbContext.hxx
+@@ -50,6 +50,18 @@ public:
+   //! Read the probability table for Mark II codec.
+   Standard_Boolean ReadMk2   (JtDecode_BitReader::Raw& theReader);
+ 
++  //! Read the JT 10 (ISO 14306-4) probability table: entries carry an escape flag instead of a symbol.
++  Standard_Boolean ReadJt10  (JtDecode_BitReader::Raw& theReader);
++
++  //! Whether an entry is the escape symbol, i.e. out-of-band values follow (JT 10).
++  Standard_Boolean HasEscape() const
++  {
++    for (Standard_Size i = 0; i < myEntries.Count(); i++)
++      if (myEntries[i].symbol == -2)
++        return Standard_True;
++    return Standard_False;
++  }
++
+   //! Fetch the entry.
+   const Entry& operator[] (Standard_Size theIndex) const { return myEntries[theIndex]; }
+ 
+diff --git a/TKJT/src/JtDecode/JtDecode_VertexData.cxx b/TKJT/src/JtDecode/JtDecode_VertexData.cxx
+index fd33897..7f6b422 100644
+--- a/TKJT/src/JtDecode/JtDecode_VertexData.cxx
++++ b/TKJT/src/JtDecode/JtDecode_VertexData.cxx
+@@ -58,7 +58,8 @@ JtDecode_VertexData::Handle JtDecode_VertexData::LoadCompressedCoords (JtData_Re
+   if (aQuantizerData.X.bits)
+     aData = new JtDecode_VertexData_Quantized (aQuantizerData, aNbComponents, JtDecode_Unpack_Lag1);
+   else
+-    aData = new JtDecode_VertexData_ExpMant (aNbComponents, JtDecode_Unpack_Lag1);
++    aData = new JtDecode_VertexData_ExpMant (aNbComponents, JtDecode_Unpack_Lag1,
++                                             theReader.Model()->MajorVersion() >= 10);
+ 
+   // Load encoded data
+   if (!aData->load (theReader, &JtDecode_Int32CDP::Load2, aVertexCount))
+@@ -109,7 +110,8 @@ JtDecode_VertexData::Handle JtDecode_VertexData::LoadCompressedNormals (JtData_R
+   if (aNbBits)
+     aData = new JtDecode_VertexData_Deering (aNbBits);
+   else
+-    aData = new JtDecode_VertexData_ExpMant (aNbComponents);
++    aData = new JtDecode_VertexData_ExpMant (aNbComponents, JtDecode_Unpack_Null,
++                                             theReader.Model()->MajorVersion() >= 10);
+ 
+   // Load encoded data
+   if (!aData->load (theReader, &JtDecode_Int32CDP::Load2, aNormalsCount))
+diff --git a/TKJT/src/JtDecode/JtDecode_VertexData_ExpMant.cxx b/TKJT/src/JtDecode/JtDecode_VertexData_ExpMant.cxx
+index 9576b6b..4c55fc1 100644
+--- a/TKJT/src/JtDecode/JtDecode_VertexData_ExpMant.cxx
++++ b/TKJT/src/JtDecode/JtDecode_VertexData_ExpMant.cxx
+@@ -20,17 +20,31 @@
+ #include <JtData_Parallel.hxx>
+ 
+ JtDecode_VertexData_ExpMant::JtDecode_VertexData_ExpMant (const Standard_Size theNbComponents,
+-                                                                JtDecode_Unpack& theUnpacker)
+-  : JtDecode_VertexData (theNbComponents * 2, theUnpacker) {}
++                                                                JtDecode_Unpack& theUnpacker,
++                                                          const bool          theIsBinary)
++  : JtDecode_VertexData (theNbComponents * (theIsBinary ? 1 : 2), theUnpacker), myIsBinary (theIsBinary) {}
+ 
+ Standard_Integer JtDecode_VertexData_ExpMant::getOutCompCount (Standard_Size thePackageCount)
+ {
+-  return static_cast<Standard_Integer>(thePackageCount) / 2;
++  return static_cast<Standard_Integer>(thePackageCount) / (myIsBinary ? 1 : 2);
+ }
+ 
+ void JtDecode_VertexData_ExpMant::decode (Decoded::Ref theResults)
+ {
+   JtData_Parallel::TaskGroup aDecodeTasks;
++  if (myIsBinary)
++  {
++    for (Decoded::CompCountType j = 0; j < theResults.CompCount(); j++)
++    {
++      Jt_VecU32 aBits;
++      aDecodeTasks.Run (getDecodingFunctor (j, aBits));
++      aDecodeTasks.Wait();
++      for (Decoded::SizeType i = 0; i < theResults.Count(); i++)
++        reinterpret_cast <uint32_t&> (theResults[i][j]) = aBits[i];
++    }
++    return;
++  }
++
+   for (Decoded::CompCountType j = 0; j < theResults.CompCount(); j++)
+   {
+     Jt_VecU32 anExp, aMant;
+diff --git a/TKJT/src/JtDecode/JtDecode_VertexData_ExpMant.hxx b/TKJT/src/JtDecode/JtDecode_VertexData_ExpMant.hxx
+index bd95a22..883d8b0 100644
+--- a/TKJT/src/JtDecode/JtDecode_VertexData_ExpMant.hxx
++++ b/TKJT/src/JtDecode/JtDecode_VertexData_ExpMant.hxx
+@@ -24,9 +24,12 @@ class JtDecode_VertexData_ExpMant : public JtDecode_VertexData
+ {
+ public:
+   //! Constructor.
++  //! theIsBinary: JT 10 stores each component as one array of raw IEEE-754 bits
++  //! ("Binary Vertex Coords/Normals") instead of separate exponent and mantissa arrays.
+   Standard_EXPORT JtDecode_VertexData_ExpMant (
+     const Standard_Size theNbComponents,
+-    JtDecode_Unpack& theUnpacker = JtDecode_Unpack_Null);
++    JtDecode_Unpack& theUnpacker = JtDecode_Unpack_Null,
++    const bool       theIsBinary = false);
+ 
+ protected:
+   //! Get expected count of output components.
+@@ -34,6 +37,8 @@ protected:
+ 
+   //! Decoding method.
+   Standard_EXPORT void decode (Decoded::Ref theResults) Standard_OVERRIDE;
++
++  bool myIsBinary;
+ };
+ 
+ #endif
+diff --git a/TKJT/src/JtElement/JtElement_ShapeLOD_Base.cxx b/TKJT/src/JtElement/JtElement_ShapeLOD_Base.cxx
+index cd13fe1..1c2bb92 100644
+--- a/TKJT/src/JtElement/JtElement_ShapeLOD_Base.cxx
++++ b/TKJT/src/JtElement/JtElement_ShapeLOD_Base.cxx
+@@ -36,7 +36,7 @@ Standard_Boolean JtElement_ShapeLOD_Base::Read (JtData_Reader& theReader)
+     return Standard_True;
+ 
+   Jt_I16 aVersion;
+-  return theReader.ReadI16 (aVersion);
++  return theReader.ReadVersion (aVersion);
+ }
+ 
+ //=======================================================================
+diff --git a/TKJT/src/JtElement/JtElement_ShapeLOD_TriStripSet.cxx b/TKJT/src/JtElement/JtElement_ShapeLOD_TriStripSet.cxx
+index 101dbac..cab2404 100644
+--- a/TKJT/src/JtElement/JtElement_ShapeLOD_TriStripSet.cxx
++++ b/TKJT/src/JtElement/JtElement_ShapeLOD_TriStripSet.cxx
+@@ -30,7 +30,7 @@ Standard_Boolean JtElement_ShapeLOD_TriStripSet::Read (JtData_Reader& theReader)
+ {
+   Jt_I16 aVersion;
+   if (!readVertexShapeLODData (theReader, Standard_True)
+-   || !theReader.ReadI16 (aVersion))
++   || !theReader.ReadVersion (aVersion))
+     return Standard_False;
+ 
+   if (theReader.Model()->MajorVersion() < 9)
+diff --git a/TKJT/src/JtElement/JtElement_ShapeLOD_Vertex.cxx b/TKJT/src/JtElement/JtElement_ShapeLOD_Vertex.cxx
+index d5d0672..acfc494 100644
+--- a/TKJT/src/JtElement/JtElement_ShapeLOD_Vertex.cxx
++++ b/TKJT/src/JtElement/JtElement_ShapeLOD_Vertex.cxx
+@@ -19,6 +19,7 @@
+ #include <NCollection_Handle.hxx>
+ 
+ #include <JtData_Reader.hxx>
++#include <JtData_Message.hxx>
+ #include <JtData_Inflate.hxx>
+ 
+ #include <JtDecode_Int32CDP.hxx>
+@@ -56,18 +57,22 @@ class JtElement_ShapeLOD_Vertex::MeshDecodeTask
+   NCollection_Handle<JtDecode_MeshCoderDriver::InputData> myData;
+   IndicesVec* myVertexIndicesPtr;
+   IndicesVec* myNormalIndicesPtr;
++  bool        myIsJt10;
+ 
+ public:
+   MeshDecodeTask (JtData_SingleHandle<JtDecode_MeshCoderDriver::InputData> theData,
+                   IndicesVec& theVertexIndices,
+-                  IndicesVec& theNormalIndices)
++                  IndicesVec& theNormalIndices,
++                  bool        theIsJt10)
+     : myData             (theData)
+     , myVertexIndicesPtr (&theVertexIndices)
+-    , myNormalIndicesPtr (&theNormalIndices) {}
++    , myNormalIndicesPtr (&theNormalIndices)
++    , myIsJt10           (theIsJt10) {}
+ 
+   void operator ()() const
+   {
+     JtDecode_MeshCoderDriver aMeshCoderDriver;
++    aMeshCoderDriver.SetJt10      (myIsJt10);
+     aMeshCoderDriver.SetInputData (const_cast <JtDecode_MeshCoderDriver::InputData&> (*myData));
+     aMeshCoderDriver.Decode       (myVertexIndicesPtr, myNormalIndicesPtr);
+   }
+@@ -259,11 +264,34 @@ Standard_Boolean JtElement_ShapeLOD_Vertex::readVertexShapeLODData (
+     Jt_I32 aTriID;
+     Jt_I16 aVersion4;
+     if (!JtElement_ShapeLOD_Base::Read (theReader)
+-     || !theReader.ReadI16 (aVersion)
+-     || !aVertexBinding.Read (theReader)
+-     || !theReader.ReadI16 (aMeshVersion)
++     || !theReader.ReadVersion (aVersion)
++     || !aVertexBinding.Read (theReader))
++    {
++      return Standard_False;
++    }
++
++    // JT 10 files wrap the TopoMesh data in an embedded logical element header (length, object
++    // type ID, base type, object ID). ISO 14306-4 does not describe it; seen in NX-written files.
++    if (theReader.Model()->MajorVersion() >= 10)
++    {
++      static const Jt_GUID aTopoMeshGUID ("f830a5ad-be4c-4fbc-9b-5f-b9-26-92-78-d2-e1");
++      Jt_I32  aLength, anObjectID;
++      Jt_GUID aGUID;
++      Jt_U8   aBaseType;
++      if (!theReader.ReadI32  (aLength)
++       || !theReader.ReadGUID (aGUID)
++       || !(aGUID == aTopoMeshGUID)
++       || !theReader.ReadU8   (aBaseType)
++       || !theReader.ReadI32  (anObjectID))
++      {
++        ALARM ("Error: Unsupported JT 10 TopoMesh layout");
++        return Standard_False;
++      }
++    }
++
++    if (!theReader.ReadVersion (aMeshVersion)
+      || !theReader.ReadI32 (aTriID)
+-     || !theReader.ReadI16 (aVersion4))
++     || !theReader.ReadVersion (aVersion4))
+     {
+       return Standard_False;
+     }
+@@ -479,7 +507,8 @@ Standard_Boolean JtElement_ShapeLOD_Vertex::readTopologicallyCompressedData (JtD
+     return Standard_False;
+ 
+   IndicesVec aVertexIndices, aNormalIndices;
+-  aDecodeTasks.Run (MeshDecodeTask (aMeshData, aVertexIndices, aNormalIndices));
++  aDecodeTasks.Run (MeshDecodeTask (aMeshData, aVertexIndices, aNormalIndices,
++                                    theReader.Model()->MajorVersion() >= 10));
+ 
+   ///////////////////////////////////////////////////////////////////
+   // Topologically Compressed Vertex Records data collection
+diff --git a/TKJT/src/JtNode/JtNode_Base.cxx b/TKJT/src/JtNode/JtNode_Base.cxx
+index 31acfb8..58064f5 100644
+--- a/TKJT/src/JtNode/JtNode_Base.cxx
++++ b/TKJT/src/JtNode/JtNode_Base.cxx
+@@ -34,7 +34,7 @@ Standard_Boolean JtNode_Base::Read (JtData_Reader& theReader)
+ 
+   Jt_I16 aVersion;
+   if (theReader.Model()->MajorVersion() > 8
+-  && !theReader.ReadI16 (aVersion))
++  && !theReader.ReadVersion (aVersion))
+     return Standard_False;
+ 
+   Jt_U32 aFlags;
+diff --git a/TKJT/src/JtNode/JtNode_Group.cxx b/TKJT/src/JtNode/JtNode_Group.cxx
+index ca6fa1a..01f6a9f 100644
+--- a/TKJT/src/JtNode/JtNode_Group.cxx
++++ b/TKJT/src/JtNode/JtNode_Group.cxx
+@@ -34,7 +34,7 @@ Standard_Boolean JtNode_Group::Read (JtData_Reader& theReader)
+ 
+   Jt_I16 aVersion;
+   if (theReader.Model()->MajorVersion() > 8
+-  && !theReader.ReadI16 (aVersion))
++  && !theReader.ReadVersion (aVersion))
+     return Standard_False;
+ 
+   return JtData_DeferredObject::ReadVec (theReader, myChildren);
+diff --git a/TKJT/src/JtNode/JtNode_Instance.cxx b/TKJT/src/JtNode/JtNode_Instance.cxx
+index c42f320..54ec228 100644
+--- a/TKJT/src/JtNode/JtNode_Instance.cxx
++++ b/TKJT/src/JtNode/JtNode_Instance.cxx
+@@ -34,7 +34,7 @@ Standard_Boolean JtNode_Instance::Read (JtData_Reader& theReader)
+ 
+   Jt_I16 aVersion;
+   if (theReader.Model()->MajorVersion() > 8
+-  && !theReader.ReadI16 (aVersion))
++  && !theReader.ReadVersion (aVersion))
+     return Standard_False;
+ 
+   return JtData_DeferredObject::Read (theReader, myObject);
+diff --git a/TKJT/src/JtNode/JtNode_LOD.cxx b/TKJT/src/JtNode/JtNode_LOD.cxx
+index 6210baa..ac7be3a 100644
+--- a/TKJT/src/JtNode/JtNode_LOD.cxx
++++ b/TKJT/src/JtNode/JtNode_LOD.cxx
+@@ -33,9 +33,13 @@ Standard_Boolean JtNode_LOD::Read (JtData_Reader& theReader)
+ 
+   myVersion = 0;
+   if (theReader.Model()->MajorVersion() > 8
+-  && !theReader.ReadI16 (myVersion))
++  && !theReader.ReadVersion (myVersion))
+     return Standard_False;
+ 
++  // JT 10 dropped the reserved fields.
++  if (theReader.Model()->MajorVersion() >= 10)
++    return Standard_True;
++
+   Jt_VecF32 aReservedVec;
+   Jt_F32    aReservedVal;
+   return theReader.ReadVec (aReservedVec)
+diff --git a/TKJT/src/JtNode/JtNode_MetaData.cxx b/TKJT/src/JtNode/JtNode_MetaData.cxx
+index 3dcbb8b..decdfba 100644
+--- a/TKJT/src/JtNode/JtNode_MetaData.cxx
++++ b/TKJT/src/JtNode/JtNode_MetaData.cxx
+@@ -30,7 +30,7 @@ Standard_Boolean JtNode_MetaData::Read (JtData_Reader& theReader)
+ {
+   Jt_I16 aVersion;
+   return JtNode_Group::Read (theReader)
+-      && theReader.ReadI16  (aVersion);
++      && theReader.ReadVersion (aVersion);
+ }
+ 
+ //=======================================================================
+diff --git a/TKJT/src/JtNode/JtNode_Part.cxx b/TKJT/src/JtNode/JtNode_Part.cxx
+index fce8a60..f83b729 100644
+--- a/TKJT/src/JtNode/JtNode_Part.cxx
++++ b/TKJT/src/JtNode/JtNode_Part.cxx
+@@ -31,7 +31,7 @@ Standard_Boolean JtNode_Part::Read (JtData_Reader& theReader)
+   Jt_I16 aVersion;
+   Jt_I32 aReserved;
+   return JtNode_MetaData::Read (theReader)
+-      && theReader.ReadI16 (aVersion)
++      && theReader.ReadVersion (aVersion)
+       && theReader.ReadI32 (aReserved);
+ }
+ 
+diff --git a/TKJT/src/JtNode/JtNode_Partition.cxx b/TKJT/src/JtNode/JtNode_Partition.cxx
+index 05670db..720d10d 100644
+--- a/TKJT/src/JtNode/JtNode_Partition.cxx
++++ b/TKJT/src/JtNode/JtNode_Partition.cxx
+@@ -31,13 +31,19 @@ Standard_Boolean JtNode_Partition::Read (JtData_Reader& theReader)
+   myModel = theReader.Model();
+ 
+   Jt_I32 aFlags;
++  Jt_I16 aVersion; // JT 10 only: U8 version number (not listed in the ISO 14306-4 text, present in files)
+   if (!JtNode_Group::Read     (theReader)
++   || (theReader.Model()->MajorVersion() >= 10 && !theReader.ReadVersion (aVersion))
+    || !theReader.ReadI32      (aFlags)
+    || !theReader.ReadMbString (myFileName))
+   {
+     return Standard_False;
+   }
+ 
++  // JT 10 reordered the bounding boxes; nothing below is used, and unread element bytes are skipped.
++  if (theReader.Model()->MajorVersion() >= 10)
++    return Standard_True;
++
+   const Standard_Boolean hasUntransformedBndBox = ((aFlags & 1) != 0);
+ 
+   Jt_BBoxF32 aBBox;
+diff --git a/TKJT/src/JtNode/JtNode_RangeLOD.cxx b/TKJT/src/JtNode/JtNode_RangeLOD.cxx
+index 645eb6e..e23aa8a 100644
+--- a/TKJT/src/JtNode/JtNode_RangeLOD.cxx
++++ b/TKJT/src/JtNode/JtNode_RangeLOD.cxx
+@@ -33,7 +33,7 @@ Standard_Boolean JtNode_RangeLOD::Read (JtData_Reader& theReader)
+ 
+   myVersion = 0;
+   if (theReader.Model()->MajorVersion() > 8
+-  && !theReader.ReadI16 (myVersion))
++  && !theReader.ReadVersion (myVersion))
+     return Standard_False;
+ 
+   return theReader.ReadVec          <Jt_F32> (myVecR)
+diff --git a/TKJT/src/JtNode/JtNode_Shape_Base.cxx b/TKJT/src/JtNode/JtNode_Shape_Base.cxx
+index 37fad07..612a980 100644
+--- a/TKJT/src/JtNode/JtNode_Shape_Base.cxx
++++ b/TKJT/src/JtNode/JtNode_Shape_Base.cxx
+@@ -33,10 +33,11 @@ Standard_Boolean JtNode_Shape_Base::Read (JtData_Reader& theReader)
+ 
+   Jt_I16 aVersion;
+   if (theReader.Model()->MajorVersion() > 8
+-  && !theReader.ReadI16 (aVersion))
++  && !theReader.ReadVersion (aVersion))
+     return Standard_False;
+ 
+-  return theReader.ReadUniformStruct<Jt_F32> (myReservedBnd)
++  // JT 10 dropped the reserved bounding box.
++  return (theReader.Model()->MajorVersion() >= 10 || theReader.ReadUniformStruct<Jt_F32> (myReservedBnd))
+       && theReader.ReadUniformStruct<Jt_F32> (myUntransBnd)
+       && theReader.ReadF32   (myArea)
+       && theReader.ReadArray (myVertexRange)
+diff --git a/TKJT/src/JtNode/JtNode_Shape_Vertex.cxx b/TKJT/src/JtNode/JtNode_Shape_Vertex.cxx
+index 3901a8a..7f73996 100644
+--- a/TKJT/src/JtNode/JtNode_Shape_Vertex.cxx
++++ b/TKJT/src/JtNode/JtNode_Shape_Vertex.cxx
+@@ -48,9 +48,12 @@ Standard_Boolean JtNode_Shape_Vertex::Read (JtData_Reader &theReader)
+   else
+   {
+     JtElement_ShapeLOD_Vertex::VertexBinding2 aVertexBinding;
+-    if (!theReader.ReadI16 (aVersion)
++    if (!theReader.ReadVersion (aVersion)
+      || !aVertexBinding.Read (theReader))
+       return Standard_False;
++    // JT 10 has no quantization parameters here; unread element bytes are skipped.
++    if (theReader.Model()->MajorVersion() >= 10)
++      return Standard_True;
+   }
+ 
+   JtElement_ShapeLOD_Vertex::QuantizationParams aQuantizationParams;
+diff --git a/TKJT/src/JtProperty/JtProperty_Base.cxx b/TKJT/src/JtProperty/JtProperty_Base.cxx
+index 3df574e..8d8df85 100644
+--- a/TKJT/src/JtProperty/JtProperty_Base.cxx
++++ b/TKJT/src/JtProperty/JtProperty_Base.cxx
+@@ -40,7 +40,7 @@ Standard_Boolean JtProperty_Base::Read (JtData_Reader& theReader)
+     return Standard_False;
+ 
+   if (theReader.Model()->MajorVersion() > 8
+-  && !theReader.ReadI16 (myVersion))
++  && !theReader.ReadVersion (myVersion))
+     return Standard_False;
+ 
+   return theReader.ReadU32 (myStateFlags);
+diff --git a/TKJT/src/JtProperty/JtProperty_LateLoaded.cxx b/TKJT/src/JtProperty/JtProperty_LateLoaded.cxx
+index 79cf73e..e2e1a8c 100644
+--- a/TKJT/src/JtProperty/JtProperty_LateLoaded.cxx
++++ b/TKJT/src/JtProperty/JtProperty_LateLoaded.cxx
+@@ -33,7 +33,7 @@ Standard_Boolean JtProperty_LateLoaded::Read (JtData_Reader& theReader)
+ 
+   Jt_I16 aVersion;
+   if (theReader.Model()->MajorVersion() > 8
+-  && !theReader.ReadI16 (aVersion))
++  && !theReader.ReadVersion (aVersion))
+     return Standard_False;
+ 
+   Jt_GUID aGUID;
+@@ -50,7 +50,7 @@ Standard_Boolean JtProperty_LateLoaded::Read (JtData_Reader& theReader)
+   {
+     Jt_I32 aPayloadObjectID, aReserved;
+     if (!theReader.ReadI32 (aPayloadObjectID)
+-     || !theReader.ReadI32 (aReserved))
++     || (aVersion < 2 && !theReader.ReadI32 (aReserved))) // version 2 (JT 10) has no reserved field
+     {
+       return Standard_False;
+     }
+diff --git a/TKJT/src/JtProperty/JtProperty_String.cxx b/TKJT/src/JtProperty/JtProperty_String.cxx
+index 6c67d92..af63bd1 100644
+--- a/TKJT/src/JtProperty/JtProperty_String.cxx
++++ b/TKJT/src/JtProperty/JtProperty_String.cxx
+@@ -33,7 +33,7 @@ Standard_Boolean JtProperty_String::Read (JtData_Reader& theReader)
+ 
+   Jt_I16 aVersion;
+   if (theReader.Model()->MajorVersion() > 8
+-  && !theReader.ReadI16 (aVersion))
++  && !theReader.ReadVersion (aVersion))
+     return Standard_False;
+ 
+   return theReader.ReadMbString (myValue);

@@ -8,6 +8,7 @@ export const FORMATS = [
   { name: 'STL', extensions: ['.stl'], mime: 'model/stl' },
   { name: 'VRML', extensions: ['.wrl', '.vrml'], mime: 'model/vrml' },
   { name: 'BREP', extensions: ['.brep', '.brp'], mime: 'application/octet-stream' },
+  { name: 'JT', extensions: ['.jt'], mime: 'model/jt' },
 ];
 
 export const EXTENSIONS = FORMATS.flatMap((f) => f.extensions);
