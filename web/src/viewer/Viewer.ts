@@ -59,7 +59,6 @@ export class Viewer {
   private readonly ortho = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 1000);
   private camera: THREE.PerspectiveCamera | THREE.OrthographicCamera = this.perspective;
   private controls: OrbitControls;
-  private readonly up = Z_UP.clone(); // orbit axis; saved views may set another
   private readonly light = new THREE.DirectionalLight(0xffffff, 2.2);
   private readonly modelRoot = new THREE.Group();
   private readonly measure: Measure;
@@ -88,6 +87,8 @@ export class Viewer {
   private animation = 0;
   private renderQueued = false;
   private pointerDown: { x: number; y: number } | null = null;
+  private readonly pointers = new Set<number>();
+  private rotateFrom: { x: number; y: number } | null = null;
 
   private readonly edgeMaterial = new THREE.LineBasicMaterial({ color: EDGE_COLOR });
   private readonly highlight = new THREE.MeshStandardMaterial({
@@ -109,8 +110,8 @@ export class Viewer {
     container.appendChild(this.renderer.domElement);
 
     this.scene.background = new THREE.Color(0x2a2d34);
-    this.perspective.up.copy(this.up);
-    this.ortho.up.copy(this.up);
+    this.perspective.up.copy(Z_UP);
+    this.ortho.up.copy(Z_UP);
     this.scene.add(new THREE.HemisphereLight(0xffffff, 0x50545c, 1.4));
     this.scene.add(this.camera);
     this.camera.add(this.light);
@@ -129,6 +130,10 @@ export class Viewer {
     canvas.addEventListener('pointerup', this.handleClick);
     canvas.addEventListener('pointermove', this.handleHover);
     canvas.addEventListener('pointerleave', () => this.setHover(null));
+    canvas.addEventListener('pointerdown', this.handleRotateStart);
+    canvas.addEventListener('pointermove', this.handleRotate);
+    canvas.addEventListener('pointerup', this.handleRotateEnd);
+    canvas.addEventListener('pointercancel', this.handleRotateEnd);
 
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(container);
@@ -399,34 +404,53 @@ export class Viewer {
     return this.camera.position.clone().sub(this.controls.target).normalize();
   }
 
+  // OrbitControls pan and zoom; rotation is our own (below) because theirs stops at the poles.
   private createControls(): OrbitControls {
     const controls = new OrbitControls(this.camera, this.renderer.domElement);
+    controls.enableRotate = false;
     controls.addEventListener('change', this.requestRender);
     controls.addEventListener('start', () => cancelAnimationFrame(this.animation));
     return controls;
   }
 
-  // OrbitControls fix their up axis when created, so a new axis needs new controls.
-  private setUp(up: THREE.Vector3): void {
-    if (up.distanceToSquared(this.up) < 1e-12) return;
-    this.up.copy(up).normalize();
-    this.perspective.up.copy(this.up);
-    this.ortho.up.copy(this.up);
-    const { target, maxDistance } = this.controls;
-    this.controls.dispose();
-    this.controls = this.createControls();
-    this.controls.target.copy(target);
-    this.controls.maxDistance = maxDistance;
-  }
+  // Free rotation about the screen axes through the target, so the model tumbles over the poles.
+  // Left drag without modifiers (those pan) and with one pointer (two pinch and pan).
+  private handleRotateStart = (e: PointerEvent): void => {
+    this.pointers.add(e.pointerId);
+    const free = e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey && this.pointers.size === 1;
+    this.rotateFrom = free ? { x: e.clientX, y: e.clientY } : null;
+    if (free) cancelAnimationFrame(this.animation);
+  };
+
+  private handleRotate = (e: PointerEvent): void => {
+    if (!this.rotateFrom || this.pointers.size !== 1) return;
+    const k = (2 * Math.PI) / this.container.clientHeight; // a full turn per viewport height, as OrbitControls
+    const dx = (e.clientX - this.rotateFrom.x) * k;
+    const dy = (e.clientY - this.rotateFrom.y) * k;
+    this.rotateFrom = { x: e.clientX, y: e.clientY };
+    const q = this.camera.quaternion;
+    const turn = new THREE.Quaternion()
+      .setFromAxisAngle(new THREE.Vector3(0, 1, 0).applyQuaternion(q), -dx)
+      .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0).applyQuaternion(q), -dy));
+    const { target } = this.controls;
+    this.camera.position.sub(target).applyQuaternion(turn).add(target);
+    this.camera.up.applyQuaternion(turn);
+    this.controls.update();
+  };
+
+  private handleRotateEnd = (e: PointerEvent): void => {
+    this.pointers.delete(e.pointerId);
+    this.rotateFrom = null;
+  };
 
   // Look at the box from `dir` (target towards camera), optionally turning and zooming there smoothly.
-  // `up` changes the orbit axis (Z for the standard views; a saved view's own).
+  // `up` is the world direction to show up on screen (Z for the standard views); omitted keeps the current one.
   private frame(direction: THREE.Vector3, box: THREE.Box3, animate = false, up?: THREE.Vector3): void {
     cancelAnimationFrame(this.animation);
-    if (up) this.setUp(up);
     const dir = direction.clone().normalize();
-    // Z-up orbit controls cannot look straight along Z; the tilt keeps +Y up on screen from above.
-    if (this.up.z === 1 && Math.abs(dir.z) > 0.9999) dir.set(0, -1e-4, Math.sign(dir.z)).normalize();
+    const upDir = up?.clone() ?? this.camera.up.clone();
+    // Looking along the up axis: show +Y up from above and -Y from below, as the ViewCube labels.
+    if (Math.abs(upDir.clone().normalize().dot(dir)) > 0.9999) upDir.set(0, Math.sign(upDir.dot(dir)), 0);
 
     const sphere = box.getBoundingSphere(new THREE.Sphere());
     const r = Math.max(sphere.radius, 1e-3);
@@ -438,20 +462,24 @@ export class Viewer {
     this.controls.maxDistance = distance * 20;
 
     const from = {
-      dir: this.viewDir(),
+      orientation: this.camera.quaternion.clone(),
       target: this.controls.target.clone(),
       distance: this.camera.position.distanceTo(this.controls.target),
       halfHeight: this.orthoHalfHeight / this.ortho.zoom,
     };
-    const turn = new THREE.Quaternion().setFromUnitVectors(from.dir, dir);
+    const to = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().lookAt(dir, new THREE.Vector3(), upDir));
     const t0 = performance.now();
     const step = (now: number) => {
       const t = animate ? Math.min((now - t0) / ANIMATION_MS, 1) : 1;
       const k = t * t * (3 - 2 * t); // ease in-out
-      const d = k === 1 ? dir : from.dir.clone().applyQuaternion(new THREE.Quaternion().slerp(turn, k));
+      const q = from.orientation.clone().slerp(to, k);
+      const d = new THREE.Vector3(0, 0, 1).applyQuaternion(q);
       const target = from.target.clone().lerp(sphere.center, k);
       const dist = THREE.MathUtils.lerp(from.distance, distance, k);
-      for (const cam of [this.perspective, this.ortho]) cam.position.copy(target).addScaledVector(d, dist);
+      for (const cam of [this.perspective, this.ortho]) {
+        cam.position.copy(target).addScaledVector(d, dist);
+        cam.up.set(0, 1, 0).applyQuaternion(q);
+      }
       this.ortho.zoom = 1;
       this.orthoHalfHeight = THREE.MathUtils.lerp(from.halfHeight, r * 1.05, k);
       this.controls.target.copy(target);
@@ -467,6 +495,7 @@ export class Viewer {
     if (next === this.camera) return;
     next.position.copy(this.camera.position);
     next.quaternion.copy(this.camera.quaternion);
+    next.up.copy(this.camera.up);
     if (on) {
       // Match the perspective view's apparent size at the target.
       const d = this.camera.position.distanceTo(this.controls.target);
