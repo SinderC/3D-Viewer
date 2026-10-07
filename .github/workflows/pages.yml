@@ -20,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Building OCCT takes ~20-30 min; it only reruns when the pinned versions or build script change.
+      # Building OCCT takes ~20-30 min; it only reruns when the pinned versions, build script or OCCT patches change.
       - name: Cache Emscripten SDK and OCCT
         id: deps
         uses: actions/cache@v6
@@ -28,7 +28,7 @@ jobs:
           path: |
             wasm/.emsdk
             wasm/.deps/occt-install-*
-          key: occt-${{ runner.os }}-${{ hashFiles('wasm/scripts/env.sh', 'wasm/scripts/setup-emsdk.sh', 'wasm/scripts/build-occt.sh') }}
+          key: occt-${{ runner.os }}-${{ hashFiles('wasm/scripts/env.sh', 'wasm/scripts/setup-emsdk.sh', 'wasm/scripts/build-occt.sh', 'wasm/patches/occt-*.patch') }}
 
       - name: Build Emscripten SDK and OCCT
         if: steps.deps.outputs.cache-hit != 'true'
@@ -41,7 +41,7 @@ jobs:
           path: |
             wasm/.deps/pyopenjt
             wasm/.deps/xz-install-*
-          key: jt-${{ runner.os }}-${{ hashFiles('wasm/scripts/env.sh', 'wasm/scripts/build-jt-deps.sh', 'wasm/patches/**') }}
+          key: jt-${{ runner.os }}-${{ hashFiles('wasm/scripts/env.sh', 'wasm/scripts/build-jt-deps.sh', 'wasm/patches/tkjt-*.patch') }}
 
       - name: Build JT reader dependencies
         if: steps.jtdeps.outputs.cache-hit != 'true'

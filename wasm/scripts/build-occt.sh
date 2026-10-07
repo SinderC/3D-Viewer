@@ -8,6 +8,9 @@ source "$EMSDK_DIR/emsdk_env.sh" >/dev/null 2>&1
 if [ ! -d "$OCCT_SRC" ]; then
   git clone --depth 1 --branch "$OCCT_TAG" https://github.com/Open-Cascade-SAS/OCCT.git "$OCCT_SRC"
 fi
+for p in "$WASM_DIR"/patches/occt-*.patch; do
+  git -C "$OCCT_SRC" apply --reverse --check "$p" 2>/dev/null || git -C "$OCCT_SRC" apply "$p"
+done
 if [ ! -d "$RAPIDJSON_SRC" ]; then
   git init -q "$RAPIDJSON_SRC"
   git -C "$RAPIDJSON_SRC" fetch -q --depth 1 https://github.com/Tencent/rapidjson.git "$RAPIDJSON_COMMIT"

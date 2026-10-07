@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { isolate } from '../ui/state';
-import { apOf, decodeModel, type RawModel } from './model';
+import { apOf, decodeModel, defaultView, type RawModel, type SavedView } from './model';
 
 function rawFixture(): { raw: RawModel; geometry: ArrayBuffer } {
   // One triangle prototype: 3 positions, 3 normals, 3 indices, 1 edge segment.
@@ -38,6 +38,8 @@ function rawFixture(): { raw: RawModel; geometry: ArrayBuffer } {
         groups: [[0, 3, -1]],
       },
     ],
+    pmi: [{ kind: 'dimension', type: 'Distance', name: 'd1', proto: 0, segments: [84, 6], triangles: [0, 9], faces: [0], value: [1] }],
+    views: [{ name: 'MBD_A', direction: [0, 0, -1], up: [0, 1, 0], pmi: [0] }],
   };
   return { raw, geometry: buf };
 }
@@ -57,6 +59,9 @@ describe('decodeModel', () => {
     expect(m.unit).toBe('mm');
     expect(Array.from(m.protos[0].faceData)).toEqual([1, 0, 0, 0, 0, 0, 1]);
     expect(Array.from(m.protos[0].edgeData)).toEqual([1, 1, 0, 0, 0, 0, 0, 0, 0]);
+    expect(Array.from(m.pmi[0].segments)).toEqual([0, 0, 0, 1, 0, 0]);
+    expect(m.pmi[0].faces).toEqual([0]);
+    expect(m.views[0].pmi).toEqual([0]);
   });
 });
 
@@ -76,5 +81,15 @@ describe('isolate', () => {
     const m = decodeModel(raw, geometry);
     expect([...isolate(m, 1)]).toEqual([2]);
     expect([...isolate(m, 0)]).toEqual([]);
+  });
+});
+
+describe('defaultView', () => {
+  const view = (name: string): SavedView => ({ name, direction: [0, 0, -1], up: [0, 1, 0], pmi: [] });
+  it('prefers the default camera, then an isometric view, then the first', () => {
+    expect(defaultView({ views: [view('MBD_A'), view('* Document Default Camera')] })?.name).toBe('* Document Default Camera');
+    expect(defaultView({ views: [view('Back'), view('Isometric')] })?.name).toBe('Isometric');
+    expect(defaultView({ views: [view('MBD_B'), view('MBD_A')] })?.name).toBe('MBD_B');
+    expect(defaultView({ views: [] })).toBeUndefined();
   });
 });

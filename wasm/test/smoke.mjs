@@ -100,6 +100,8 @@ for (const target of targets) {
         colors: model.colors.length,
         planes,
         circles,
+        pmi: model.pmi.length,
+        views: model.views.length,
         open: model.protos.map((p) => (openEdgeRatio(geometry, p) * 100).toFixed(1) + '%').join(' '),
       });
     }

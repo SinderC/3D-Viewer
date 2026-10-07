@@ -10,11 +10,15 @@ only allows requests to the app's own origin. After the first visit the app work
 ## Features
 
 - STEP AP203 (ed1/ed2), AP214, AP242 (ed1–ed3), including AP242 tessellated geometry
+- STEP AP242 PMI: dimensions, geometric tolerances, datums and notes as drawn in the file (lines
+  and filled text), listed per item with show/hide, the referenced faces and the semantic values
+  (type, nominal, tolerances, datums) of the selected item; saved views (direction, up and the
+  PMI they show; OCCT keeps no camera position, so a view frames the model and its PMI)
 - IGES and OCCT BREP (B-rep: all measurements work)
 - JT 8, 9 and 10 (ISO 14306, incl. JT 10.5): tessellated geometry, assembly structure, instances,
   material colours, finest LOD only. Parts that embed their exact B-rep as Parasolid XT data get its
-  edges (feature edges; exact edge length / radius / diameter); faces stay the JT mesh. No PMI, no
-  JT B-rep, no external part files
+  edges (feature edges; exact edge length / radius / diameter); faces stay the JT mesh. No PMI yet,
+  no JT B-rep, no external part files
 - glTF/GLB, OBJ, STL, VRML (meshes: point-to-point distance only, no feature edges). glTF is read
   in metres; OBJ, STL and VRML carry no reliable unit and are read as mm. A `.gltf` must embed its
   buffers (or use `.glb`); external `.bin`/`.mtl` files are not loaded
@@ -61,7 +65,7 @@ the PWA from the browser's address bar.
 wasm/src/bridge.cpp       OCCT → mesh bridge (embind): readModel(bytes, fileName, options)
 wasm/src/jt_reader.cpp    JT scene graph → XCAF document (via TKJT)
 wasm/src/xt_reader.cpp    Parasolid XT (neutral binary) → edges, for JT parts with embedded XT data
-wasm/patches/             changes to TKJT: JT 10 support and fixes
+wasm/patches/             changes to TKJT (JT 10 support and fixes) and OCCT (STEP PMI fix)
 wasm/scripts/             toolchain + build scripts (versions pinned in env.sh)
 wasm/test/smoke.mjs       Node smoke test over samples/
 web/src/worker/           Web Worker running the WASM module

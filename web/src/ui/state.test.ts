@@ -37,3 +37,34 @@ describe('reducer', () => {
     expect(measureMode({ ...initialState, measureMode: 'faceAngle', model: meshOnly })).toBe('faceAngle');
   });
 });
+
+describe('PMI state', () => {
+  const model = {
+    protos: [],
+    pmi: [{}, {}, {}],
+    views: [
+      { name: 'MBD_A', direction: [0, 0, -1], up: [0, 1, 0], pmi: [0, 2] },
+      { name: 'Front', direction: [0, 1, 0], up: [0, 0, 1], pmi: [] },
+    ],
+  } as unknown as Model;
+  const ready: State = { ...initialState, status: 'ready', model, pmi: false };
+
+  it('applying a view shows exactly its PMI', () => {
+    const s = reducer(ready, { type: 'applyView', index: 0 });
+    expect(s.pmi).toBe(true);
+    expect([...s.hiddenPmi]).toEqual([1]);
+    expect(s.view).toEqual({ index: 0 });
+  });
+
+  it('a view without PMI keeps the current visibility', () => {
+    const s = reducer({ ...ready, hiddenPmi: new Set([2]) }, { type: 'applyView', index: 1 });
+    expect(s.pmi).toBe(false);
+    expect([...s.hiddenPmi]).toEqual([2]);
+  });
+
+  it('selecting a part clears the PMI selection and the other way round', () => {
+    const s = reducer({ ...ready, selectedPmi: 1 }, { type: 'select', id: 4 });
+    expect(s.selectedPmi).toBeNull();
+    expect(reducer(s, { type: 'selectPmi', index: 2 }).selected).toBeNull();
+  });
+});

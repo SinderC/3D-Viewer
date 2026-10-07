@@ -1,0 +1,38 @@
+Changes to OCCT (V8_0_1) for the 3D Viewer. Applied by wasm/scripts/build-occt.sh.
+
+- STEP AP242: recognise draughting models that are also tessellated shape representations
+  (complex instances with SHAPE_REPRESENTATION and TESSELLATED_SHAPE_REPRESENTATION, with or
+  without CHARACTERIZED_OBJECT). OCCT skipped them, so PMI in them lost its length unit (inch
+  PMI read as mm) and saved views attached to them were dropped. Seen in the NIST AP242 PMI files.
+
+diff --git a/src/DataExchange/TKDESTEP/RWStepAP214/RWStepAP214_ReadWriteModule.cxx b/src/DataExchange/TKDESTEP/RWStepAP214/RWStepAP214_ReadWriteModule.cxx
+index f339ce69..fbfe2fe7 100644
+--- a/src/DataExchange/TKDESTEP/RWStepAP214/RWStepAP214_ReadWriteModule.cxx
++++ b/src/DataExchange/TKDESTEP/RWStepAP214/RWStepAP214_ReadWriteModule.cxx
+@@ -4516,6 +4516,13 @@ int RWStepAP214_ReadWriteModule::CaseStep(
+       {
+         return 337;
+       }
++      // Draughting model that is also a tessellated shape representation (AP242 PMI)
++      else if (types(1).IsEqual(StepType(402)) && types(2).IsEqual(StepType(714))
++               && types(3).IsEqual(StepType(441)) && types(4).IsEqual(StepType(245))
++               && types(5).IsEqual(StepType(262)) && types(6).IsEqual(StepType(807)))
++      {
++        return 715;
++      }
+     }
+     else if (NbComp == 5)
+     {
+@@ -4650,6 +4657,12 @@ int RWStepAP214_ReadWriteModule::CaseStep(
+       {
+         return 715;
+       }
++      // The same without characterized_object: read as the draughting model it is
++      else if (types(1).IsEqual(StepType(441)) && types(2).IsEqual(StepType(245))
++               && types(3).IsEqual(StepType(262)) && types(4).IsEqual(StepType(807)))
++      {
++        return 715;
++      }
+     }
+     else if (NbComp == 3)
+     {

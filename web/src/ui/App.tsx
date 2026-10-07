@@ -3,7 +3,7 @@ import type { Viewer } from '../viewer/Viewer';
 import { EXTENSIONS, isSupported } from '../core/formats';
 import { loadModel } from '../worker/loadModel';
 import { QUALITY, type Quality } from '../worker/protocol';
-import { ModelTree } from './ModelTree';
+import { Sidebar } from './Sidebar';
 import { initialState, reducer, type State } from './state';
 import { Toolbar } from './Toolbar';
 import { ViewBar } from './ViewBar';
@@ -103,6 +103,7 @@ export function App() {
       if (e.key === 'f') viewer.current?.fit();
       if (e.key === 'F') viewer.current?.fitSelection();
       if (e.key === 'm') dispatch({ type: 'setTool', tool: state.tool === 'measure' ? 'select' : 'measure' });
+      if (e.key === 'p') dispatch({ type: 'togglePmi' });
       if (e.key === 'Escape') {
         dispatch({ type: 'setTool', tool: 'select' });
         dispatch({ type: 'select', id: null });
@@ -112,7 +113,7 @@ export function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, [state.tool]);
 
-  const { model, status } = state;
+  const { status } = state;
   return (
     <div
       className="app"
@@ -146,31 +147,7 @@ export function App() {
           e.target.value = '';
         }}
       />
-      <aside className="sidebar">
-        {model ? (
-          <>
-            <ModelTree key={state.fileName} model={model} hidden={state.hidden} selected={state.selected} dispatch={dispatch} />
-            <dl className="info">
-              <dt>File</dt>
-              <dd title={state.fileName}>{state.fileName}</dd>
-              <dt>Format</dt>
-              <dd title={model.schema || undefined}>{model.format}</dd>
-              <dt>Units</dt>
-              <dd>{model.unit}</dd>
-              <dt>Parts</dt>
-              <dd>
-                {model.protos.length} ({model.nodes.filter((n) => n.proto >= 0).length} instances)
-              </dd>
-              <dt>Triangles</dt>
-              <dd>{model.triangles.toLocaleString()}</dd>
-              <dt>Load time</dt>
-              <dd>{((state.loadMs ?? 0) / 1000).toFixed(2)} s</dd>
-            </dl>
-          </>
-        ) : (
-          <p className="hint">No model loaded.</p>
-        )}
-      </aside>
+      <Sidebar state={state} dispatch={dispatch} />
       <main className="stage">
         <ViewerCanvas state={state} dispatch={dispatch} viewerRef={viewer} />
         {status === 'ready' && <ViewBar state={state} dispatch={dispatch} viewer={viewer} />}

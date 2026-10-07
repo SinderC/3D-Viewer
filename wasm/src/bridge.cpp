@@ -50,9 +50,19 @@
 #include <TopoDS_Face.hxx>
 #include <VrmlAPI_CafReader.hxx>
 #include <XCAFApp_Application.hxx>
+#include <XCAFDimTolObjects_DatumObject.hxx>
+#include <XCAFDimTolObjects_DimensionObject.hxx>
+#include <XCAFDimTolObjects_GeomToleranceObject.hxx>
 #include <XCAFDoc_ColorTool.hxx>
+#include <XCAFDoc_Datum.hxx>
+#include <XCAFDoc_DimTolTool.hxx>
+#include <XCAFDoc_Dimension.hxx>
 #include <XCAFDoc_DocumentTool.hxx>
+#include <XCAFDoc_GeomTolerance.hxx>
 #include <XCAFDoc_ShapeTool.hxx>
+#include <XCAFDoc_View.hxx>
+#include <XCAFDoc_ViewTool.hxx>
+#include <XCAFView_Object.hxx>
 #include <XCAFPrs.hxx>
 #include <XCAFPrs_Style.hxx>
 
@@ -115,6 +125,34 @@ struct Proto
   Range              faceStarts, faceData; // first index of each face (uint32) / kFaceStride doubles
   Range              edgeStarts, edgeData; // first segment of each edge (uint32) / kEdgeStride doubles
   std::vector<Group> groups;
+  // B-rep face → index into faceStarts, to resolve PMI references. Not serialised.
+  NCollection_DataMap<TopoDS_Shape, int, TopTools_ShapeMapHasher> faceIndex;
+};
+
+// PMI (STEP GD&T): one dimension, geometric tolerance, datum or note, with its drawn presentation.
+struct Pmi
+{
+  std::string              kind; // dimension, tolerance, datum, note
+  std::string              type; // e.g. Diameter, Position
+  std::string              name;
+  int                      proto = -1; // owning part; -1 = drawn in model coordinates
+  Range                    segments;   // presentation lines (x0 y0 z0 x1 y1 z1 ...), float32
+  Range                    triangles;  // filled presentation areas such as text glyphs, float32 xyz x3
+  std::vector<int>         faces;      // referenced faces of the owning part (faceStarts indices)
+  std::vector<double>      value;      // nominal value (dimension, tolerance), if any
+  std::vector<double>      plusMinus;  // lower and upper tolerance, if any
+  std::vector<double>      range;      // lower and upper limit, if any
+  bool                     angular = false; // values in degrees, not model units
+  std::vector<std::string> datums;
+};
+
+// A saved view (STEP camera model) with the PMI it shows. OCCT keeps no camera position, so the
+// viewer frames the view's PMI from its direction.
+struct SavedView
+{
+  std::string      name;
+  gp_Dir           direction, up; // direction the camera looks
+  std::vector<int> pmi;
 };
 
 struct Node
@@ -253,7 +291,9 @@ public:
       : myOpts(opts),
         myProgress(progress),
         myShapes(XCAFDoc_DocumentTool::ShapeTool(doc->Main())),
-        myColors(XCAFDoc_DocumentTool::ColorTool(doc->Main()))
+        myColors(XCAFDoc_DocumentTool::ColorTool(doc->Main())),
+        myDimTols(XCAFDoc_DocumentTool::DimTolTool(doc->Main())),
+        myViews(XCAFDoc_DocumentTool::ViewTool(doc->Main()))
   {
   }
 
@@ -271,11 +311,16 @@ public:
     myShapes->GetFreeShapes(roots);
     for (const TDF_Label& root : roots)
       visit(root, -1);
+
+    collectPmi();
+    collectViews();
   }
 
-  const std::vector<Node>&  nodes() const { return myNodes; }
-  const std::vector<Proto>& protos() const { return myProtos; }
-  const std::vector<RGBA>&  colors() const { return myColorTable; }
+  const std::vector<Node>&      nodes() const { return myNodes; }
+  const std::vector<Proto>&     protos() const { return myProtos; }
+  const std::vector<RGBA>&      colors() const { return myColorTable; }
+  const std::vector<Pmi>&       pmi() const { return myPmi; }
+  const std::vector<SavedView>& views() const { return myViewList; }
 
 private:
   int colorIndex(const RGBA& c)
@@ -424,6 +469,8 @@ private:
 
       faceStarts.push_back(start);
       appendFaceData(face, reversed, faceData);
+      if (!proto.faceIndex.IsBound(face))
+        proto.faceIndex.Bind(face, int(faceStarts.size()) - 1);
 
       const int* found = colorOf.Seek(face);
       const int  color = found ? *found : partColor;
@@ -594,12 +641,20 @@ private:
                   std::vector<uint32_t>& starts,
                   std::vector<double>&   data) const
   {
+    const size_t at     = out.size();
+    const double length = sampleCurve(edge, linearDeflection, out);
+    if (out.size() == at)
+      return;
+    starts.push_back(uint32_t(at / 6));
+    appendEdgeData(edge, length, data);
+  }
+
+  // Line segments along an edge's curve, appended to out; returns their total length.
+  double sampleCurve(const TopoDS_Edge& edge, double linearDeflection, std::vector<float>& out) const
+  {
     const BRepAdaptor_Curve           curve(edge);
     const GCPnts_TangentialDeflection pts(curve, myOpts.angularDeflection, linearDeflection);
-    if (pts.NbPoints() < 2)
-      return;
-    starts.push_back(uint32_t(out.size() / 6));
-    double length = 0;
+    double                            length = 0;
     for (int k = 1; k < pts.NbPoints(); ++k)
     {
       const gp_Pnt a = pts.Value(k);
@@ -607,7 +662,219 @@ private:
       length += a.Distance(b);
       out.insert(out.end(), {float(a.X()), float(a.Y()), float(a.Z()), float(b.X()), float(b.Y()), float(b.Z())});
     }
-    appendEdgeData(edge, length, data);
+    return length;
+  }
+
+  // -------------------------------------------------------------------------
+  // PMI and saved views (STEP AP242 GD&T)
+
+  static std::string entryOf(const TDF_Label& l)
+  {
+    TCollection_AsciiString entry;
+    TDF_Tool::Entry(l, entry);
+    return entry.ToCString();
+  }
+
+  static std::string str(const Handle(TCollection_HAsciiString)& s) { return s.IsNull() ? std::string() : s->ToCString(); }
+
+  void collectPmi()
+  {
+    LabelSequence labels;
+    myDimTols->GetDimensionLabels(labels);
+    for (const TDF_Label& l : labels)
+    {
+      Handle(XCAFDoc_Dimension) attr;
+      if (!l.FindAttribute(XCAFDoc_Dimension::GetID(), attr))
+        continue;
+      const Handle(XCAFDimTolObjects_DimensionObject) obj = attr->GetObject();
+      const auto type = obj->GetType();
+      Pmi        p;
+      const bool note = type == XCAFDimTolObjects_DimensionType_CommonLabel
+                        || type == XCAFDimTolObjects_DimensionType_DimensionPresentation;
+      p.kind    = note ? "note" : "dimension";
+      p.type    = dimensionType(type);
+      p.angular = type == XCAFDimTolObjects_DimensionType_Location_Angular
+                  || type == XCAFDimTolObjects_DimensionType_Size_Angular;
+      if (!note && !obj->GetValues().IsNull())
+      {
+        if (obj->IsDimWithRange())
+          p.range = {obj->GetLowerBound(), obj->GetUpperBound()};
+        else
+          p.value = {obj->GetValue()};
+        if (obj->IsDimWithPlusMinusTolerance())
+          p.plusMinus = {obj->GetLowerTolValue(), obj->GetUpperTolValue()};
+      }
+      addPmi(l, std::move(p), obj->GetPresentation(), obj->GetPresentationName());
+    }
+
+    labels.Clear();
+    myDimTols->GetGeomToleranceLabels(labels);
+    for (const TDF_Label& l : labels)
+    {
+      Handle(XCAFDoc_GeomTolerance) attr;
+      if (!l.FindAttribute(XCAFDoc_GeomTolerance::GetID(), attr))
+        continue;
+      const Handle(XCAFDimTolObjects_GeomToleranceObject) obj = attr->GetObject();
+      Pmi p;
+      p.kind  = "tolerance";
+      p.type  = toleranceType(obj->GetType());
+      p.value = {obj->GetValue()};
+      LabelSequence datums;
+      XCAFDoc_DimTolTool::GetDatumOfTolerLabels(l, datums);
+      for (const TDF_Label& d : datums)
+      {
+        Handle(XCAFDoc_Datum) datum;
+        if (d.FindAttribute(XCAFDoc_Datum::GetID(), datum))
+          p.datums.push_back(str(datum->GetObject()->GetName()));
+      }
+      addPmi(l, std::move(p), obj->GetPresentation(), obj->GetPresentationName());
+    }
+
+    labels.Clear();
+    myDimTols->GetDatumLabels(labels);
+    for (const TDF_Label& l : labels)
+    {
+      Handle(XCAFDoc_Datum) attr;
+      if (!l.FindAttribute(XCAFDoc_Datum::GetID(), attr))
+        continue;
+      const Handle(XCAFDimTolObjects_DatumObject) obj = attr->GetObject();
+      Pmi p;
+      p.kind = "datum";
+      p.type = "Datum " + str(obj->GetName());
+      addPmi(l, std::move(p), obj->GetPresentation(), obj->GetPresentationName());
+    }
+  }
+
+  void addPmi(const TDF_Label& label, Pmi p, const TopoDS_Shape& presentation, const Handle(TCollection_HAsciiString)& name)
+  {
+    p.name = str(name);
+
+    // The owning part and its faces, from the shapes the PMI refers to.
+    LabelSequence first, second;
+    XCAFDoc_DimTolTool::GetRefShapeLabel(label, first, second);
+    for (const LabelSequence* refs : {&first, &second})
+      for (const TDF_Label& ref : *refs)
+        addFaces(ref, p);
+
+    // Presentations are lines (leaders, frames) and triangulated faces (filled text glyphs).
+    std::vector<float> segments, triangles;
+    if (!presentation.IsNull())
+    {
+      const double deflection = this->deflection(presentation);
+      for (TopExp_Explorer ex(presentation, TopAbs_EDGE); ex.More(); ex.Next())
+        if (BRep_Tool::IsGeometric(TopoDS::Edge(ex.Current())))
+          sampleCurve(TopoDS::Edge(ex.Current()), deflection, segments);
+      for (TopExp_Explorer ex(presentation, TopAbs_FACE); ex.More(); ex.Next())
+      {
+        TopLoc_Location                  loc;
+        const Handle(Poly_Triangulation) tri = BRep_Tool::Triangulation(TopoDS::Face(ex.Current()), loc);
+        for (int i = 1; !tri.IsNull() && i <= tri->NbTriangles(); ++i)
+        {
+          int n[3];
+          tri->Triangle(i).Get(n[0], n[1], n[2]);
+          // Some STEP PMI meshes reference nodes past the end of their coordinate list: skip those.
+          if (std::any_of(n, n + 3, [&](int k) { return k < 1 || k > tri->NbNodes(); }))
+            continue;
+          for (int k : n)
+          {
+            const gp_Pnt v = tri->Node(k).Transformed(loc.Transformation());
+            triangles.insert(triangles.end(), {float(v.X()), float(v.Y()), float(v.Z())});
+          }
+        }
+      }
+    }
+    p.segments  = append(segments);
+    p.triangles = append(triangles);
+    myPmiByEntry[entryOf(label)] = int(myPmi.size());
+    myPmi.push_back(std::move(p));
+  }
+
+  // Faces of a referenced (sub-)shape, if they belong to the PMI's part. The first part referenced
+  // owns the PMI; references into other parts are not highlighted.
+  void addFaces(const TDF_Label& ref, Pmi& p) const
+  {
+    TDF_Label part = XCAFDoc_ShapeTool::IsSubShape(ref) ? ref.Father() : ref;
+    if (XCAFDoc_ShapeTool::IsReference(part))
+      XCAFDoc_ShapeTool::GetReferredShape(part, part);
+    const auto it = myProtoByEntry.find(entryOf(part));
+    if (it == myProtoByEntry.end() || it->second < 0)
+      return;
+    if (p.proto < 0)
+      p.proto = it->second;
+    if (p.proto != it->second)
+      return;
+    const auto& faces = myProtos[size_t(p.proto)].faceIndex;
+    for (TopExp_Explorer ex(XCAFDoc_ShapeTool::GetShape(ref), TopAbs_FACE); ex.More(); ex.Next())
+      if (const int* i = faces.Seek(ex.Current()))
+        if (std::find(p.faces.begin(), p.faces.end(), *i) == p.faces.end())
+          p.faces.push_back(*i);
+  }
+
+  void collectViews()
+  {
+    LabelSequence labels;
+    myViews->GetViewLabels(labels);
+    for (const TDF_Label& l : labels)
+    {
+      Handle(XCAFDoc_View) attr;
+      if (!l.FindAttribute(XCAFDoc_View::GetID(), attr))
+        continue;
+      const Handle(XCAFView_Object) obj = attr->GetObject();
+      SavedView v;
+      v.name      = str(obj->Name());
+      v.direction = obj->ViewDirection();
+      v.up        = obj->UpDirection();
+      LabelSequence gdts;
+      myViews->GetRefGDTLabel(l, gdts);
+      for (const TDF_Label& g : gdts)
+        if (auto it = myPmiByEntry.find(entryOf(g)); it != myPmiByEntry.end())
+          v.pmi.push_back(it->second);
+      myViewList.push_back(std::move(v));
+    }
+  }
+
+  static std::string dimensionType(XCAFDimTolObjects_DimensionType t)
+  {
+    switch (t)
+    {
+      case XCAFDimTolObjects_DimensionType_Location_CurvedDistance: return "Curved distance";
+      case XCAFDimTolObjects_DimensionType_Location_LinearDistance:
+      case XCAFDimTolObjects_DimensionType_Location_LinearDistance_FromCenterToOuter:
+      case XCAFDimTolObjects_DimensionType_Location_LinearDistance_FromCenterToInner:
+      case XCAFDimTolObjects_DimensionType_Location_LinearDistance_FromOuterToCenter:
+      case XCAFDimTolObjects_DimensionType_Location_LinearDistance_FromOuterToOuter:
+      case XCAFDimTolObjects_DimensionType_Location_LinearDistance_FromOuterToInner:
+      case XCAFDimTolObjects_DimensionType_Location_LinearDistance_FromInnerToCenter:
+      case XCAFDimTolObjects_DimensionType_Location_LinearDistance_FromInnerToOuter:
+      case XCAFDimTolObjects_DimensionType_Location_LinearDistance_FromInnerToInner: return "Distance";
+      case XCAFDimTolObjects_DimensionType_Location_Angular:
+      case XCAFDimTolObjects_DimensionType_Size_Angular: return "Angle";
+      case XCAFDimTolObjects_DimensionType_Location_Oriented: return "Oriented location";
+      case XCAFDimTolObjects_DimensionType_Location_WithPath: return "Location along path";
+      case XCAFDimTolObjects_DimensionType_Size_CurveLength: return "Curve length";
+      case XCAFDimTolObjects_DimensionType_Size_Diameter: return "Diameter";
+      case XCAFDimTolObjects_DimensionType_Size_SphericalDiameter: return "Spherical diameter";
+      case XCAFDimTolObjects_DimensionType_Size_Radius: return "Radius";
+      case XCAFDimTolObjects_DimensionType_Size_SphericalRadius: return "Spherical radius";
+      case XCAFDimTolObjects_DimensionType_Size_Thickness: return "Thickness";
+      case XCAFDimTolObjects_DimensionType_Size_WithPath: return "Size along path";
+      case XCAFDimTolObjects_DimensionType_CommonLabel:
+      case XCAFDimTolObjects_DimensionType_DimensionPresentation: return "Note";
+      case XCAFDimTolObjects_DimensionType_Location_None: return "Location";
+      default: return "Toroidal size";
+    }
+  }
+
+  static std::string toleranceType(XCAFDimTolObjects_GeomToleranceType t)
+  {
+    static const char* const kNames[] = {"Tolerance",       "Angularity",       "Circular runout",
+                                         "Circularity",     "Coaxiality",       "Concentricity",
+                                         "Cylindricity",    "Flatness",         "Parallelism",
+                                         "Perpendicularity", "Position",        "Profile of a line",
+                                         "Profile of a surface", "Straightness", "Symmetry",
+                                         "Total runout"};
+    const auto i = size_t(t);
+    return i < sizeof kNames / sizeof *kNames ? kNames[i] : "Tolerance";
   }
 
   Options                    myOpts;
@@ -620,6 +887,11 @@ private:
   std::vector<Proto>         myProtos;
   std::vector<RGBA>          myColorTable;
   std::map<std::string, int> myProtoByEntry;
+  Handle(XCAFDoc_DimTolTool) myDimTols;
+  Handle(XCAFDoc_ViewTool)   myViews;
+  std::vector<Pmi>           myPmi;
+  std::map<std::string, int> myPmiByEntry;
+  std::vector<SavedView>     myViewList;
 };
 
 // Readers: each fills the XCAF document and describes the source.
@@ -673,7 +945,8 @@ Source readStepDoc(const std::string& bytes, const Handle(TDocStd_Document)& doc
   reader.SetNameMode(true);
   reader.SetColorMode(true);
   reader.SetLayerMode(true);
-  reader.SetGDTMode(false); // PMI out of scope for now
+  reader.SetGDTMode(true);  // PMI: dimensions, tolerances, datums with their presentations
+  reader.SetViewMode(true); // saved views
   reader.SetPropsMode(false);
 
   MemBuf       buf(const_cast<char*>(bytes.data()), bytes.size(), progress);
@@ -980,6 +1253,56 @@ std::string toJson(const Source& src, const Builder& b)
     for (size_t g = 0; g < p.groups.size(); ++g)
       o << (g ? "," : "") << '[' << p.groups[g].start << ',' << p.groups[g].count << ','
         << p.groups[g].color << ']';
+    o << "]}";
+  }
+  o << "],\"pmi\":[";
+  auto numbers = [&o](const char* key, const std::vector<double>& v) {
+    if (v.empty())
+      return;
+    o << ",\"" << key << "\":[";
+    for (size_t k = 0; k < v.size(); ++k)
+      o << (k ? "," : "") << v[k];
+    o << ']';
+  };
+  auto xyz = [&o](const char* key, const gp_XYZ& v) {
+    o << ",\"" << key << "\":[" << v.X() << ',' << v.Y() << ',' << v.Z() << ']';
+  };
+  for (size_t i = 0; i < b.pmi().size(); ++i)
+  {
+    const Pmi& p = b.pmi()[i];
+    o << (i ? "," : "") << "{\"kind\":\"" << p.kind << "\",\"type\":\"" << jsonEscape(p.type) << "\",\"name\":\""
+      << jsonEscape(p.name) << "\",\"proto\":" << p.proto << ',';
+    writeRange(o, "segments", p.segments);
+    o << ',';
+    writeRange(o, "triangles", p.triangles);
+    o << ",\"faces\":[";
+    for (size_t k = 0; k < p.faces.size(); ++k)
+      o << (k ? "," : "") << p.faces[k];
+    o << ']';
+    numbers("value", p.value);
+    numbers("plusMinus", p.plusMinus);
+    numbers("range", p.range);
+    if (p.angular)
+      o << ",\"angular\":true";
+    if (!p.datums.empty())
+    {
+      o << ",\"datums\":[";
+      for (size_t k = 0; k < p.datums.size(); ++k)
+        o << (k ? "," : "") << '"' << jsonEscape(p.datums[k]) << '"';
+      o << ']';
+    }
+    o << '}';
+  }
+  o << "],\"views\":[";
+  for (size_t i = 0; i < b.views().size(); ++i)
+  {
+    const SavedView& v = b.views()[i];
+    o << (i ? "," : "") << "{\"name\":\"" << jsonEscape(v.name) << '"';
+    xyz("direction", v.direction.XYZ());
+    xyz("up", v.up.XYZ());
+    o << ",\"pmi\":[";
+    for (size_t k = 0; k < v.pmi.size(); ++k)
+      o << (k ? "," : "") << v.pmi[k];
     o << "]}";
   }
   o << "]}";

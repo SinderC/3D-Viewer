@@ -20,6 +20,38 @@ export interface RawModel {
     edgeData: Range;
     groups: [start: number, count: number, color: number][];
   }[];
+  pmi: (Omit<PmiItem, 'segments' | 'triangles'> & { segments: Range; triangles: Range })[];
+  views: SavedView[];
+}
+
+export type PmiKind = 'dimension' | 'tolerance' | 'datum' | 'note';
+
+/** STEP GD&T item with its drawn presentation. Lengths in mm, angles in degrees. */
+export interface PmiItem {
+  kind: PmiKind;
+  type: string; // e.g. "Diameter", "Position", "Datum A"
+  name: string;
+  /** Owning prototype (drawn with each of its instances), or -1 for model coordinates. */
+  proto: number;
+  /** Presentation lines, 6 floats per segment, in the owner's coordinates. */
+  segments: Float32Array;
+  /** Filled presentation areas (text glyphs), 9 floats per triangle, in the owner's coordinates. */
+  triangles: Float32Array;
+  /** Referenced faces of the owning prototype (indices into its faceStarts). */
+  faces: number[];
+  value?: [number];
+  plusMinus?: [lower: number, upper: number];
+  range?: [lower: number, upper: number];
+  angular?: boolean;
+  datums?: string[];
+}
+
+/** Saved view: the direction the camera looks, and the PMI it shows. */
+export interface SavedView {
+  name: string;
+  direction: [number, number, number];
+  up: [number, number, number];
+  pmi: number[];
 }
 
 export interface Proto {
@@ -61,6 +93,24 @@ export interface Model {
   roots: number[];
   protos: Proto[];
   triangles: number;
+  pmi: PmiItem[];
+  views: SavedView[];
+}
+
+/** The saved view a file opens in: its default camera, else an isometric view, else the first. */
+export function defaultView(model: Pick<Model, 'views'>): SavedView | undefined {
+  const { views } = model;
+  return views.find((v) => /default/i.test(v.name)) ?? views.find((v) => /^\W*iso/i.test(v.name)) ?? views[0];
+}
+
+/** Triangles of B-rep faces (faceStarts indices) as a flat, non-indexed position list in prototype coordinates. */
+export function faceTriangles(proto: Proto, faces: number[]): Float32Array {
+  const ranges = faces.map((f) => [proto.faceStarts[f], proto.faceStarts[f + 1] ?? proto.indices.length]);
+  const out = new Float32Array(ranges.reduce((n, [a, b]) => n + (b - a) * 3, 0));
+  let o = 0;
+  for (const [a, b] of ranges)
+    for (let k = a; k < b; k++, o += 3) out.set(proto.positions.subarray(proto.indices[k] * 3, proto.indices[k] * 3 + 3), o);
+  return out;
 }
 
 export function apOf(schema: string): 'AP203' | 'AP214' | 'AP242' | 'unknown' {
@@ -108,5 +158,7 @@ export function decodeModel(raw: RawModel, geometry: ArrayBuffer): Model {
     roots,
     protos,
     triangles,
+    pmi: raw.pmi.map((p) => ({ ...p, segments: f32(p.segments), triangles: f32(p.triangles) })),
+    views: raw.views,
   };
 }

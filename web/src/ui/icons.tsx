@@ -86,6 +86,13 @@ export const GridIcon = () => (
   </Icon>
 );
 
+// Dimension with arrows and extension lines.
+export const PmiIcon = () => (
+  <Icon>
+    <path d="M2 3v10M14 3v10M2 8h12M4.5 6 2 8l2.5 2M11.5 6 14 8l-2.5 2" />
+  </Icon>
+);
+
 export const SectionIcon = () => (
   <Icon>
     <rect x="2" y="2" width="12" height="12" />

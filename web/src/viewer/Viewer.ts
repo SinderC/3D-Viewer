@@ -2,9 +2,11 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from 'three-mesh-bvh';
-import { EDGE_STRIDE, FACE_STRIDE, type Model, type Proto } from '../core/model';
+import { EDGE_STRIDE, FACE_STRIDE, faceTriangles, type Model, type Proto } from '../core/model';
 import type { UnitId } from '../core/units';
 import { Measure, type EdgePick, type FacePick, type MeasureMode, type Pick } from './measure';
+import { isShown } from './objects';
+import { PmiLayer } from './pmi';
 import { buildSectionCaps, disposeCaps } from './section';
 import { ViewCube } from './ViewCube';
 
@@ -23,6 +25,8 @@ export interface Section {
 }
 
 // Models are Z-up (the bridge converts Y-up mesh formats).
+const Z_UP = new THREE.Vector3(0, 0, 1); // models are Z-up
+
 // Directions from the target towards the camera.
 const VIEW_DIRS: Record<ViewName, THREE.Vector3> = {
   iso: new THREE.Vector3(1, -1, 0.8),
@@ -53,7 +57,8 @@ export class Viewer {
   private readonly perspective = new THREE.PerspectiveCamera(40, 1, 0.1, 1000);
   private readonly ortho = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 1000);
   private camera: THREE.PerspectiveCamera | THREE.OrthographicCamera = this.perspective;
-  private readonly controls: OrbitControls;
+  private controls: OrbitControls;
+  private readonly up = Z_UP.clone(); // orbit axis; saved views may set another
   private readonly light = new THREE.DirectionalLight(0xffffff, 2.2);
   private readonly modelRoot = new THREE.Group();
   private readonly measure: Measure;
@@ -65,6 +70,7 @@ export class Viewer {
   private readonly capOutline = new THREE.LineBasicMaterial({ color: 0x1e2026 });
   private readonly resizeObserver: ResizeObserver;
   private readonly cube: ViewCube;
+  private readonly pmi = new PmiLayer();
   private grid: THREE.GridHelper | null = null;
   private gridVisible = false;
 
@@ -101,8 +107,8 @@ export class Viewer {
     container.appendChild(this.renderer.domElement);
 
     this.scene.background = new THREE.Color(0x2a2d34);
-    this.perspective.up.set(0, 0, 1);
-    this.ortho.up.set(0, 0, 1);
+    this.perspective.up.copy(this.up);
+    this.ortho.up.copy(this.up);
     this.scene.add(new THREE.HemisphereLight(0xffffff, 0x50545c, 1.4));
     this.scene.add(this.camera);
     this.camera.add(this.light);
@@ -110,12 +116,10 @@ export class Viewer {
     this.scene.add(this.modelRoot);
     this.scene.add(this.caps);
 
-    this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-    this.controls.addEventListener('change', this.requestRender);
-    this.controls.addEventListener('start', () => cancelAnimationFrame(this.animation));
+    this.controls = this.createControls();
 
     this.measure = new Measure(this.scene, container);
-    this.cube = new ViewCube(container, VIEW_DIRS.iso, (dir) => this.frame(dir, this.visibleBounds(), true));
+    this.cube = new ViewCube(container, VIEW_DIRS.iso, (dir) => this.frame(dir, this.visibleBounds(), true, Z_UP));
 
     const canvas = this.renderer.domElement;
     canvas.addEventListener('pointerdown', (e) => (this.pointerDown = { x: e.clientX, y: e.clientY }));
@@ -134,6 +138,7 @@ export class Viewer {
     this.controls.dispose();
     this.measure.dispose();
     this.cube.dispose();
+    this.pmi.dispose();
     this.capOutline.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
@@ -192,11 +197,12 @@ export class Viewer {
 
     this.modelRoot.updateMatrixWorld(true);
     this.bounds.setFromObject(this.modelRoot);
+    this.pmi.build(model, this.nodeObjects, this.modelRoot); // after the bounds: PMI does not count for fitting
     this.grid = makeGrid(this.bounds);
     this.grid.visible = this.gridVisible;
     this.scene.add(this.grid);
     this.setDisplayStyle(this.display);
-    this.frame(VIEW_DIRS.iso, this.bounds);
+    this.frame(VIEW_DIRS.iso, this.bounds, false, Z_UP);
     this.cube.setVisible(true);
   }
 
@@ -244,6 +250,7 @@ export class Viewer {
     this.selected = null;
     this.bounds.makeEmpty();
     this.measure.clear();
+    this.pmi.clear();
     this.cube.setVisible(false);
     this.requestRender();
   }
@@ -266,6 +273,25 @@ export class Viewer {
     this.edgeMaterial.color.set(faces ? EDGE_COLOR : WIRE_COLOR);
     this.updateCaps();
     this.requestRender();
+  }
+
+  // ---------------------------------------------------------------------------
+  // PMI
+
+  setPmi(visible: boolean, hidden: ReadonlySet<number>): void {
+    this.pmi.setVisible(visible, hidden);
+    this.requestRender();
+  }
+
+  selectPmi(index: number | null): void {
+    this.pmi.select(index);
+    this.requestRender();
+  }
+
+  /** Look along a saved view's direction at the model and the PMI shown. */
+  lookAlong(direction: readonly [number, number, number], up: readonly [number, number, number], animate = true): void {
+    const box = this.visibleBounds().union(this.pmi.visibleBounds());
+    this.frame(new THREE.Vector3(...direction).negate(), box, animate, new THREE.Vector3(...up));
   }
 
   setGridVisible(visible: boolean): void {
@@ -348,7 +374,7 @@ export class Viewer {
   // Camera
 
   setView(view: ViewName): void {
-    this.frame(VIEW_DIRS[view], this.visibleBounds(), true);
+    this.frame(VIEW_DIRS[view], this.visibleBounds(), true, Z_UP);
   }
 
   /** Fit the visible geometry while keeping the current viewing direction. */
@@ -367,12 +393,34 @@ export class Viewer {
     return this.camera.position.clone().sub(this.controls.target).normalize();
   }
 
+  private createControls(): OrbitControls {
+    const controls = new OrbitControls(this.camera, this.renderer.domElement);
+    controls.addEventListener('change', this.requestRender);
+    controls.addEventListener('start', () => cancelAnimationFrame(this.animation));
+    return controls;
+  }
+
+  // OrbitControls fix their up axis when created, so a new axis needs new controls.
+  private setUp(up: THREE.Vector3): void {
+    if (up.distanceToSquared(this.up) < 1e-12) return;
+    this.up.copy(up).normalize();
+    this.perspective.up.copy(this.up);
+    this.ortho.up.copy(this.up);
+    const { target, maxDistance } = this.controls;
+    this.controls.dispose();
+    this.controls = this.createControls();
+    this.controls.target.copy(target);
+    this.controls.maxDistance = maxDistance;
+  }
+
   // Look at the box from `dir` (target towards camera), optionally turning and zooming there smoothly.
-  private frame(direction: THREE.Vector3, box: THREE.Box3, animate = false): void {
+  // `up` changes the orbit axis (Z for the standard views; a saved view's own).
+  private frame(direction: THREE.Vector3, box: THREE.Box3, animate = false, up?: THREE.Vector3): void {
     cancelAnimationFrame(this.animation);
+    if (up) this.setUp(up);
     const dir = direction.clone().normalize();
     // Z-up orbit controls cannot look straight along Z; the tilt keeps +Y up on screen from above.
-    if (Math.abs(dir.z) > 0.9999) dir.set(0, -1e-4, Math.sign(dir.z)).normalize();
+    if (this.up.z === 1 && Math.abs(dir.z) > 0.9999) dir.set(0, -1e-4, Math.sign(dir.z)).normalize();
 
     const sphere = box.getBoundingSphere(new THREE.Sphere());
     const r = Math.max(sphere.radius, 1e-3);
@@ -507,15 +555,9 @@ export class Viewer {
     const proto = mesh.userData.proto as Proto;
     if (hit.faceIndex == null || !proto.faceStarts.length) return null;
     const f = lastAtOrBelow(proto.faceStarts, hit.faceIndex * 3);
-    const start = proto.faceStarts[f];
-    const end = proto.faceStarts[f + 1] ?? proto.indices.length;
-
     const m = mesh.matrixWorld;
-    const v = new THREE.Vector3();
-    const triangles = new Float32Array((end - start) * 3);
-    for (let k = start; k < end; k++) {
-      v.fromArray(proto.positions, proto.indices[k] * 3).applyMatrix4(m).toArray(triangles, (k - start) * 3);
-    }
+    const triangles = faceTriangles(proto, [f]);
+    new THREE.BufferAttribute(triangles, 3).applyMatrix4(m);
 
     let plane: THREE.Plane | null = null;
     const d = proto.faceData.subarray(f * FACE_STRIDE, (f + 1) * FACE_STRIDE);
@@ -643,9 +685,4 @@ function makeGrid(bounds: THREE.Box3): THREE.GridHelper {
   grid.position.set(center.x, center.y, bounds.min.z - extent * 1e-4); // below the bottom faces, no z-fighting
   grid.raycast = () => {};
   return grid;
-}
-
-function isShown(o: THREE.Object3D): boolean {
-  for (let p: THREE.Object3D | null = o; p; p = p.parent) if (!p.visible) return false;
-  return true;
 }

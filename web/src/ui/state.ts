@@ -19,6 +19,10 @@ export interface State {
   display: DisplayStyle;
   ortho: boolean;
   grid: boolean;
+  pmi: boolean; // show PMI
+  hiddenPmi: ReadonlySet<number>;
+  selectedPmi: number | null;
+  view: { index: number } | null; // saved view last applied; a new object per apply, so re-applying moves the camera again
 }
 
 export type Action =
@@ -35,7 +39,11 @@ export type Action =
   | { type: 'setSection'; section: Partial<Section> }
   | { type: 'setDisplay'; display: DisplayStyle }
   | { type: 'toggleOrtho' }
-  | { type: 'toggleGrid' };
+  | { type: 'toggleGrid' }
+  | { type: 'togglePmi' }
+  | { type: 'setHiddenPmi'; hidden: ReadonlySet<number> }
+  | { type: 'selectPmi'; index: number | null }
+  | { type: 'applyView'; index: number };
 
 const noSection: Section = { axis: null, position: 0.5, flip: false };
 
@@ -50,10 +58,21 @@ export const initialState: State = {
   display: 'shadedEdges',
   ortho: true,
   grid: false,
+  pmi: true,
+  hiddenPmi: new Set(),
+  selectedPmi: null,
+  view: null,
 };
 
 // View preferences survive opening and closing files.
-const keepPrefs = ({ display, ortho, grid, measureMode }: State): State => ({ ...initialState, display, ortho, grid, measureMode });
+const keepPrefs = ({ display, ortho, grid, pmi, measureMode }: State): State => ({
+  ...initialState,
+  display,
+  ortho,
+  grid,
+  pmi,
+  measureMode,
+});
 
 // Mesh formats (STL, OBJ…) carry no B-rep edges, so only plain shading applies to them.
 export const hasEdges = (model?: Model): boolean => !!model?.protos.some((p) => p.edges.length);
@@ -80,7 +99,7 @@ export function reducer(state: State, action: Action): State {
     case 'setHidden':
       return { ...state, hidden: action.hidden };
     case 'select':
-      return { ...state, selected: action.id };
+      return { ...state, selected: action.id, selectedPmi: action.id === null ? state.selectedPmi : null };
     case 'setTool':
       return { ...state, tool: action.tool };
     case 'setMeasureMode':
@@ -95,6 +114,18 @@ export function reducer(state: State, action: Action): State {
       return { ...state, ortho: !state.ortho };
     case 'toggleGrid':
       return { ...state, grid: !state.grid };
+    case 'togglePmi':
+      return { ...state, pmi: !state.pmi };
+    case 'setHiddenPmi':
+      return { ...state, hiddenPmi: action.hidden };
+    case 'selectPmi':
+      return { ...state, selectedPmi: action.index, selected: action.index === null ? state.selected : null };
+    case 'applyView': {
+      // A view shows exactly its PMI; views without any (e.g. "Front") leave PMI visibility as it is.
+      const shown = new Set(state.model?.views[action.index]?.pmi);
+      const hiddenPmi = shown.size ? new Set(state.model!.pmi.keys().filter((i) => !shown.has(i))) : state.hiddenPmi;
+      return { ...state, view: { index: action.index }, pmi: state.pmi || shown.size > 0, hiddenPmi };
+    }
   }
 }
 

@@ -8,6 +8,7 @@ import {
   GridIcon,
   MeasureIcon,
   OrthoIcon,
+  PmiIcon,
   SectionIcon,
   ShadedEdgesIcon,
   ShadedIcon,
@@ -104,6 +105,17 @@ export function ViewBar({ state, dispatch, viewer }: Props) {
       >
         <GridIcon />
       </button>
+      {state.model!.pmi.length > 0 && (
+        <button
+          className="icon"
+          title="PMI (P)"
+          aria-label="PMI"
+          aria-pressed={state.pmi}
+          onClick={() => dispatch({ type: 'togglePmi' })}
+        >
+          <PmiIcon />
+        </button>
+      )}
       <span className="sep" />
       <Menu up title="Section" className="icon" pressed={section.axis !== null} label={<SectionIcon />}>
         <div className="menu-row">

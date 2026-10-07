@@ -2,8 +2,8 @@ This product includes Open CASCADE Technology (https://dev.opencascade.org/),
 Copyright (c) Open CASCADE SAS, licensed under the GNU Lesser General Public License
 version 2.1 with additional exception (https://dev.opencascade.org/resources/licensing).
 
-The compiled library is distributed as web/public/occt/occt-viewer.wasm. To rebuild it against a
-modified OCCT, change OCCT_SRC in wasm/scripts/env.sh and run wasm/scripts/build-occt.sh and
+OCCT is built with the changes in wasm/patches/occt-*.patch. The compiled library is distributed as
+web/public/occt/occt-viewer.wasm. To rebuild it against a modified OCCT, change OCCT_SRC in wasm/scripts/env.sh and run wasm/scripts/build-occt.sh and
 wasm/scripts/build-bridge.sh.
 
 It also includes RapidJSON (https://rapidjson.org/), Copyright (c) 2015 THL A29 Limited, a Tencent
