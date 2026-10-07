@@ -34,6 +34,19 @@ jobs:
         if: steps.deps.outputs.cache-hit != 'true'
         run: wasm/scripts/setup-emsdk.sh && wasm/scripts/build-occt.sh
 
+      - name: Cache JT reader dependencies
+        id: jtdeps
+        uses: actions/cache@v6
+        with:
+          path: |
+            wasm/.deps/pyopenjt
+            wasm/.deps/xz-install-*
+          key: jt-${{ runner.os }}-${{ hashFiles('wasm/scripts/env.sh', 'wasm/scripts/build-jt-deps.sh', 'wasm/patches/**') }}
+
+      - name: Build JT reader dependencies
+        if: steps.jtdeps.outputs.cache-hit != 'true'
+        run: wasm/scripts/build-jt-deps.sh
+
       - name: Build WASM bridge
         run: wasm/scripts/build-bridge.sh
 
