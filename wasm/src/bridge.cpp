@@ -755,18 +755,77 @@ TDF_Label addShape(const Handle(TDocStd_Document)& doc, const TopoDS_Shape& shap
   return l;
 }
 
+// Each triangle corner gets the area-weighted average normal of the triangles at its node that lie
+// within creaseAngle of the corner's own triangle (area, not corner angle: sliver normals are noisy).
+// Unlike RWStl's merge angle (compared against whichever triangle reached a node first) this does
+// not depend on triangle order. Nodes are split once per distinct normal.
+Handle(Poly_Triangulation) withCreasedNormals(const Handle(Poly_Triangulation)& tri, double creaseAngle)
+{
+  const int nbTris = tri->NbTriangles();
+  std::vector<gp_XYZ>             triNormal(nbTris), triArea(nbTris); // unit normal, area-scaled normal
+  std::vector<std::array<int, 3>> triNodes(nbTris);
+  std::vector<std::vector<int>>   nodeTris(tri->NbNodes() + 1);
+  for (int i = 0; i < nbTris; ++i)
+  {
+    auto& n = triNodes[i];
+    tri->Triangle(i + 1).Get(n[0], n[1], n[2]);
+    const gp_XYZ p[3] = {tri->Node(n[0]).XYZ(), tri->Node(n[1]).XYZ(), tri->Node(n[2]).XYZ()};
+    const gp_XYZ c    = (p[1] - p[0]).Crossed(p[2] - p[0]);
+    triNormal[i]      = c.Modulus() > 0 ? c / c.Modulus() : gp_XYZ();
+    triArea[i]        = c;
+    for (int k = 0; k < 3; ++k)
+      nodeTris[n[k]].push_back(i);
+  }
+
+  const double                                    cosCrease = std::cos(creaseAngle);
+  std::vector<std::vector<std::pair<gp_XYZ, int>>> split(nodeTris.size()); // per old node: (normal, new node)
+  std::vector<gp_XYZ>                             nodes, normals;
+  std::vector<std::array<int, 3>>                 tris(nbTris);
+  for (int i = 0; i < nbTris; ++i)
+    for (int k = 0; k < 3; ++k)
+    {
+      const int v = triNodes[i][k];
+      gp_XYZ    sum;
+      for (const int j : nodeTris[v])
+        if (triNormal[j].Dot(triNormal[i]) >= cosCrease)
+          sum += triArea[j];
+      const gp_XYZ n     = sum.Modulus() > 0 ? sum / sum.Modulus() : gp_XYZ(0, 0, 1);
+      auto&        known = split[v];
+      auto         found = std::find_if(known.begin(), known.end(), [&](const auto& e) { return e.first.IsEqual(n, 1e-6); });
+      if (found == known.end())
+      {
+        nodes.push_back(tri->Node(v).XYZ());
+        normals.push_back(n);
+        found = known.insert(known.end(), {n, int(nodes.size())});
+      }
+      tris[i][k] = found->second;
+    }
+
+  Handle(Poly_Triangulation) out = new Poly_Triangulation(int(nodes.size()), nbTris, false, true);
+  for (int i = 0; i < int(nodes.size()); ++i)
+  {
+    out->SetNode(i + 1, nodes[i]);
+    out->SetNormal(i + 1, gp_Dir(normals[i]));
+  }
+  for (int i = 0; i < nbTris; ++i)
+    out->SetTriangle(i + 1, Poly_Triangle(tris[i][0], tris[i][1], tris[i][2]));
+  return out;
+}
+
 Source readStlDoc(const std::string& bytes, const std::string& name, const Handle(TDocStd_Document)& doc, Progress& progress)
 {
   progress("read", -1);
   Handle(Poly_Triangulation) tri;
   {
     TempFile file(".stl", bytes);
-    tri = RWStl::ReadFile(file.path(), 30.0 * M_PI / 180.0); // split nodes at creases for flat shading there
+    tri = RWStl::ReadFile(file.path(), M_PI / 2.0); // merge all coincident nodes; creases are handled below
   }
   if (tri.IsNull() || tri->NbTriangles() == 0)
     throw std::runtime_error("Not a readable STL file");
   TopoDS_Face face;
-  BRep_Builder().MakeFace(face, tri);
+  // 20°, not 30°: CAD exports put shallow chamfers at 20-30° to long sliver walls, and smoothing across
+  // them shades the slivers as dark wedges.
+  BRep_Builder().MakeFace(face, withCreasedNormals(tri, 20.0 * M_PI / 180.0));
   addShape(doc, face, name);
   return {"STL", {}, {}}; // no units in STL; taken as mm
 }
