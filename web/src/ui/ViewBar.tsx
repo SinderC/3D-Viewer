@@ -5,6 +5,7 @@ import type { Axis, DisplayStyle, ViewName, Viewer } from '../viewer/Viewer';
 import {
   Chevron,
   FitIcon,
+  GridIcon,
   MeasureIcon,
   OrthoIcon,
   SectionIcon,
@@ -16,7 +17,7 @@ import {
   ZoomSelectionIcon,
 } from './icons';
 import { Menu } from './Menu';
-import type { Action, State } from './state';
+import { displayStyle, hasEdges, measureMode, type Action, type State } from './state';
 
 interface Props {
   state: State;
@@ -42,7 +43,11 @@ const DISPLAY: Record<DisplayStyle, { label: string; icon: ReactNode }> = {
 
 // Camera and display controls floating over the bottom of the viewport.
 export function ViewBar({ state, dispatch, viewer }: Props) {
-  const { section, display } = state;
+  const { section } = state;
+  const display = displayStyle(state);
+  const edges = hasEdges(state.model);
+  const mode = measureMode(state);
+  const noEdges = 'This model has no edges';
   const measuring = state.tool === 'measure';
   return (
     <div className="viewbar">
@@ -82,12 +87,23 @@ export function ViewBar({ state, dispatch, viewer }: Props) {
             key={id}
             className="menu-item"
             aria-pressed={id === display}
+            disabled={!edges && id !== 'shaded'}
+            title={!edges && id !== 'shaded' ? noEdges : undefined}
             onClick={() => dispatch({ type: 'setDisplay', display: id as DisplayStyle })}
           >
             {icon} {label}
           </button>
         ))}
       </Menu>
+      <button
+        className="icon"
+        title="Ground grid"
+        aria-label="Ground grid"
+        aria-pressed={state.grid}
+        onClick={() => dispatch({ type: 'toggleGrid' })}
+      >
+        <GridIcon />
+      </button>
       <span className="sep" />
       <Menu up title="Section" className="icon" pressed={section.axis !== null} label={<SectionIcon />}>
         <div className="menu-row">
@@ -133,12 +149,14 @@ export function ViewBar({ state, dispatch, viewer }: Props) {
         <MeasureIcon />
       </button>
       <Menu up title="Measurement" className="icon narrow" label={<Chevron />}>
-        {Object.entries(MEASURE_MODES).map(([mode, { label }]) => (
+        {Object.entries(MEASURE_MODES).map(([id, { label, pick }]) => (
           <button
-            key={mode}
+            key={id}
             className="menu-item"
-            aria-pressed={measuring && mode === state.measureMode}
-            onClick={() => dispatch({ type: 'setMeasureMode', mode: mode as MeasureMode })}
+            aria-pressed={measuring && id === mode}
+            disabled={!edges && pick === 'edge'}
+            title={!edges && pick === 'edge' ? noEdges : undefined}
+            onClick={() => dispatch({ type: 'setMeasureMode', mode: id as MeasureMode })}
           >
             {label}
           </button>

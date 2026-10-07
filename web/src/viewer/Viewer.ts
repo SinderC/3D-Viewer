@@ -65,6 +65,8 @@ export class Viewer {
   private readonly capOutline = new THREE.LineBasicMaterial({ color: 0x1e2026 });
   private readonly resizeObserver: ResizeObserver;
   private readonly cube: ViewCube;
+  private grid: THREE.GridHelper | null = null;
+  private gridVisible = false;
 
   private nodeObjects: THREE.Object3D[] = [];
   private meshes: THREE.Mesh[] = [];
@@ -190,6 +192,9 @@ export class Viewer {
 
     this.modelRoot.updateMatrixWorld(true);
     this.bounds.setFromObject(this.modelRoot);
+    this.grid = makeGrid(this.bounds);
+    this.grid.visible = this.gridVisible;
+    this.scene.add(this.grid);
     this.setDisplayStyle(this.display);
     this.frame(VIEW_DIRS.iso, this.bounds);
     this.cube.setVisible(true);
@@ -226,6 +231,11 @@ export class Viewer {
       g.dispose();
     });
     this.materials.forEach((m) => m.dispose());
+    if (this.grid) {
+      this.scene.remove(this.grid);
+      this.grid.dispose();
+      this.grid = null;
+    }
     this.modelRoot.clear();
     this.nodeObjects = [];
     this.meshes = [];
@@ -255,6 +265,12 @@ export class Viewer {
     this.edgeLines.forEach((l) => (l.visible = style !== 'shaded'));
     this.edgeMaterial.color.set(faces ? EDGE_COLOR : WIRE_COLOR);
     this.updateCaps();
+    this.requestRender();
+  }
+
+  setGridVisible(visible: boolean): void {
+    this.gridVisible = visible;
+    if (this.grid) this.grid.visible = visible;
     this.requestRender();
   }
 
@@ -613,6 +629,20 @@ function lastAtOrBelow(sorted: Uint32Array, value: number): number {
     else hi = mid - 1;
   }
   return lo;
+}
+
+// Ground grid just below the model, 10–100 cells across with a round cell size (1, 10, 100… model units).
+function makeGrid(bounds: THREE.Box3): THREE.GridHelper {
+  const size = bounds.getSize(new THREE.Vector3());
+  const extent = 2 * Math.max(size.x, size.y, 1e-3);
+  const cell = 10 ** Math.floor(Math.log10(extent / 10));
+  const divisions = 2 * Math.ceil(extent / cell / 2); // even, so a grid line runs through the centre
+  const grid = new THREE.GridHelper(divisions * cell, divisions, 0x565b66, 0x3a3e46);
+  grid.rotation.x = Math.PI / 2; // GridHelper lies in XZ; models are Z-up
+  const center = bounds.getCenter(new THREE.Vector3());
+  grid.position.set(center.x, center.y, bounds.min.z - extent * 1e-4); // below the bottom faces, no z-fighting
+  grid.raycast = () => {};
+  return grid;
 }
 
 function isShown(o: THREE.Object3D): boolean {

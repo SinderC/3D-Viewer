@@ -1,6 +1,6 @@
 import type { Model } from '../core/model';
 import type { UnitId } from '../core/units';
-import type { MeasureMode } from '../viewer/measure';
+import { MEASURE_MODES, type MeasureMode } from '../viewer/measure';
 import type { DisplayStyle, Section, Tool } from '../viewer/Viewer';
 
 export interface State {
@@ -18,6 +18,7 @@ export interface State {
   section: Section;
   display: DisplayStyle;
   ortho: boolean;
+  grid: boolean;
 }
 
 export type Action =
@@ -33,7 +34,8 @@ export type Action =
   | { type: 'setUnit'; unit: UnitId }
   | { type: 'setSection'; section: Partial<Section> }
   | { type: 'setDisplay'; display: DisplayStyle }
-  | { type: 'toggleOrtho' };
+  | { type: 'toggleOrtho' }
+  | { type: 'toggleGrid' };
 
 const noSection: Section = { axis: null, position: 0.5, flip: false };
 
@@ -47,10 +49,21 @@ export const initialState: State = {
   section: noSection,
   display: 'shadedEdges',
   ortho: true,
+  grid: false,
 };
 
 // View preferences survive opening and closing files.
-const keepPrefs = ({ display, ortho, measureMode }: State): State => ({ ...initialState, display, ortho, measureMode });
+const keepPrefs = ({ display, ortho, grid, measureMode }: State): State => ({ ...initialState, display, ortho, grid, measureMode });
+
+// Mesh formats (STL, OBJ…) carry no B-rep edges, so only plain shading applies to them.
+export const hasEdges = (model?: Model): boolean => !!model?.protos.some((p) => p.edges.length);
+
+// The chosen style is kept for the next model that has edges.
+export const displayStyle = (state: State): DisplayStyle => (hasEdges(state.model) ? state.display : 'shaded');
+
+// Likewise edge measurements: without edges, measure between points.
+export const measureMode = (state: State): MeasureMode =>
+  MEASURE_MODES[state.measureMode].pick === 'edge' && !hasEdges(state.model) ? 'pointDistance' : state.measureMode;
 
 export function reducer(state: State, action: Action): State {
   switch (action.type) {
@@ -80,6 +93,8 @@ export function reducer(state: State, action: Action): State {
       return { ...state, display: action.display };
     case 'toggleOrtho':
       return { ...state, ortho: !state.ortho };
+    case 'toggleGrid':
+      return { ...state, grid: !state.grid };
   }
 }
 

@@ -79,6 +79,13 @@ export const WireframeIcon = () => (
   </Icon>
 );
 
+// Grid in perspective, like a ground plane.
+export const GridIcon = () => (
+  <Icon>
+    <path d="M4 4.5h8L15 12H1zM1.75 10h12.5M2.8 7.25h10.4M6.7 4.5 5.7 12M9.3 4.5l1 7.5" />
+  </Icon>
+);
+
 export const SectionIcon = () => (
   <Icon>
     <rect x="2" y="2" width="12" height="12" />
