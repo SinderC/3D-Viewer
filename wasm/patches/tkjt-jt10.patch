@@ -10,6 +10,9 @@ Changes to TKJT (PyOpenJt 21faef4) for the 3D Viewer. Applied by wasm/scripts/bu
 - JT_PROP_MEASUREMENT_UNITS is recorded (JtData_Model::MeasurementUnits).
 - Robustness: corrupt TopoMesh splits throw instead of reading out of bounds (ISO 14306
   Annex E check missing in TKJT); LoadBytes pads buffers since bit readers read whole words.
+- zlib: stop at Z_STREAM_END (TechSoft3D JT 8.1 compressed sizes include a trailing byte, which
+  made the inflate loop spin forever), and only warn when a compressed stream runs past the
+  declared segment end (the same writer declares segments one byte short).
 
 diff --git a/TKJT/src/JtAttribute/JtAttribute_Base.cxx b/TKJT/src/JtAttribute/JtAttribute_Base.cxx
 index b964b33..0b10e9a 100644
@@ -69,11 +72,38 @@ index 7813b72..370aae7 100644
     || !theReader.ReadF32 (myShininess))
      return Standard_False;
  
+diff --git a/TKJT/src/JtData/JtData_Inflate.cxx b/TKJT/src/JtData/JtData_Inflate.cxx
+index 87594e3..69e8bdf 100644
+--- a/TKJT/src/JtData/JtData_Inflate.cxx
++++ b/TKJT/src/JtData/JtData_Inflate.cxx
+@@ -165,6 +165,8 @@ Standard_Size JtData_Inflate::read (Bytef* theBuffer, Standard_Size theLength)
+     // return 0 in case of a failure
+     switch (ret)
+     {
++    case Z_STREAM_END: // all data inflated; stop even if (padding) input bytes remain
++      return theLength - myZStream.avail_out;
+     case Z_NEED_DICT:
+     case Z_STREAM_ERROR:
+     case Z_DATA_ERROR:
 diff --git a/TKJT/src/JtData/JtData_Model.cxx b/TKJT/src/JtData/JtData_Model.cxx
-index d157680..6485fcf 100644
+index d157680..af5df18 100644
 --- a/TKJT/src/JtData/JtData_Model.cxx
 +++ b/TKJT/src/JtData/JtData_Model.cxx
-@@ -544,6 +544,10 @@ Standard_Boolean JtData_Model::readLSGData(JtData_Reader &theReader,
+@@ -328,9 +328,10 @@ Handle(JtData_Object) JtData_Model::readSegment(std::ifstream &theFile,
+   Standard_Size aReaderPos = aReader.GetPosition();
+   if (aBytesSpec < aReaderPos)
+   {
+-    Standard_Size aBytesRest = aBytesSpec - aReaderPos;
+-    ALARM("Error: " + std::to_string(aBytesRest) + " extra bytes were read after end of the segment");
+-    return Handle(JtData_Object)();
++    // Some writers (TechSoft3D JT 8.1) declare segments one byte short of their compressed
++    // stream. The data was read and checksummed by zlib, so only warn.
++    Standard_Size aBytesOver = aReaderPos - aBytesSpec;
++    WARNING("Warning: " + std::to_string(aBytesOver) + " bytes were read after end of the segment");
+   }
+   if (aBytesSpec > aReaderPos)
+   {
+@@ -544,6 +545,10 @@ Standard_Boolean JtData_Model::readLSGData(JtData_Reader &theReader,
                    Handle(JtProperty_String)::DownCast(aKeyProperty);
                if (!aKeyStringProp.IsNull() && aKeyStringProp->Value() == anObjectNameKey)
                  anObject->BindName(aStringProp->Value());
