@@ -32,6 +32,11 @@ describe('pmiLabel', () => {
     expect(pmiLabel(item({ kind: 'note', type: 'Note', name: 'Note 1' }), 'mm')).toBe('Note 1');
     expect(pmiLabel(item({ kind: 'datum', type: 'Datum A' }), 'mm')).toBe('Datum A');
   });
+
+  it('uses the name, else the type, for items without a value', () => {
+    expect(pmiLabel(item({ type: 'Dimension', name: 'Linear Dimension (40)' }), 'mm')).toBe('Linear Dimension (40)');
+    expect(pmiLabel(item({ kind: 'tolerance', type: 'Feature Control Frame' }), 'mm')).toBe('Feature Control Frame');
+  });
 });
 
 describe('pmiInfo', () => {

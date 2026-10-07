@@ -17,8 +17,11 @@ only allows requests to the app's own origin. After the first visit the app work
 - IGES and OCCT BREP (B-rep: all measurements work)
 - JT 8, 9 and 10 (ISO 14306, incl. JT 10.5): tessellated geometry, assembly structure, instances,
   material colours, finest LOD only. Parts that embed their exact B-rep as Parasolid XT data get its
-  edges (feature edges; exact edge length / radius / diameter); faces stay the JT mesh. No PMI yet,
-  no JT B-rep, no external part files
+  edges (feature edges; exact edge length / radius / diameter); faces stay the JT mesh. No JT B-rep,
+  no external part files
+- JT 10 PMI as drawn in the file (lines, arrowheads and font glyphs), per part and for the model,
+  with their saved views; JT 8 and 9 files get their saved views only. No semantic values and no
+  referenced faces for JT PMI
 - glTF/GLB, OBJ, STL, VRML (meshes: point-to-point distance only, no feature edges). glTF is read
   in metres; OBJ, STL and VRML carry no reliable unit and are read as mm. A `.gltf` must embed its
   buffers (or use `.glb`); external `.bin`/`.mtl` files are not loaded
@@ -31,7 +34,7 @@ only allows requests to the app's own origin. After the first visit the app work
   shaded / shaded with edges / wireframe, ground grid
 - Installable PWA; when installed (Chromium) it can be the OS handler for the supported extensions
 
-Not yet: PMI (graphical/semantic), section caps, 3MF, PLY, FBX.
+Not yet: section caps, 3MF, PLY, FBX.
 
 ## Build
 
@@ -64,8 +67,9 @@ the PWA from the browser's address bar.
 ```
 wasm/src/bridge.cpp       OCCT → mesh bridge (embind): readModel(bytes, fileName, options)
 wasm/src/jt_reader.cpp    JT scene graph → XCAF document (via TKJT)
+wasm/src/jt_pmi.cpp       JT PMI Manager data → drawn PMI and saved views
 wasm/src/xt_reader.cpp    Parasolid XT (neutral binary) → edges, for JT parts with embedded XT data
-wasm/patches/             changes to TKJT (JT 10 support and fixes) and OCCT (STEP PMI fix)
+wasm/patches/             changes to TKJT (JT 10 support and fixes, raw PMI data) and OCCT (STEP PMI fix)
 wasm/scripts/             toolchain + build scripts (versions pinned in env.sh)
 wasm/test/smoke.mjs       Node smoke test over samples/
 web/src/worker/           Web Worker running the WASM module

@@ -7,3 +7,4 @@ wasm/build/
 web/public/occt/
 *.tsbuildinfo
 samples/
+references/

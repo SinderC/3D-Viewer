@@ -1,0 +1,69 @@
+Changes to TKJT (PyOpenJt 21faef4) for the 3D Viewer. Applied by wasm/scripts/build-jt-deps.sh.
+
+- PMI Manager elements keep their raw data (the element length is only known in readElement).
+  TKJT parses only the JT 9 layout and drops the geometry; wasm/src/jt_pmi.cpp parses it instead.
+
+--- a/TKJT/src/JtData/JtData_Model.cxx
++++ b/TKJT/src/JtData/JtData_Model.cxx
+@@ -31,6 +31,7 @@
+ #include <TCollection_AsciiString.hxx>
+ #include <TColStd_SequenceOfInteger.hxx>
+ #include <JtData_Object.hxx>
++#include <JtElement_MetaData_PMIManager.hxx>
+ 
+ using namespace std;
+ 
+@@ -675,7 +676,10 @@
+       return Standard_False;
+   }
+ 
+-  if (!theObject->Read(theReader))
++  // PMI managers keep their raw data, which the caller parses.
++  const Handle(JtElement_MetaData_PMIManager) aPMI = Handle(JtElement_MetaData_PMIManager)::DownCast(theObject);
++  if (!(aPMI.IsNull() ? theObject->Read(theReader)
++                      : aPMI->ReadData(theReader, anElemStart + anElemLength - theReader.GetPosition())))
+     return Standard_False;
+ 
+   // Check the loaded data length
+--- a/TKJT/src/JtElement/JtElement_MetaData_PMIManager.hxx
++++ b/TKJT/src/JtElement/JtElement_MetaData_PMIManager.hxx
+@@ -193,6 +193,12 @@
+   //! Dump this entity.
+   Standard_EXPORT Standard_Integer Dump (Standard_OStream& theStream) const Standard_OVERRIDE;
+ 
++  //! Read the element's data (after the object ID) without parsing it.
++  Standard_EXPORT Standard_Boolean ReadData (JtData_Reader& theReader, Standard_Size theLength);
++
++  //! Raw element data, as read by ReadData.
++  const Jt_String& Data() const { return myData; }
++
+   //! Entities.
+   const Entities& GetEntities() const { return myEntities; }
+ 
+@@ -210,6 +216,7 @@
+   JtData_Vector <UserAttribute          , Jt_I32> myUserAttributes;
+   JtData_Vector <TCollection_AsciiString, Jt_I32> myStringTable;
+   JtData_Vector <ModelView              , Jt_I32> myModelViews;
++  Jt_String myData;
+ };
+ 
+ DEFINE_STANDARD_HANDLE(JtElement_MetaData_PMIManager, JtData_Object)
+--- a/TKJT/src/JtElement/JtElement_MetaData_PMIManager.cxx
++++ b/TKJT/src/JtElement/JtElement_MetaData_PMIManager.cxx
+@@ -423,6 +423,16 @@
+ 
+     return true;
+ #endif 
++}
++
++//=======================================================================
++//function : ReadData
++//purpose  : Keep the element data unparsed
++//=======================================================================
++Standard_Boolean JtElement_MetaData_PMIManager::ReadData (JtData_Reader& theReader, Standard_Size theLength)
++{
++  return myData.Allocate (Jt_I32 (theLength))
++      && theReader.ReadBytes (myData.Data(), theLength);
+ }
+ 
+ //=======================================================================

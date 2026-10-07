@@ -5,6 +5,7 @@
 // material of a node (and of the instance nodes referencing it) go on the XCAF component that
 // places it; materials below a part become face colours. Of each LOD node only the finest LOD is read.
 // Parts that embed their exact B-rep (XT data) also get its edges, as free edges next to the faces.
+// PMI (late-loaded PMI Manager elements on metadata nodes) is parsed by jt_pmi.cpp.
 
 #include "jt_reader.h"
 #include "xt_reader.h"
@@ -12,10 +13,12 @@
 #include <JtAttribute_GeometricTransform.hxx>
 #include <JtAttribute_Material.hxx>
 #include <JtData_Model.hxx>
+#include <JtElement_MetaData_PMIManager.hxx>
 #include <JtElement_ShapeLOD_Vertex.hxx>
 #include <JtElement_XTBRep.hxx>
 #include <JtNode_Instance.hxx>
 #include <JtNode_LOD.hxx>
+#include <JtNode_MetaData.hxx>
 #include <JtNode_Part.hxx>
 #include <JtNode_Partition.hxx>
 #include <JtNode_Shape_Vertex.hxx>
@@ -34,6 +37,7 @@
 
 #include <map>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -97,7 +101,9 @@ Attributes attributesOf(const Handle(JtNode_Base)& node)
   return a;
 }
 
-constexpr Jt_I32 kXtBRepSegment = 17; // segment type of XT B-Rep data (ISO 14306 segment type table)
+// Segment types (ISO 14306 segment type table).
+constexpr Jt_I32 kPmiSegment    = 3;
+constexpr Jt_I32 kXtBRepSegment = 17;
 
 bool isLod(const Handle(JtData_Object)& o) { return o->IsKind(STANDARD_TYPE(JtNode_LOD)); }
 bool isShape(const Handle(JtData_Object)& o) { return o->IsKind(STANDARD_TYPE(JtNode_Shape_Base)); }
@@ -113,9 +119,10 @@ bool isGeometry(const Handle(JtData_Object)& o)
 class Converter
 {
 public:
-  Converter(const Handle(TDocStd_Document)& doc, double scale)
+  Converter(const Handle(TDocStd_Document)& doc, const Handle(JtData_Model)& model, double scale)
       : myShapes(XCAFDoc_DocumentTool::ShapeTool(doc->Main())),
         myColors(XCAFDoc_DocumentTool::ColorTool(doc->Main())),
+        myModel(model),
         myScale(scale)
   {
   }
@@ -126,6 +133,10 @@ public:
     TDF_Label        def = define(root);
     if (def.IsNull())
       return;
+    std::set<const Standard_Transient*> visited;
+    visitPmi(root, gp_Trsf(), false, visited);
+    if (myPmi.views.empty())
+      myPmi.views = std::move(myPartViews);
     if (a.trsf.Form() != gp_Identity)
     {
       // Root transform: wrap so it becomes a component location.
@@ -139,6 +150,8 @@ public:
   }
 
   bool empty() const { return myTriangles == 0; }
+
+  JtPmi& pmi() { return myPmi; }
 
 private:
   // XCAF label for a node's definition; built once per node so instanced parts are shared.
@@ -353,6 +366,152 @@ private:
     }
   }
 
+  // PMI sits on metadata nodes. The top one holds the model's PMI; the ones below it (NX writes one
+  // per component file) hold the PMI of the component's own part, next to its sub-components.
+  // trsf: node's parent → model.
+  void visitPmi(const Handle(JtNode_Base)&           node,
+                gp_Trsf                              trsf,
+                bool                                 belowTop,
+                std::set<const Standard_Transient*>& visited)
+  {
+    if (node.IsNull())
+      return;
+    trsf.Multiply(attributesOf(node).trsf);
+    if (auto inst = Handle(JtNode_Instance)::DownCast(node); !inst.IsNull())
+      return visitPmi(Handle(JtNode_Base)::DownCast(inst->Object()), trsf, belowTop, visited);
+    const auto group = Handle(JtNode_Group)::DownCast(node);
+    if (group.IsNull() || isLod(node) || !visited.insert(node.get()).second)
+      return;
+
+    const auto meta = Handle(JtNode_MetaData)::DownCast(node);
+    if (!meta.IsNull() && hasPmi(meta))
+    {
+      if (node->IsKind(STANDARD_TYPE(JtNode_Part)))
+      {
+        if (const TDF_Label part = defOf(node); !part.IsNull())
+          addPmi(meta, part, gp_Trsf(), false);
+      }
+      else if (!belowTop)
+      {
+        addPmi(meta, {}, trsf, true);
+        belowTop = true;
+      }
+      else
+      {
+        std::vector<std::pair<Handle(JtNode_Base), gp_Trsf>> parts;
+        partsBelow(group, gp_Trsf(), parts);
+        if (parts.size() == 1)
+          if (const TDF_Label part = defOf(parts[0].first); !part.IsNull())
+            addPmi(meta, part, parts[0].second.Inverted(), false);
+      }
+    }
+    if (node->IsKind(STANDARD_TYPE(JtNode_Part)))
+      return;
+    for (Standard_Size i = 0; i < group->Children().Count(); ++i)
+      visitPmi(Handle(JtNode_Base)::DownCast(group->Children()[i]), trsf, belowTop, visited);
+  }
+
+  // Part nodes below group, with their transforms relative to it (their own included); not those
+  // of sub-components (other metadata nodes).
+  static void partsBelow(const Handle(JtNode_Group)&                            group,
+                         const gp_Trsf&                                         trsf,
+                         std::vector<std::pair<Handle(JtNode_Base), gp_Trsf>>& parts)
+  {
+    for (Standard_Size i = 0; i < group->Children().Count(); ++i)
+    {
+      auto    node = Handle(JtNode_Base)::DownCast(group->Children()[i]);
+      gp_Trsf t    = trsf;
+      while (!node.IsNull())
+      {
+        t.Multiply(attributesOf(node).trsf);
+        const auto inst = Handle(JtNode_Instance)::DownCast(node);
+        if (inst.IsNull())
+          break;
+        node = Handle(JtNode_Base)::DownCast(inst->Object());
+      }
+      if (node.IsNull() || isGeometry(node))
+        continue;
+      if (node->IsKind(STANDARD_TYPE(JtNode_Part)))
+        parts.emplace_back(node, t);
+      else if (const auto sub = Handle(JtNode_Group)::DownCast(node);
+               !sub.IsNull() && !node->IsKind(STANDARD_TYPE(JtNode_MetaData)))
+        partsBelow(sub, t, parts);
+    }
+  }
+
+  TDF_Label defOf(const Handle(JtNode_Base)& node) const
+  {
+    const auto it = myDefs.find(node.get());
+    return it != myDefs.end() ? it->second : TDF_Label();
+  }
+
+  static bool hasPmi(const Handle(JtNode_MetaData)& node)
+  {
+    for (Standard_Size i = 0; i < node->LateLoads().Count(); ++i)
+      if (node->LateLoads()[i]->getSegmentType() == kPmiSegment)
+        return true;
+    return false;
+  }
+
+  // Adds the PMI of node, in its coordinates (taken through trsf, scaled to mm), owned by part (null:
+  // the model). Keeps the views of the top node, and of the first part as a fallback.
+  void addPmi(const Handle(JtNode_MetaData)& node, const TDF_Label& part, const gp_Trsf& trsf, bool top)
+  {
+    const JtData_Object::VectorOfLateLoads& lateLoads = node->LateLoads();
+    for (Standard_Size i = 0; i < lateLoads.Count(); ++i)
+    {
+      const Handle(JtProperty_LateLoaded)& late = lateLoads[i];
+      if (late->getSegmentType() != kPmiSegment)
+        continue;
+      try
+      {
+        if (late->DefferedObject().IsNull())
+          late->Load();
+        const auto manager = Handle(JtElement_MetaData_PMIManager)::DownCast(late->DefferedObject());
+        if (!manager.IsNull())
+        {
+          const Jt_String& data = manager->Data();
+          add(readJtPmi(data.Data(), size_t(data.Count()), myModel->MajorVersion(), !myModel->IsFileLE()), part,
+              trsf, top);
+        }
+      }
+      catch (const std::exception&)
+      {
+        // Unreadable PMI: the part keeps its mesh without it.
+      }
+      late->Unload();
+    }
+  }
+
+  void add(JtPmi pmi, const TDF_Label& part, const gp_Trsf& trsf, bool top)
+  {
+    const int first = int(myPmi.items.size());
+    for (JtPmiItem& item : pmi.items)
+    {
+      for (std::vector<float>* points : {&item.segments, &item.triangles})
+        for (size_t k = 0; k + 2 < points->size(); k += 3)
+        {
+          gp_XYZ p((*points)[k], (*points)[k + 1], (*points)[k + 2]);
+          trsf.Transforms(p);
+          p *= myScale;
+          (*points)[k] = float(p.X()), (*points)[k + 1] = float(p.Y()), (*points)[k + 2] = float(p.Z());
+        }
+      item.part = part;
+      myPmi.items.push_back(std::move(item));
+    }
+    for (JtPmiView& v : pmi.views)
+    {
+      for (int& i : v.pmi)
+        i += first;
+      v.direction.Transform(trsf);
+      v.up.Transform(trsf);
+    }
+    if (top)
+      myPmi.views = std::move(pmi.views);
+    else if (myPartViews.empty())
+      myPartViews = std::move(pmi.views);
+  }
+
   TopoDS_Face triangulate(const Handle(JtNode_Shape_Vertex)& shape, const gp_Trsf& trsf)
   {
     const JtData_Object::VectorOfLateLoads& lateLoads = shape->LateLoads();
@@ -430,14 +589,17 @@ private:
 
   Handle(XCAFDoc_ShapeTool)                  myShapes;
   Handle(XCAFDoc_ColorTool)                  myColors;
+  Handle(JtData_Model)                       myModel;
   double                                     myScale;
+  JtPmi                                      myPmi;
+  std::vector<JtPmiView>                     myPartViews;
   size_t                                     myTriangles = 0;
   std::map<const Standard_Transient*, TDF_Label> myDefs;
 };
 
 } // namespace
 
-std::string readJt(const char* path, const Handle(TDocStd_Document)& doc)
+std::string readJt(const char* path, const Handle(TDocStd_Document)& doc, JtPmi& pmi)
 {
   Handle(JtData_Model)     model = new JtData_Model(TCollection_ExtendedString(path));
   Handle(JtNode_Partition) root  = model->Init();
@@ -445,10 +607,11 @@ std::string readJt(const char* path, const Handle(TDocStd_Document)& doc)
     throw std::runtime_error("Not a readable JT file");
 
   const auto [scale, unit] = unitOf(TCollection_AsciiString(model->MeasurementUnits()));
-  Converter conv(doc, scale);
+  Converter conv(doc, model, scale);
   conv.addRoot(root);
   XCAFDoc_DocumentTool::ShapeTool(doc->Main())->UpdateAssemblies();
   if (conv.empty())
     throw std::runtime_error("JT file has no tessellated geometry");
+  pmi = std::move(conv.pmi());
   return unit;
 }

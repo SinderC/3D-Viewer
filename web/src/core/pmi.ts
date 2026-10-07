@@ -26,10 +26,10 @@ function nominal(p: PmiItem, unit: UnitId): string | undefined {
   return undefined;
 }
 
-/** One-line label for lists: type, value and datums. */
+/** One-line label for lists: type, value and datums; the name for items without a value (notes, JT PMI). */
 export function pmiLabel(p: PmiItem, unit: UnitId): string {
   if (p.kind === 'datum') return p.type;
-  if (p.kind === 'note') return p.name || p.type;
+  if (p.kind === 'note' || !(p.value || p.range)) return p.name || p.type;
   const parts = [p.type, nominal(p, unit), deviation(p, unit), p.datums?.length ? `| ${p.datums.join(' | ')}` : undefined];
   return parts.filter(Boolean).join(' ');
 }

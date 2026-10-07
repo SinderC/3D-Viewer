@@ -297,7 +297,7 @@ public:
   {
   }
 
-  void build()
+  void build(const JtPmi& jtPmi)
   {
     // Every part definition is meshed once; count them so meshing can report progress.
     LabelSequence all;
@@ -314,6 +314,7 @@ public:
 
     collectPmi();
     collectViews();
+    addJtPmi(jtPmi);
   }
 
   const std::vector<Node>&      nodes() const { return myNodes; }
@@ -833,6 +834,32 @@ private:
     }
   }
 
+  // JT PMI comes drawn already, in the coordinates of its part (or the model).
+  void addJtPmi(const JtPmi& jt)
+  {
+    const int first = int(myPmi.size());
+    for (const JtPmiItem& item : jt.items)
+    {
+      Pmi p;
+      p.kind = item.kind;
+      p.type = item.type;
+      p.name = item.name;
+      if (!item.part.IsNull())
+        if (const auto it = myProtoByEntry.find(entryOf(item.part)); it != myProtoByEntry.end())
+          p.proto = it->second;
+      p.segments  = append(item.segments);
+      p.triangles = append(item.triangles);
+      myPmi.push_back(std::move(p));
+    }
+    for (const JtPmiView& v : jt.views)
+    {
+      SavedView view{v.name, v.direction, v.up, {}};
+      for (int i : v.pmi)
+        view.pmi.push_back(first + i);
+      myViewList.push_back(std::move(view));
+    }
+  }
+
   static std::string dimensionType(XCAFDimTolObjects_DimensionType t)
   {
     switch (t)
@@ -901,6 +928,7 @@ struct Source
   std::string format;
   std::string schema; // STEP only
   std::string unit;   // file length unit name as in STEP ("MILLIMETRE", "INCH", ...); empty = mm
+  JtPmi       jtPmi;  // JT only (STEP PMI is in the XCAF document)
 };
 
 // OCCT's IGES reader, TKJT (and glTF buffers, read lazily by file name) need a real file: MEMFS.
@@ -1155,7 +1183,9 @@ Source readJtDoc(const std::string& bytes, const Handle(TDocStd_Document)& doc, 
 {
   progress("read", -1);
   TempFile file(".jt", bytes);
-  return {"JT", {}, readJt(file.path(), doc)};
+  Source   src{"JT", {}, {}, {}};
+  src.unit = readJt(file.path(), doc, src.jtPmi);
+  return src;
 }
 
 std::string lowerExtension(const std::string& fileName)
@@ -1342,7 +1372,7 @@ val readModel(const std::string& bytes, const std::string& fileName, val jsOptio
     const Source src = readDoc(bytes, fileName, doc, progress);
 
     Builder builder(doc, opts, progress);
-    builder.build();
+    builder.build(src.jtPmi);
 
     result.set("json", toJson(src, builder));
     result.set("geometry", val(emscripten::typed_memory_view(gGeometry.size(), gGeometry.data())));
