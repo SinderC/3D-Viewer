@@ -1,7 +1,7 @@
 import type { Model } from '../core/model';
 import type { UnitId } from '../core/units';
 import type { MeasureMode } from '../viewer/measure';
-import type { Section, Tool } from '../viewer/Viewer';
+import type { DisplayStyle, Section, Tool } from '../viewer/Viewer';
 
 export interface State {
   status: 'idle' | 'loading' | 'ready' | 'error';
@@ -16,7 +16,7 @@ export interface State {
   measureMode: MeasureMode;
   unit: UnitId;
   section: Section;
-  edges: boolean;
+  display: DisplayStyle;
   ortho: boolean;
 }
 
@@ -25,13 +25,14 @@ export type Action =
   | { type: 'progress'; stage: string; percent: number }
   | { type: 'loaded'; model: Model; ms: number }
   | { type: 'failed'; error: string }
+  | { type: 'close' }
   | { type: 'setHidden'; hidden: ReadonlySet<number> }
   | { type: 'select'; id: number | null }
   | { type: 'setTool'; tool: Tool }
   | { type: 'setMeasureMode'; mode: MeasureMode }
   | { type: 'setUnit'; unit: UnitId }
   | { type: 'setSection'; section: Partial<Section> }
-  | { type: 'toggleEdges' }
+  | { type: 'setDisplay'; display: DisplayStyle }
   | { type: 'toggleOrtho' };
 
 const noSection: Section = { axis: null, position: 0.5, flip: false };
@@ -44,27 +45,25 @@ export const initialState: State = {
   measureMode: 'pointDistance',
   unit: 'mm',
   section: noSection,
-  edges: true,
-  ortho: false,
+  display: 'shadedEdges',
+  ortho: true,
 };
+
+// View preferences survive opening and closing files.
+const keepPrefs = ({ display, ortho, measureMode }: State): State => ({ ...initialState, display, ortho, measureMode });
 
 export function reducer(state: State, action: Action): State {
   switch (action.type) {
     case 'loadStart':
-      return {
-        ...initialState,
-        edges: state.edges,
-        ortho: state.ortho,
-        measureMode: state.measureMode,
-        status: 'loading',
-        fileName: action.fileName,
-      };
+      return { ...keepPrefs(state), status: 'loading', fileName: action.fileName };
     case 'progress':
       return { ...state, progress: { stage: action.stage, percent: action.percent } };
     case 'loaded':
       return { ...state, status: 'ready', model: action.model, unit: action.model.unit, loadMs: action.ms, progress: undefined };
     case 'failed':
       return { ...state, status: 'error', error: action.error, progress: undefined };
+    case 'close':
+      return keepPrefs(state);
     case 'setHidden':
       return { ...state, hidden: action.hidden };
     case 'select':
@@ -77,8 +76,8 @@ export function reducer(state: State, action: Action): State {
       return { ...state, unit: action.unit };
     case 'setSection':
       return { ...state, section: { ...state.section, ...action.section } };
-    case 'toggleEdges':
-      return { ...state, edges: !state.edges };
+    case 'setDisplay':
+      return { ...state, display: action.display };
     case 'toggleOrtho':
       return { ...state, ortho: !state.ortho };
   }

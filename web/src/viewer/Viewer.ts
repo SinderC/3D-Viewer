@@ -6,13 +6,15 @@ import { EDGE_STRIDE, FACE_STRIDE, type Model, type Proto } from '../core/model'
 import type { UnitId } from '../core/units';
 import { Measure, type EdgePick, type FacePick, type MeasureMode, type Pick } from './measure';
 import { buildSectionCaps, disposeCaps } from './section';
+import { ViewCube } from './ViewCube';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
 export type Tool = 'select' | 'measure';
-export type ViewName = 'iso' | 'front' | 'top' | 'right';
+export type ViewName = 'iso' | 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom';
+export type DisplayStyle = 'shadedEdges' | 'shaded' | 'wireframe';
 export type Axis = 'x' | 'y' | 'z';
 export interface Section {
   axis: Axis | null;
@@ -21,11 +23,15 @@ export interface Section {
 }
 
 // Models are Z-up (the bridge converts Y-up mesh formats).
+// Directions from the target towards the camera.
 const VIEW_DIRS: Record<ViewName, THREE.Vector3> = {
-  iso: new THREE.Vector3(1, -1, 0.8).normalize(),
+  iso: new THREE.Vector3(1, -1, 0.8),
   front: new THREE.Vector3(0, -1, 0),
-  top: new THREE.Vector3(0, -1e-4, 1).normalize(),
+  back: new THREE.Vector3(0, 1, 0),
+  left: new THREE.Vector3(-1, 0, 0),
   right: new THREE.Vector3(1, 0, 0),
+  top: new THREE.Vector3(0, 0, 1),
+  bottom: new THREE.Vector3(0, 0, -1),
 };
 const AXES: Record<Axis, THREE.Vector3> = {
   x: new THREE.Vector3(1, 0, 0),
@@ -33,6 +39,9 @@ const AXES: Record<Axis, THREE.Vector3> = {
   z: new THREE.Vector3(0, 0, 1),
 };
 const DEFAULT_COLOR = new THREE.Color(0xb8bcc4);
+const EDGE_COLOR = 0x1e2026;
+const WIRE_COLOR = 0xc8ccd4; // edges alone must stand out against the background
+const ANIMATION_MS = 300;
 const CLICK_TOLERANCE_PX = 4;
 const EDGE_PICK_PX = 6;
 
@@ -55,6 +64,7 @@ export class Viewer {
   private capMaterials = new Map<number, THREE.MeshStandardMaterial>();
   private readonly capOutline = new THREE.LineBasicMaterial({ color: 0x1e2026 });
   private readonly resizeObserver: ResizeObserver;
+  private readonly cube: ViewCube;
 
   private nodeObjects: THREE.Object3D[] = [];
   private meshes: THREE.Mesh[] = [];
@@ -64,11 +74,12 @@ export class Viewer {
   private orthoHalfHeight = 1;
   private selected: number | null = null;
   private tool: Tool = 'select';
-  private edgesVisible = true;
+  private display: DisplayStyle = 'shadedEdges';
+  private animation = 0;
   private renderQueued = false;
   private pointerDown: { x: number; y: number } | null = null;
 
-  private readonly edgeMaterial = new THREE.LineBasicMaterial({ color: 0x1e2026 });
+  private readonly edgeMaterial = new THREE.LineBasicMaterial({ color: EDGE_COLOR });
   private readonly highlight = new THREE.MeshStandardMaterial({
     color: 0xff7d2d,
     emissive: 0x4a240d,
@@ -99,8 +110,10 @@ export class Viewer {
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.addEventListener('change', this.requestRender);
+    this.controls.addEventListener('start', () => cancelAnimationFrame(this.animation));
 
     this.measure = new Measure(this.scene, container);
+    this.cube = new ViewCube(container, VIEW_DIRS.iso, (dir) => this.frame(dir, this.visibleBounds(), true));
 
     const canvas = this.renderer.domElement;
     canvas.addEventListener('pointerdown', (e) => (this.pointerDown = { x: e.clientX, y: e.clientY }));
@@ -118,6 +131,7 @@ export class Viewer {
     this.clear();
     this.controls.dispose();
     this.measure.dispose();
+    this.cube.dispose();
     this.capOutline.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
@@ -165,7 +179,6 @@ export class Viewer {
         this.meshes.push(mesh);
 
         const lines = new THREE.LineSegments(geometries[node.proto].edges, this.edgeMaterial);
-        lines.visible = this.edgesVisible;
         lines.raycast = () => {}; // picked explicitly in pickEdge()
         lines.userData = { proto };
         obj.add(lines);
@@ -177,7 +190,9 @@ export class Viewer {
 
     this.modelRoot.updateMatrixWorld(true);
     this.bounds.setFromObject(this.modelRoot);
-    this.setView('iso');
+    this.setDisplayStyle(this.display);
+    this.frame(VIEW_DIRS.iso, this.bounds);
+    this.cube.setVisible(true);
   }
 
   private makeMaterial(color: THREE.Color, alpha: number): THREE.MeshStandardMaterial {
@@ -196,7 +211,9 @@ export class Viewer {
     });
   }
 
-  private clear(): void {
+  /** Remove the model and release its GPU and JS memory. */
+  clear(): void {
+    cancelAnimationFrame(this.animation);
     this.clearCaps();
     this.capMaterials.forEach((m) => m.dispose());
     this.capMaterials.clear();
@@ -215,7 +232,9 @@ export class Viewer {
     this.edgeLines = [];
     this.materials = [];
     this.selected = null;
+    this.bounds.makeEmpty();
     this.measure.clear();
+    this.cube.setVisible(false);
     this.requestRender();
   }
 
@@ -228,9 +247,14 @@ export class Viewer {
     this.requestRender();
   }
 
-  setEdgesVisible(visible: boolean): void {
-    this.edgesVisible = visible;
-    this.edgeLines.forEach((l) => (l.visible = visible));
+  setDisplayStyle(style: DisplayStyle): void {
+    this.display = style;
+    const faces = style !== 'wireframe';
+    // Invisible materials are still raycast, so wireframe parts stay pickable.
+    this.materials.forEach((m) => (m.visible = faces));
+    this.edgeLines.forEach((l) => (l.visible = style !== 'shaded'));
+    this.edgeMaterial.color.set(faces ? EDGE_COLOR : WIRE_COLOR);
+    this.updateCaps();
     this.requestRender();
   }
 
@@ -278,7 +302,7 @@ export class Viewer {
   // Solid-looking cut: fill each visible part's cross-section with its own colour.
   private updateCaps(): void {
     this.clearCaps();
-    if (!this.clipping.length) return;
+    if (!this.clipping.length || this.display === 'wireframe') return;
     this.caps = buildSectionCaps(this.meshes.filter(isShown), this.clipPlane, {
       material: (mesh) => this.capMaterial(mesh),
       outline: this.capOutline,
@@ -308,30 +332,64 @@ export class Viewer {
   // Camera
 
   setView(view: ViewName): void {
-    this.frame(VIEW_DIRS[view]);
+    this.frame(VIEW_DIRS[view], this.visibleBounds(), true);
   }
 
   /** Fit the visible geometry while keeping the current viewing direction. */
   fit(): void {
-    this.frame(this.camera.position.clone().sub(this.controls.target).normalize());
+    this.frame(this.viewDir(), this.visibleBounds(), true);
   }
 
-  private frame(dir: THREE.Vector3): void {
-    const sphere = this.visibleBounds().getBoundingSphere(new THREE.Sphere());
+  /** Fit the selected node, or everything visible when nothing is selected. */
+  fitSelection(): void {
+    const node = this.selected === null ? undefined : this.nodeObjects[this.selected];
+    const box = node ? new THREE.Box3().setFromObject(node) : new THREE.Box3();
+    this.frame(this.viewDir(), box.isEmpty() ? this.visibleBounds() : box, true);
+  }
+
+  private viewDir(): THREE.Vector3 {
+    return this.camera.position.clone().sub(this.controls.target).normalize();
+  }
+
+  // Look at the box from `dir` (target towards camera), optionally turning and zooming there smoothly.
+  private frame(direction: THREE.Vector3, box: THREE.Box3, animate = false): void {
+    cancelAnimationFrame(this.animation);
+    const dir = direction.clone().normalize();
+    // Z-up orbit controls cannot look straight along Z; the tilt keeps +Y up on screen from above.
+    if (Math.abs(dir.z) > 0.9999) dir.set(0, -1e-4, Math.sign(dir.z)).normalize();
+
+    const sphere = box.getBoundingSphere(new THREE.Sphere());
     const r = Math.max(sphere.radius, 1e-3);
     const distance = r / Math.sin(THREE.MathUtils.degToRad(this.perspective.fov / 2));
-
     for (const cam of [this.perspective, this.ortho]) {
-      cam.position.copy(sphere.center).addScaledVector(dir, distance);
       cam.near = distance / 100;
       cam.far = distance * 100;
     }
-    this.ortho.zoom = 1;
-    this.orthoHalfHeight = r * 1.05;
-    this.controls.target.copy(sphere.center);
     this.controls.maxDistance = distance * 20;
-    this.resize();
-    this.controls.update();
+
+    const from = {
+      dir: this.viewDir(),
+      target: this.controls.target.clone(),
+      distance: this.camera.position.distanceTo(this.controls.target),
+      halfHeight: this.orthoHalfHeight / this.ortho.zoom,
+    };
+    const turn = new THREE.Quaternion().setFromUnitVectors(from.dir, dir);
+    const t0 = performance.now();
+    const step = (now: number) => {
+      const t = animate ? Math.min((now - t0) / ANIMATION_MS, 1) : 1;
+      const k = t * t * (3 - 2 * t); // ease in-out
+      const d = k === 1 ? dir : from.dir.clone().applyQuaternion(new THREE.Quaternion().slerp(turn, k));
+      const target = from.target.clone().lerp(sphere.center, k);
+      const dist = THREE.MathUtils.lerp(from.distance, distance, k);
+      for (const cam of [this.perspective, this.ortho]) cam.position.copy(target).addScaledVector(d, dist);
+      this.ortho.zoom = 1;
+      this.orthoHalfHeight = THREE.MathUtils.lerp(from.halfHeight, r * 1.05, k);
+      this.controls.target.copy(target);
+      this.resize();
+      this.controls.update();
+      if (t < 1) this.animation = requestAnimationFrame(step);
+    };
+    step(t0);
   }
 
   setOrthographic(on: boolean): void {
@@ -456,7 +514,9 @@ export class Viewer {
   // The visible B-rep edge nearest the cursor, within a few pixels.
   private pickEdge(e: PointerEvent, meshHit: THREE.Intersection | undefined): EdgePick | null {
     const raycaster = this.raycaster(e.clientX, e.clientY);
-    const depth = meshHit?.distance ?? this.camera.position.distanceTo(this.controls.target);
+    // Wireframe shows hidden edges, so faces must not hide them from picking either.
+    const occluder = this.display === 'wireframe' ? undefined : meshHit;
+    const depth = occluder?.distance ?? this.camera.position.distanceTo(this.controls.target);
     const threshold = EDGE_PICK_PX * this.worldPerPixel(depth);
     raycaster.params.Line = { threshold };
 
@@ -468,7 +528,7 @@ export class Viewer {
     let bestRay = Infinity;
     for (const h of hits) {
       // Skip edges hidden behind the surface under the cursor, or cut away by the section.
-      if (meshHit && h.distance > meshHit.distance + 4 * threshold) continue;
+      if (occluder && h.distance > occluder.distance + 4 * threshold) continue;
       if (!this.unclipped(h.point, threshold)) continue;
       const ray = raycaster.ray.distanceSqToPoint(h.point);
       if (ray < bestRay) {
@@ -537,6 +597,7 @@ export class Viewer {
     requestAnimationFrame(() => {
       this.renderQueued = false;
       this.renderer.render(this.scene, this.camera);
+      this.cube.update(this.camera);
       this.measure.updateLabel(this.camera, this.renderer.domElement);
     });
   };

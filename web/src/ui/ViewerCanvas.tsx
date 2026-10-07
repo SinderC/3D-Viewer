@@ -12,7 +12,7 @@ interface Props {
 export function ViewerCanvas({ state, dispatch, viewerRef }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const [viewer, setViewer] = useState<Viewer | null>(null);
-  const { model, hidden, selected, tool, measureMode, unit, section, edges, ortho } = state;
+  const { model, hidden, selected, tool, measureMode, unit, section, display, ortho } = state;
 
   useEffect(() => {
     const viewer = new Viewer(host.current!);
@@ -26,14 +26,15 @@ export function ViewerCanvas({ state, dispatch, viewerRef }: Props) {
   }, [dispatch, viewerRef]);
 
   // Load first: the effects below re-apply display state to the new scene.
-  useEffect(() => void (model && viewer?.load(model)), [viewer, model]);
+  // No model (closed, or another one loading) frees the old scene right away.
+  useEffect(() => void (model ? viewer?.load(model) : viewer?.clear()), [viewer, model]);
   useEffect(() => viewer?.setHidden(hidden), [viewer, model, hidden]);
   useEffect(() => viewer?.select(selected), [viewer, model, selected]);
   useEffect(() => viewer?.setTool(tool), [viewer, tool]);
   useEffect(() => viewer?.setMeasureMode(measureMode), [viewer, model, measureMode]);
   useEffect(() => viewer?.setUnit(unit), [viewer, unit]);
   useEffect(() => viewer?.setSection(section), [viewer, model, section]);
-  useEffect(() => viewer?.setEdgesVisible(edges), [viewer, edges]);
+  useEffect(() => viewer?.setDisplayStyle(display), [viewer, display]);
   useEffect(() => viewer?.setOrthographic(ortho), [viewer, ortho]);
 
   return <div className="viewport" ref={host} data-tool={tool} />;

@@ -6,6 +6,7 @@ import { QUALITY, type Quality } from '../worker/protocol';
 import { ModelTree } from './ModelTree';
 import { initialState, reducer, type State } from './state';
 import { Toolbar } from './Toolbar';
+import { ViewBar } from './ViewBar';
 import { ViewerCanvas } from './ViewerCanvas';
 
 // Minimal typing for the File Handling API (installed PWA "Open with").
@@ -38,9 +39,13 @@ export function App() {
   const [dragging, setDragging] = useState(false);
   const [quality, setQuality] = useState<Quality>(storedQuality);
   const lastFile = useRef<File | null>(null);
+  const loading = useRef<AbortController | null>(null);
 
   const open = useCallback(
     async (file: File, q: Quality = quality) => {
+      // Only the latest file may land: cancel a load still running.
+      loading.current?.abort();
+      const { signal } = (loading.current = new AbortController());
       lastFile.current = file;
       dispatch({ type: 'loadStart', fileName: file.name });
       if (!isSupported(file.name)) {
@@ -54,14 +59,21 @@ export function App() {
           file.name,
           (stage, percent) => dispatch({ type: 'progress', stage, percent }),
           QUALITY[q].options,
+          signal,
         );
         dispatch({ type: 'loaded', model, ms: Math.round(performance.now() - t0) });
       } catch (e) {
-        dispatch({ type: 'failed', error: e instanceof Error ? e.message : String(e) });
+        if (!signal.aborted) dispatch({ type: 'failed', error: e instanceof Error ? e.message : String(e) });
       }
     },
     [quality],
   );
+
+  const close = () => {
+    loading.current?.abort();
+    lastFile.current = null;
+    dispatch({ type: 'close' });
+  };
 
   // Quality is applied at load time, so reload the open model with the new setting.
   const changeQuality = (q: Quality) => {
@@ -82,8 +94,14 @@ export function App() {
   // Keyboard shortcuts.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'o') {
+        e.preventDefault();
+        fileInput.current?.click();
+        return;
+      }
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
       if (e.key === 'f') viewer.current?.fit();
+      if (e.key === 'F') viewer.current?.fitSelection();
       if (e.key === 'm') dispatch({ type: 'setTool', tool: state.tool === 'measure' ? 'select' : 'measure' });
       if (e.key === 'Escape') {
         dispatch({ type: 'setTool', tool: 'select' });
@@ -111,10 +129,9 @@ export function App() {
       }}
     >
       <Toolbar
-        state={state}
-        dispatch={dispatch}
-        viewer={viewer}
+        status={status}
         onOpen={() => fileInput.current?.click()}
+        onClose={close}
         quality={quality}
         onQuality={changeQuality}
       />
@@ -156,10 +173,11 @@ export function App() {
       </aside>
       <main className="stage">
         <ViewerCanvas state={state} dispatch={dispatch} viewerRef={viewer} />
+        {status === 'ready' && <ViewBar state={state} dispatch={dispatch} viewer={viewer} />}
         {status === 'idle' && (
           <div className="overlay">
             <p>
-              Drop a STEP, IGES, JT, glTF, OBJ, STL, VRML or BREP file here or use <b>Open…</b>
+              Drop a STEP, IGES, JT, glTF, OBJ, STL, VRML or BREP file here or use <b>File › Open…</b>
             </p>
             <p className="muted">Files are processed locally in your browser and never uploaded.</p>
           </div>

@@ -30,10 +30,8 @@ html, body, #root { height: 100%; margin: 0; }
   border-bottom: 1px solid var(--line);
   flex-wrap: wrap;
 }
-.toolbar fieldset { display: contents; border: 0; }
-.toolbar .sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 4px; }
 .toolbar label { display: inline-flex; align-items: center; gap: 4px; }
-.toolbar fieldset:disabled { opacity: 0.45; }
+.sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 4px; }
 
 button, select {
   font: inherit;
@@ -45,8 +43,10 @@ button, select {
   cursor: pointer;
 }
 button:hover:not(:disabled) { border-color: #4a4f59; }
+button:disabled { opacity: 0.4; cursor: default; }
+button svg { display: block; flex: none; }
+.menu-trigger { display: inline-flex; align-items: center; gap: 2px; padding-right: 4px; }
 button[aria-pressed='true'] { background: var(--select); border-color: var(--accent); }
-button.primary { background: var(--accent); color: #0b1a2b; border-color: var(--accent); font-weight: 600; }
 input[type='range'] { width: 140px; accent-color: var(--accent); }
 input[type='checkbox'] { accent-color: var(--accent); margin: 0; }
 
@@ -125,7 +125,102 @@ input[type='checkbox'] { accent-color: var(--accent); margin: 0; }
   color: #fff;
 }
 
+/* Dropdowns (Popover API, placed by Menu.tsx) */
+.menu {
+  inset: auto;
+  margin: 0;
+  min-width: 180px;
+  padding: 4px;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.4);
+}
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 10px;
+  text-align: left;
+  background: none;
+  border: 0;
+}
+.menu-item:hover:not(:disabled) { background: var(--select); }
+.menu-item[aria-pressed='true'] { color: var(--accent); background: none; }
+.menu-item kbd { margin-left: auto; color: var(--muted); font: inherit; }
+.menu-row { display: flex; align-items: center; gap: 6px; padding: 4px 6px; }
+.menu-row button { flex: 1; }
+
+/* Floating view toolbar */
+.viewbar {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  max-width: calc(100% - 16px);
+  overflow-x: auto;
+  padding: 4px;
+  background: rgb(34 37 43 / 0.92);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.35);
+}
+.viewbar .sep { margin: 2px 3px; background: #464a54; }
+button.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  background: none;
+  border-color: transparent;
+  border-radius: 6px;
+}
+button.icon.wide { width: 40px; }
+button.icon.narrow { width: 16px; margin-left: -2px; }
+button.icon:hover:not(:disabled) { background: #2d3138; border-color: transparent; }
+button.icon[aria-pressed='true'] { color: var(--accent); background: var(--select); }
+
+/* Orientation cube (ViewCube.ts); face size matches SIZE there */
+.viewcube { position: absolute; top: 16px; right: 16px; width: 110px; height: 110px; }
+.viewcube .cube { position: absolute; left: 50%; top: 50%; transform-style: preserve-3d; }
+.viewcube .face {
+  position: absolute;
+  left: -32px;
+  top: -32px;
+  width: 64px;
+  height: 64px;
+  display: grid;
+  grid-template: 1fr 3fr 1fr / 1fr 3fr 1fr;
+  background: #3a3e46;
+  border: 1px solid #5a5f69;
+  backface-visibility: hidden;
+}
+.viewcube .face span {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  pointer-events: none;
+  user-select: none;
+}
+.viewcube .cell { cursor: pointer; }
+.viewcube .cell.hover { background: rgb(90 169 255 / 0.55); }
+.viewcube .home { position: absolute; top: 0; left: 0; padding: 3px; background: none; border-color: transparent; color: var(--muted); }
+.viewcube .home:hover { color: var(--text); }
+
 @media (max-width: 700px) {
+  .viewcube { transform: scale(0.75); transform-origin: top right; }
   .app { grid-template: 'bar' auto 'stage' 1fr 'side' 40% / 1fr; }
   .sidebar { border-right: 0; border-top: 1px solid var(--line); }
 }
