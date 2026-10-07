@@ -19,6 +19,7 @@
 #include <Bnd_Box.hxx>
 #include <DESTEP_Parameters.hxx>
 #include <GCPnts_AbscissaPoint.hxx>
+#include <GCPnts_TangentialDeflection.hxx>
 #include <HeaderSection_FileSchema.hxx>
 #include <IGESCAFControl_Reader.hxx>
 #include <IGESData_IGESModel.hxx>
@@ -359,31 +360,22 @@ private:
   Proto meshPart(const TDF_Label& def, const TopoDS_Shape& shape)
   {
     // B-rep faces need meshing; AP242 tessellated faces already carry a triangulation.
+    bool hasSurfaces = false;
     {
       TopoDS_Compound toMesh;
       BRep_Builder    bb;
       bb.MakeCompound(toMesh);
-      bool any = false;
       for (TopExp_Explorer ex(shape, TopAbs_FACE); ex.More(); ex.Next())
       {
         const TopoDS_Face& f = TopoDS::Face(ex.Current());
         if (!BRep_Tool::Surface(f).IsNull())
         {
           bb.Add(toMesh, f);
-          any = true;
+          hasSurfaces = true;
         }
       }
-      if (any)
-      {
-        Bnd_Box box;
-        BRepBndLib::Add(shape, box);
-        const double diag = box.IsVoid() ? 1.0 : std::sqrt(box.SquareExtent());
-        BRepMesh_IncrementalMesh(toMesh,
-                                 std::max(diag * myOpts.linearDeflection, 1e-4),
-                                 false,
-                                 myOpts.angularDeflection,
-                                 false);
-      }
+      if (hasSurfaces)
+        BRepMesh_IncrementalMesh(toMesh, deflection(shape), false, myOpts.angularDeflection, false);
     }
 
     int        partColor = -1;
@@ -442,7 +434,8 @@ private:
         proto.groups.push_back({start, count, color});
     }
 
-    collectEdges(shape, edges, edgeStarts, edgeData);
+    // Free edges count only on triangulated parts (JT parts with XT edges), not next to B-rep faces.
+    collectEdges(shape, !hasSurfaces, edges, edgeStarts, edgeData);
 
     proto.positions  = append(pos);
     proto.normals    = append(nrm);
@@ -453,6 +446,15 @@ private:
     proto.edgeStarts = append(edgeStarts);
     proto.edgeData   = append(edgeData);
     return proto;
+  }
+
+  // Linear meshing deflection for a part, relative to its size.
+  double deflection(const TopoDS_Shape& shape) const
+  {
+    Bnd_Box box;
+    BRepBndLib::Add(shape, box);
+    const double diag = box.IsVoid() ? 1.0 : std::sqrt(box.SquareExtent());
+    return std::max(diag * myOpts.linearDeflection, 1e-4);
   }
 
   // Styles from the part and its sub-shape labels; larger shapes first so faces override solids.
@@ -531,19 +533,31 @@ private:
   }
 
   // Feature edges as line segments (x0 y0 z0 x1 y1 z1 ...). Seams and degenerate edges skipped.
-  static void collectEdges(const TopoDS_Shape&    shape,
-                           std::vector<float>&    out,
-                           std::vector<uint32_t>& starts,
-                           std::vector<double>&   data)
+  // Face edges follow their face's mesh; free edges (the XT edges of JT parts) are sampled.
+  void collectEdges(const TopoDS_Shape&    shape,
+                    bool                   freeEdges,
+                    std::vector<float>&    out,
+                    std::vector<uint32_t>& starts,
+                    std::vector<double>&   data) const
   {
     EdgeFacesMap edgeFaces;
     TopExp::MapShapesAndAncestors(shape, TopAbs_EDGE, TopAbs_FACE, edgeFaces);
+    double freeDeflection = 0; // computed for the first free edge
 
     for (int i = 1; i <= edgeFaces.Extent(); ++i)
     {
       const TopoDS_Edge& edge = TopoDS::Edge(edgeFaces.FindKey(i));
-      if (BRep_Tool::Degenerated(edge) || edgeFaces(i).IsEmpty())
+      if (BRep_Tool::Degenerated(edge))
         continue;
+      if (edgeFaces(i).IsEmpty())
+      {
+        if (!freeEdges || !BRep_Tool::IsGeometric(edge))
+          continue; // also VRML line sets: polygon only
+        if (freeDeflection == 0)
+          freeDeflection = deflection(shape);
+        sampleEdge(edge, freeDeflection, out, starts, data);
+        continue;
+      }
       const TopoDS_Face& face = TopoDS::Face(edgeFaces(i).First());
       if (BRep_Tool::IsClosed(edge, face))
         continue; // seam
@@ -572,6 +586,28 @@ private:
       }
       appendEdgeData(edge, length, data);
     }
+  }
+
+  void sampleEdge(const TopoDS_Edge&     edge,
+                  double                 linearDeflection,
+                  std::vector<float>&    out,
+                  std::vector<uint32_t>& starts,
+                  std::vector<double>&   data) const
+  {
+    const BRepAdaptor_Curve           curve(edge);
+    const GCPnts_TangentialDeflection pts(curve, myOpts.angularDeflection, linearDeflection);
+    if (pts.NbPoints() < 2)
+      return;
+    starts.push_back(uint32_t(out.size() / 6));
+    double length = 0;
+    for (int k = 1; k < pts.NbPoints(); ++k)
+    {
+      const gp_Pnt a = pts.Value(k);
+      const gp_Pnt b = pts.Value(k + 1);
+      length += a.Distance(b);
+      out.insert(out.end(), {float(a.X()), float(a.Y()), float(a.Z()), float(b.X()), float(b.Y()), float(b.Z())});
+    }
+    appendEdgeData(edge, length, data);
   }
 
   Options                    myOpts;

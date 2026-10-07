@@ -1,0 +1,33 @@
+Changes to TKJT (PyOpenJt 21faef4) for the 3D Viewer. Applied by wasm/scripts/build-jt-deps.sh.
+
+- JT 10 XT B-Rep elements (the embedded Parasolid data): 16-bit version and a byte after the
+  Parasolid build number, verified on NX-written 10.3 and 10.5 files.
+
+diff --git a/TKJT/src/JtElement/JtElement_XTBRep.cxx b/TKJT/src/JtElement/JtElement_XTBRep.cxx
+index 5021e76..aaac27b 100644
+--- a/TKJT/src/JtElement/JtElement_XTBRep.cxx
++++ b/TKJT/src/JtElement/JtElement_XTBRep.cxx
+@@ -30,6 +30,23 @@ IMPLEMENT_OBJECT_CLASS(JtElement_XTBRep, "XT B-Rep Object",
+ //=======================================================================
+ Standard_Boolean JtElement_XTBRep::Read (JtData_Reader& theReader)
+ {
++  // JT 10: 16-bit version, and one more byte after the build number.
++  if (theReader.Model()->MajorVersion() >= 10)
++  {
++    Jt_I16 aVersion;
++    Jt_U8  aReserved;
++    if (!theReader.ReadI16 (aVersion)
++     || !theReader.ReadI32 (myPKMajorVersion)
++     || !theReader.ReadI32 (myPKMinorVersion)
++     || !theReader.ReadI32 (myPKBuild)
++     || !theReader.ReadU8 (aReserved))
++    {
++      return Standard_False;
++    }
++    myVersion = aVersion;
++    return theReader.ReadVec (myData);
++  }
++
+   if (!JtData_Object::Read (theReader)
+    || !theReader.ReadI32 (myVersion)
+    || !theReader.ReadI32 (myPKMajorVersion)

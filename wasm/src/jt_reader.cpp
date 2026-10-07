@@ -4,13 +4,16 @@
 // tri-strip shape, baked into part coordinates. Other groups become assemblies. The transform and
 // material of a node (and of the instance nodes referencing it) go on the XCAF component that
 // places it; materials below a part become face colours. Of each LOD node only the finest LOD is read.
+// Parts that embed their exact B-rep (XT data) also get its edges, as free edges next to the faces.
 
 #include "jt_reader.h"
+#include "xt_reader.h"
 
 #include <JtAttribute_GeometricTransform.hxx>
 #include <JtAttribute_Material.hxx>
 #include <JtData_Model.hxx>
 #include <JtElement_ShapeLOD_Vertex.hxx>
+#include <JtElement_XTBRep.hxx>
 #include <JtNode_Instance.hxx>
 #include <JtNode_LOD.hxx>
 #include <JtNode_Part.hxx>
@@ -93,6 +96,8 @@ Attributes attributesOf(const Handle(JtNode_Base)& node)
   }
   return a;
 }
+
+constexpr Jt_I32 kXtBRepSegment = 17; // segment type of XT B-Rep data (ISO 14306 segment type table)
 
 bool isLod(const Handle(JtData_Object)& o) { return o->IsKind(STANDARD_TYPE(JtNode_LOD)); }
 bool isShape(const Handle(JtData_Object)& o) { return o->IsKind(STANDARD_TYPE(JtNode_Shape_Base)); }
@@ -260,6 +265,8 @@ private:
     else
     {
       collect(node, gp_Trsf(), {}, compound, faceColors, /*own attributes on the component*/ true);
+      if (auto part = Handle(JtNode_Part)::DownCast(node); !part.IsNull())
+        addXtEdges(part, compound);
     }
 
     if (compound.NbChildren() == 0)
@@ -315,6 +322,35 @@ private:
                                         : group->Children().Count();
     for (Standard_Size i = 0; i < n; ++i)
       collect(Handle(JtNode_Base)::DownCast(group->Children()[i]), trsf, color, compound, faceColors);
+  }
+
+  // Edges of the part's XT B-rep, in part coordinates like the faces. XT data is in metres.
+  static void addXtEdges(const Handle(JtNode_Part)& part, TopoDS_Compound& compound)
+  {
+    const JtData_Object::VectorOfLateLoads& lateLoads = part->LateLoads();
+    for (Standard_Size i = 0; i < lateLoads.Count(); ++i)
+    {
+      const Handle(JtProperty_LateLoaded)& late = lateLoads[i];
+      if (late->getSegmentType() != kXtBRepSegment)
+        continue;
+      try
+      {
+        if (late->DefferedObject().IsNull())
+          late->Load();
+        const auto xt = Handle(JtElement_XTBRep)::DownCast(late->DefferedObject());
+        if (!xt.IsNull())
+        {
+          const Jt_String& data = xt->Data();
+          for (const TopoDS_Edge& edge : readXtEdges(data.Data(), size_t(data.Count()), 1000.0))
+            BRep_Builder().Add(compound, edge);
+        }
+      }
+      catch (const std::exception&)
+      {
+        // Unreadable XT data: the part keeps its mesh without edges.
+      }
+      late->Unload(); // the edges hold their own geometry
+    }
   }
 
   TopoDS_Face triangulate(const Handle(JtNode_Shape_Vertex)& shape, const gp_Trsf& trsf)

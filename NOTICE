@@ -17,3 +17,8 @@ occt-viewer.wasm, and the application as a whole, are distributed under GPL-2.0-
 It also includes liblzma from XZ Utils (https://tukaani.org/xz/), licensed under the BSD Zero Clause
 License, and zlib (https://zlib.net/), Copyright (c) 1995-2024 Jean-loup Gailly and Mark Adler,
 licensed under the zlib License.
+
+The base schema table in wasm/src/xt_schema13006.inc is partly derived from parasolid-kit
+(https://github.com/monozukuri-ai/parasolid-kit), Copyright (c) 2026 parasolid-kit contributors,
+licensed under the MIT License. The Parasolid XT format is read as documented in the Parasolid XT
+Format Reference published by Siemens Industry Software; Parasolid is a trademark of Siemens.
