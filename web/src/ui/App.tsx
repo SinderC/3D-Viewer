@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import type { Viewer } from '../viewer/Viewer';
-import { EXTENSIONS, isSupported } from '../core/formats';
+import { EXTENSIONS, FORMATS, isSupported } from '../core/formats';
 import { loadModel } from '../worker/loadModel';
 import { QUALITY, type Quality } from '../worker/protocol';
+import { LockIcon, OpenFileIcon } from './icons';
 import { Sidebar } from './Sidebar';
 import { initialState, reducer, type State } from './state';
 import { Toolbar } from './Toolbar';
@@ -153,10 +154,22 @@ export function App() {
         {status === 'ready' && <ViewBar state={state} dispatch={dispatch} viewer={viewer} />}
         {status === 'idle' && (
           <div className="overlay">
-            <p>
-              Drop a STEP, IGES, JT, glTF, OBJ, STL, VRML or BREP file here or use <b>File › Open…</b>
-            </p>
-            <p className="muted">Files are processed locally in your browser and never uploaded.</p>
+            <div className="welcome">
+              <OpenFileIcon />
+              <h1>Open a 3D model</h1>
+              <p className="muted">Drag a file anywhere onto this window, or</p>
+              <button className="primary" onClick={() => fileInput.current?.click()}>
+                Choose a file…
+              </button>
+              <ul className="formats" aria-label="Supported formats">
+                {FORMATS.map((f) => (
+                  <li key={f.name}>{f.name}</li>
+                ))}
+              </ul>
+              <p className="muted">
+                <LockIcon /> Files stay on your computer. Nothing is uploaded.
+              </p>
+            </div>
           </div>
         )}
         {status === 'loading' && (

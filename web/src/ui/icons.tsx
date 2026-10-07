@@ -113,3 +113,16 @@ export const ShowAllIcon = () => (
     <circle cx="8" cy="8" r="2" />
   </Icon>
 );
+
+export const OpenFileIcon = () => (
+  <Icon>
+    <path d="M9.5 1.5H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V5z M9.5 1.5V5H13 M8 12V7.5 M6 9.5l2-2 2 2" />
+  </Icon>
+);
+
+export const LockIcon = () => (
+  <Icon>
+    <rect x="3.5" y="7" width="9" height="7" rx="1" />
+    <path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" />
+  </Icon>
+);
