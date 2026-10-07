@@ -8,6 +8,7 @@ import { Measure, type EdgePick, type FacePick, type MeasureMode, type Pick } fr
 import { isShown } from './objects';
 import { PmiLayer } from './pmi';
 import { buildSectionCaps, disposeCaps } from './section';
+import { AxisTriad } from './AxisTriad';
 import { ViewCube } from './ViewCube';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
@@ -70,6 +71,7 @@ export class Viewer {
   private readonly capOutline = new THREE.LineBasicMaterial({ color: 0x1e2026 });
   private readonly resizeObserver: ResizeObserver;
   private readonly cube: ViewCube;
+  private readonly triad: AxisTriad;
   private readonly pmi = new PmiLayer();
   private grid: THREE.GridHelper | null = null;
   private gridVisible = false;
@@ -120,6 +122,7 @@ export class Viewer {
 
     this.measure = new Measure(this.scene, container);
     this.cube = new ViewCube(container, VIEW_DIRS.iso, (dir) => this.frame(dir, this.visibleBounds(), true, Z_UP));
+    this.triad = new AxisTriad(container);
 
     const canvas = this.renderer.domElement;
     canvas.addEventListener('pointerdown', (e) => (this.pointerDown = { x: e.clientX, y: e.clientY }));
@@ -138,6 +141,7 @@ export class Viewer {
     this.controls.dispose();
     this.measure.dispose();
     this.cube.dispose();
+    this.triad.dispose();
     this.pmi.dispose();
     this.capOutline.dispose();
     this.renderer.dispose();
@@ -204,6 +208,7 @@ export class Viewer {
     this.setDisplayStyle(this.display);
     this.frame(VIEW_DIRS.iso, this.bounds, false, Z_UP);
     this.cube.setVisible(true);
+    this.triad.setVisible(true);
   }
 
   private makeMaterial(color: THREE.Color, alpha: number): THREE.MeshStandardMaterial {
@@ -252,6 +257,7 @@ export class Viewer {
     this.measure.clear();
     this.pmi.clear();
     this.cube.setVisible(false);
+    this.triad.setVisible(false);
     this.requestRender();
   }
 
@@ -656,6 +662,7 @@ export class Viewer {
       this.renderQueued = false;
       this.renderer.render(this.scene, this.camera);
       this.cube.update(this.camera);
+      this.triad.update(this.camera);
       this.measure.updateLabel(this.camera, this.renderer.domElement);
     });
   };

@@ -225,8 +225,14 @@ button.icon[aria-pressed='true'] { color: var(--accent); background: var(--selec
 .viewcube .home { position: absolute; top: 0; left: 0; padding: 3px; background: none; border-color: transparent; color: var(--muted); }
 .viewcube .home:hover { color: var(--text); }
 
+/* XYZ axis indicator (AxisTriad.ts); size matches SIZE there */
+.axis-triad { position: absolute; right: 12px; bottom: 12px; width: 80px; height: 80px; pointer-events: none; overflow: visible; }
+.axis-triad line { stroke-width: 2.5; stroke-linecap: round; }
+.axis-triad text { stroke: none; font-size: 12px; font-weight: 700; text-anchor: middle; dominant-baseline: central; user-select: none; }
+
 @media (max-width: 700px) {
   .viewcube { transform: scale(0.75); transform-origin: top right; }
+  .axis-triad { transform: scale(0.75); transform-origin: bottom right; }
   .app { grid-template: 'bar' auto 'stage' 1fr 'side' 40% / 1fr; }
   .sidebar { border-right: 0; border-top: 1px solid var(--line); }
 }
