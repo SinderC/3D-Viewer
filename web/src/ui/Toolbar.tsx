@@ -1,5 +1,5 @@
 import { QUALITY, type Quality } from '../worker/protocol';
-import { Chevron, GitHubIcon } from './icons';
+import { Chevron, GitHubIcon, PropertiesIcon } from './icons';
 import { Menu } from './Menu';
 import type { State } from './state';
 
@@ -9,11 +9,13 @@ interface Props {
   onClose: () => void;
   quality: Quality;
   onQuality: (q: Quality) => void;
+  showProps: boolean;
+  onToggleProps: () => void;
 }
 
 const MOD = /Mac|iPhone|iPad/.test(navigator.userAgent) ? '⌘' : 'Ctrl+';
 
-export function Toolbar({ status, onOpen, onClose, quality, onQuality }: Props) {
+export function Toolbar({ status, onOpen, onClose, quality, onQuality, showProps, onToggleProps }: Props) {
   return (
     <header className="toolbar">
       <Menu title="File" label={<>File <Chevron /></>} className="menu-trigger">
@@ -34,6 +36,15 @@ export function Toolbar({ status, onOpen, onClose, quality, onQuality }: Props) 
           ))}
         </select>
       </label>
+      <button
+        className="icon props-toggle"
+        aria-pressed={showProps}
+        onClick={onToggleProps}
+        title="Properties panel"
+        aria-label="Properties panel"
+      >
+        <PropertiesIcon />
+      </button>
       <a
         className="repo-link"
         href="https://github.com/SinderC/3D-Viewer"

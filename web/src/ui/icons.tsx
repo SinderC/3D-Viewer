@@ -29,6 +29,13 @@ export const Chevron = () => (
   </Icon>
 );
 
+export const PropertiesIcon = () => (
+  <Icon>
+    <rect x="1.75" y="2.5" width="12.5" height="11" rx="1.5" />
+    <path d="M9.5 2.5v11M11.25 5.5h1M11.25 8h1" />
+  </Icon>
+);
+
 export const FitIcon = () => (
   <Icon>
     <path d={CORNERS} />

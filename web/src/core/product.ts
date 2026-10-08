@@ -1,5 +1,5 @@
-// Info panel rows for what a file says about a part beyond its shape, and checks of its
-// validation properties (ISO 10303-203 Amd 1) against the geometry as loaded.
+// Properties panel rows checking a part's validation properties (ISO 10303-203 Amd 1)
+// against the geometry as loaded.
 import type { Product } from './model';
 import { UNITS, type UnitId } from './units';
 
@@ -7,7 +7,7 @@ import { UNITS, type UnitId } from './units';
 export const TOLERANCE = 0.001;
 
 type Dim = 1 | 2 | 3;
-type Row = [label: string, value: string, title?: string];
+export type Row = [label: string, value: string, title?: string];
 
 const mark = (ok: boolean) => (ok ? '✓' : '✗');
 const unitOf = (unit: UnitId) => UNITS[unit === 'ft-in' ? 'in' : unit];
@@ -42,13 +42,19 @@ function centroidRow(c: number[], volume: number | undefined, unit: UnitId): Row
   return ['Centroid', verdict + stated, `File ${stated}, computed ${point(c.slice(3))} (${formatMeasure(distance, unit, 1)} apart)`];
 }
 
-/** Info panel rows: product data, validation properties, then user-defined attributes (often many). */
-export function productInfo(p: Product, unit: UnitId): Row[] {
-  const rows: Row[] = [...p.props];
+/** Rows checking the part's validation properties: volume, surface area and centroid. */
+export function validationInfo(p: Product, unit: UnitId): Row[] {
+  const rows: Row[] = [];
   if (p.volume) rows.push(measureRow('Volume', p.volume, unit, 3));
   if (p.area) rows.push(measureRow('Surface area', p.area, unit, 2));
   if (p.centroid) rows.push(centroidRow(p.centroid, p.volume?.[0], unit));
-  return [...rows, ...p.attributes];
+  return rows;
+}
+
+/** How many rows failed their check, or undefined when no row was checked. */
+export function failures(rows: Row[]): number | undefined {
+  const checked = rows.filter(([, value]) => value.startsWith(`${mark(true)} `) || value.startsWith(`${mark(false)} `));
+  return checked.length ? checked.filter(([, value]) => value.startsWith(mark(false))).length : undefined;
 }
 
 /** Value and tooltip for a count loaded from the file, checked against the count the file states. */

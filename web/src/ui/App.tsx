@@ -4,8 +4,11 @@ import { EXTENSIONS, FORMATS, isSupported } from '../core/formats';
 import { loadModel } from '../worker/loadModel';
 import { QUALITY, type Quality } from '../worker/protocol';
 import { LockIcon, OpenFileIcon } from './icons';
+import { Properties } from './Properties';
 import { Sidebar } from './Sidebar';
+import { Splitter } from './Splitter';
 import { initialState, reducer, type State } from './state';
+import { load, save } from './storage';
 import { Toolbar } from './Toolbar';
 import { ViewBar } from './ViewBar';
 import { ViewerCanvas } from './ViewerCanvas';
@@ -21,14 +24,25 @@ declare global {
 }
 
 const QUALITY_KEY = 'quality';
+const PROPS_KEY = 'properties';
 
-// Storage can be unavailable (private mode, blocked site data); the setting is a convenience.
 function storedQuality(): Quality {
-  try {
-    const q = localStorage.getItem(QUALITY_KEY);
-    if (q && q in QUALITY) return q as Quality;
-  } catch {}
-  return 'normal';
+  const q = load(QUALITY_KEY);
+  return q && q in QUALITY ? (q as Quality) : 'normal';
+}
+
+// Windows this narrow stack the sidebar under the viewer (see styles.css) and show properties as a tab.
+const NARROW = '(max-width: 700px)';
+
+function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(() => matchMedia(query).matches);
+  useEffect(() => {
+    const list = matchMedia(query);
+    const onChange = () => setMatches(list.matches);
+    list.addEventListener('change', onChange);
+    return () => list.removeEventListener('change', onChange);
+  }, [query]);
+  return matches;
 }
 
 const STAGES: Record<string, string> = { read: 'Parsing', transfer: 'Translating', mesh: 'Meshing' };
@@ -39,6 +53,9 @@ export function App() {
   const fileInput = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [quality, setQuality] = useState<Quality>(storedQuality);
+  const [showProps, setShowProps] = useState(() => load(PROPS_KEY) !== 'hidden');
+  const narrow = useMediaQuery(NARROW);
+  const propsPanel = showProps && !narrow;
   const lastFile = useRef<File | null>(null);
   const loading = useRef<AbortController | null>(null);
 
@@ -79,10 +96,13 @@ export function App() {
   // Quality is applied at load time, so reload the open model with the new setting.
   const changeQuality = (q: Quality) => {
     setQuality(q);
-    try {
-      localStorage.setItem(QUALITY_KEY, q);
-    } catch {}
+    save(QUALITY_KEY, q);
     if (lastFile.current) open(lastFile.current, q);
+  };
+
+  const toggleProps = () => {
+    setShowProps(!showProps);
+    save(PROPS_KEY, showProps ? 'hidden' : null);
   };
 
   // Files opened via the OS when installed as a PWA.
@@ -117,7 +137,7 @@ export function App() {
   const { status } = state;
   return (
     <div
-      className="app"
+      className={`app${propsPanel ? '' : ' no-props'}`}
       onDragOver={(e) => {
         e.preventDefault();
         setDragging(true);
@@ -136,6 +156,8 @@ export function App() {
         onClose={close}
         quality={quality}
         onQuality={changeQuality}
+        showProps={showProps}
+        onToggleProps={toggleProps}
       />
       <input
         ref={fileInput}
@@ -148,7 +170,7 @@ export function App() {
           e.target.value = '';
         }}
       />
-      <Sidebar state={state} dispatch={dispatch} />
+      <Sidebar state={state} dispatch={dispatch} info={narrow} />
       <main className="stage">
         <ViewerCanvas state={state} dispatch={dispatch} viewerRef={viewer} />
         {status === 'ready' && <ViewBar state={state} dispatch={dispatch} viewer={viewer} />}
@@ -186,6 +208,14 @@ export function App() {
         )}
         {dragging && <div className="overlay drop">Drop to open</div>}
       </main>
+      {propsPanel && (
+        <aside className="props">
+          <Splitter variable="--props-w" edge="left" />
+          <div className="tree">
+            <Properties state={state} />
+          </div>
+        </aside>
+      )}
     </div>
   );
 }
