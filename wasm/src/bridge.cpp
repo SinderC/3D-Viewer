@@ -757,6 +757,17 @@ private:
       for (const TDF_Label& ref : *refs)
         addFaces(ref, p);
 
+    // OCCT makes a datum for each tolerance that references it: keep the first of each.
+    if (p.kind == "datum")
+    {
+      const std::string key = std::to_string(p.proto) + '\n' + p.type + '\n' + p.name;
+      if (const auto [it, isNew] = myDatumByKey.try_emplace(key, int(myPmi.size())); !isNew)
+      {
+        myPmiByEntry[entryOf(label)] = it->second;
+        return;
+      }
+    }
+
     // Presentations are lines (leaders, frames) and triangulated faces (filled text glyphs).
     std::vector<float> segments, triangles;
     if (!presentation.IsNull())
@@ -828,7 +839,8 @@ private:
       LabelSequence gdts;
       myViews->GetRefGDTLabel(l, gdts);
       for (const TDF_Label& g : gdts)
-        if (auto it = myPmiByEntry.find(entryOf(g)); it != myPmiByEntry.end())
+        if (auto it = myPmiByEntry.find(entryOf(g));
+            it != myPmiByEntry.end() && std::find(v.pmi.begin(), v.pmi.end(), it->second) == v.pmi.end())
           v.pmi.push_back(it->second);
       myViewList.push_back(std::move(v));
     }
@@ -918,6 +930,7 @@ private:
   Handle(XCAFDoc_ViewTool)   myViews;
   std::vector<Pmi>           myPmi;
   std::map<std::string, int> myPmiByEntry;
+  std::map<std::string, int> myDatumByKey; // part, type and name → PMI index
   std::vector<SavedView>     myViewList;
 };
 
