@@ -1,5 +1,5 @@
 import { QUALITY, type Quality } from '../worker/protocol';
-import { Chevron } from './icons';
+import { Chevron, GitHubIcon } from './icons';
 import { Menu } from './Menu';
 import type { State } from './state';
 
@@ -34,6 +34,16 @@ export function Toolbar({ status, onOpen, onClose, quality, onQuality }: Props) 
           ))}
         </select>
       </label>
+      <a
+        className="repo-link"
+        href="https://github.com/SinderC/3D-Viewer"
+        target="_blank"
+        rel="noopener noreferrer"
+        title="Source on GitHub"
+        aria-label="Source on GitHub"
+      >
+        <GitHubIcon />
+      </a>
     </header>
   );
 }

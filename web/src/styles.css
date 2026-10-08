@@ -31,6 +31,9 @@ html, body, #root { height: 100%; margin: 0; }
   flex-wrap: wrap;
 }
 .toolbar label { display: inline-flex; align-items: center; gap: 4px; }
+.repo-link { margin-left: auto; padding: 4px; color: var(--muted); }
+.repo-link:hover { color: var(--text); }
+.repo-link svg { display: block; }
 .sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 4px; }
 
 button, select {
