@@ -28,6 +28,16 @@ describe('pmiLabel', () => {
     );
   });
 
+  it('adds the length or area a tolerance applies per', () => {
+    const flatness = item({ kind: 'tolerance', type: 'Flatness', value: [0.05], perUnit: [25], unitArea: 'circular' });
+    expect(pmiLabel(flatness, 'mm')).toBe('Flatness 0.050 mm / Ø25.000 mm');
+    expect(pmiInfo(flatness, 'mm')).toContainEqual(['Per unit', 'Ø25.000 mm area']);
+    const straightness = item({ kind: 'tolerance', type: 'Straightness', value: [0.2], perUnit: [15] });
+    expect(pmiInfo(straightness, 'mm')).toContainEqual(['Per unit', '15.000 mm length']);
+    const area = item({ kind: 'tolerance', type: 'Flatness', value: [0.1], perUnit: [10, 20], unitArea: 'rectangular' });
+    expect(pmiLabel(area, 'mm')).toBe('Flatness 0.100 mm / 10.000 mm × 20.000 mm');
+  });
+
   it('uses the name for notes and the type for datums', () => {
     expect(pmiLabel(item({ kind: 'note', type: 'Note', name: 'Note 1' }), 'mm')).toBe('Note 1');
     expect(pmiLabel(item({ kind: 'datum', type: 'Datum A' }), 'mm')).toBe('Datum A');

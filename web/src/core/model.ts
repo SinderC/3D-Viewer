@@ -43,6 +43,9 @@ export interface PmiItem {
   plusMinus?: [lower: number, upper: number];
   range?: [lower: number, upper: number];
   angular?: boolean;
+  /** Length, or area sides, a tolerance applies per (e.g. flatness 0.05 per Ø25 area). */
+  perUnit?: [number] | [number, number];
+  unitArea?: 'circular' | 'rectangular' | 'square';
   datums?: string[];
 }
 
