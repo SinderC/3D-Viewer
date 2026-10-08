@@ -20,6 +20,8 @@ Changes to OCCT (V8_0_1) for the 3D Viewer. Applied by wasm/scripts/build-occt.s
   and prefer it over a property definition on the same shape aspect (AP242 attaches semantic
   text there). OCCT dropped such PMI because it found no shapes.
 - Dimensions without a value still read their presentation.
+- A presentation whose PMI could not be read (an unsupported entity, e.g. a tolerance with a
+  defined unit or area unit) is imported as a note, even when other PMI shares its shape aspect.
 - Tolerances on the whole part find the B-rep through shape_representation_relationship when
   the part's shape representation is not the B-rep itself.
 
@@ -105,10 +107,18 @@ index aac5b931..6471b4d2 100644
      anItems = new NCollection_HArray1<occ::handle<StepRepr_RepresentationItem>>(1, nbElements);
      for (int i = 1; i <= nbElements; i++)
 diff --git a/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx b/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx
-index 1262ea95..538c685b 100644
+index 1262ea95..858a3344 100644
 --- a/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx
 +++ b/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx
-@@ -2769,29 +2769,48 @@ bool readAnnotationPlane(const occ::handle<StepVisual_AnnotationPlane>& theAnnot
+@@ -21,6 +21,7 @@
+ #include <Geom_Plane.hxx>
+ #include <Interface_EntityIterator.hxx>
+ #include <StepData_StepModel.hxx>
++#include <StepData_UndefinedEntity.hxx>
+ #include <HeaderSection_FileSchema.hxx>
+ #include <Message_ProgressScope.hxx>
+ #include <NCollection_DataMap.hxx>
+@@ -2769,29 +2770,48 @@ bool readAnnotationPlane(const occ::handle<StepVisual_AnnotationPlane>& theAnnot
  // purpose  : read annotation plane and position for given GDT
  // (Dimension, Geometric_Tolerance, Datum_Feature or Placed_Datum_Target_Feature)
  //=======================================================================
@@ -170,7 +180,7 @@ index 1262ea95..538c685b 100644
      occ::handle<TCollection_HAsciiString> aName = aDMIA->Name();
      aName->LowerCase();
      if (!aName->Search(new TCollection_HAsciiString("pmi representation to presentation link")))
-@@ -2799,6 +2818,24 @@ void readAnnotation(const occ::handle<XSControl_TransferReader>& theTR,
+@@ -2799,6 +2819,24 @@ void readAnnotation(const occ::handle<XSControl_TransferReader>& theTR,
        aDMIA = nullptr;
      }
    }
@@ -195,7 +205,7 @@ index 1262ea95..538c685b 100644
    if (aDMIA.IsNull() || aDMIA->NbIdentifiedItem() == 0)
    {
      return;
-@@ -3241,6 +3278,21 @@ static int FindShapeIndexForDGT(const occ::handle<Standard_Transient>&    theEnt
+@@ -3241,6 +3279,21 @@ static int FindShapeIndexForDGT(const occ::handle<Standard_Transient>&    theEnt
  
  //=================================================================================================
  
@@ -217,7 +227,7 @@ index 1262ea95..538c685b 100644
  static void collectShapeAspect(const occ::handle<StepRepr_ShapeAspect>&                 theSA,
                                 const occ::handle<XSControl_WorkSession>&                theWS,
                                 NCollection_Sequence<occ::handle<StepRepr_ShapeAspect>>& theSAs)
-@@ -3399,6 +3451,51 @@ bool STEPCAFControl_Reader::setDatumToXCAF(
+@@ -3399,6 +3452,51 @@ bool STEPCAFControl_Reader::setDatumToXCAF(
        }
      }
    }
@@ -269,7 +279,7 @@ index 1262ea95..538c685b 100644
  
    // Process datum targets and create objects for them
    bool isExistDatumTarget = false;
-@@ -3938,6 +4035,26 @@ TDF_Label STEPCAFControl_Reader::createGDTObjectInXCAF(
+@@ -3938,6 +4036,26 @@ TDF_Label STEPCAFControl_Reader::createGDTObjectInXCAF(
              {
                aSeqRI1.Append(anAtrABSR);
              }
@@ -296,7 +306,7 @@ index 1262ea95..538c685b 100644
            }
          }
        }
-@@ -3981,13 +4098,21 @@ TDF_Label STEPCAFControl_Reader::createGDTObjectInXCAF(
+@@ -3981,13 +4099,21 @@ TDF_Label STEPCAFControl_Reader::createGDTObjectInXCAF(
             i <= aSAs.Upper();
             i++)
        {
@@ -324,7 +334,7 @@ index 1262ea95..538c685b 100644
          }
          if (!PropD.IsNull()) // for old version
          {
-@@ -4772,23 +4897,19 @@ static void setDimObjectToXCAF(const occ::handle<Standard_Transient>&    theEnt,
+@@ -4772,23 +4898,19 @@ static void setDimObjectToXCAF(const occ::handle<Standard_Transient>&    theEnt,
      }
    }
  
@@ -352,7 +362,7 @@ index 1262ea95..538c685b 100644
    {
      occ::handle<NCollection_HArray1<double>> anArr = new NCollection_HArray1<double>(1, 3);
      if (!isPlusMinusTolerance)
-@@ -5304,6 +5425,36 @@ static void setGeomTolObjectToXCAF(const occ::handle<Standard_Transient>&    the
+@@ -5304,6 +5426,36 @@ static void setGeomTolObjectToXCAF(const occ::handle<Standard_Transient>&    the
  
  //=================================================================================================
  
@@ -389,7 +399,7 @@ index 1262ea95..538c685b 100644
  bool STEPCAFControl_Reader::ReadGDTs(const occ::handle<XSControl_WorkSession>& theWS,
                                       const occ::handle<TDocStd_Document>&      theDoc,
                                       const StepData_Factors&                   theLocalFactors)
-@@ -5326,6 +5477,8 @@ bool STEPCAFControl_Reader::ReadGDTs(const occ::handle<XSControl_WorkSession>& t
+@@ -5326,6 +5478,8 @@ bool STEPCAFControl_Reader::ReadGDTs(const occ::handle<XSControl_WorkSession>& t
    }
  
    int nb = aModel->NbEntities();
@@ -398,7 +408,7 @@ index 1262ea95..538c685b 100644
    for (int i = 1; i <= nb; i++)
    {
      occ::handle<Standard_Transient> anEnt = aModel->Value(i);
-@@ -5333,6 +5486,10 @@ bool STEPCAFControl_Reader::ReadGDTs(const occ::handle<XSControl_WorkSession>& t
+@@ -5333,6 +5487,10 @@ bool STEPCAFControl_Reader::ReadGDTs(const occ::handle<XSControl_WorkSession>& t
          || anEnt->IsKind(STANDARD_TYPE(StepShape_DimensionalLocation))
          || anEnt->IsKind(STANDARD_TYPE(StepDimTol_GeometricTolerance)))
      {
@@ -409,7 +419,7 @@ index 1262ea95..538c685b 100644
        TDF_Label aGDTL = createGDTObjectInXCAF(anEnt, theDoc, theWS, theLocalFactors);
        if (!aGDTL.IsNull())
        {
-@@ -5350,6 +5507,10 @@ bool STEPCAFControl_Reader::ReadGDTs(const occ::handle<XSControl_WorkSession>& t
+@@ -5350,6 +5508,10 @@ bool STEPCAFControl_Reader::ReadGDTs(const occ::handle<XSControl_WorkSession>& t
               || anEnt->IsKind(STANDARD_TYPE(StepVisual_AnnotationOccurrence))
               || anEnt->IsKind(STANDARD_TYPE(StepVisual_TessellatedAnnotationOccurrence)))
      {
@@ -420,13 +430,15 @@ index 1262ea95..538c685b 100644
        // Protection against import presentation twice
        occ::handle<StepVisual_DraughtingCallout> aDC;
        for (Interface_EntityIterator anIter = aGraph.Sharings(anEnt); anIter.More() && aDC.IsNull();
-@@ -5361,14 +5522,51 @@ bool STEPCAFControl_Reader::ReadGDTs(const occ::handle<XSControl_WorkSession>& t
+@@ -5361,14 +5523,54 @@ bool STEPCAFControl_Reader::ReadGDTs(const occ::handle<XSControl_WorkSession>& t
        {
          continue;
        }
 +      // Skip presentations already read with the semantic PMI they present (AP242 e3 also
 +      // links them to a plain shape aspect, which would read them a second time as a note)
-+      bool isRead = false;
++      // An association whose definition could not be read (an unsupported PMI entity) makes the
++      // presentation the only import of that PMI, whatever else shares its shape aspect.
++      bool isRead = false, isUnreadPMI = false;
 +      for (Interface_EntityIterator anIter = aGraph.Sharings(anEnt); anIter.More() && !isRead;
 +           anIter.Next())
 +      {
@@ -434,6 +446,7 @@ index 1262ea95..538c685b 100644
 +          occ::down_cast<StepAP242_DraughtingModelItemAssociation>(anIter.Value());
 +        const occ::handle<Standard_Transient> aDef =
 +          anAssoc.IsNull() ? occ::handle<Standard_Transient>() : anAssoc->Definition().Value();
++        isUnreadPMI = isUnreadPMI || (!aDef.IsNull() && aDef->IsKind(STANDARD_TYPE(StepData_UndefinedEntity)));
 +        if (!isSemanticGDT(aDef) || !myGDTMap.IsBound(aDef) || !hasPresentation(myGDTMap.Find(aDef)))
 +        {
 +          continue;
@@ -476,3 +489,12 @@ index 1262ea95..538c685b 100644
        }
        if (!aDMIA.IsNull())
        {
+@@ -5426,7 +5628,7 @@ bool STEPCAFControl_Reader::ReadGDTs(const occ::handle<XSControl_WorkSession>& t
+               }
+             }
+           }
+-          if (isConnectedToGDT)
++          if (isConnectedToGDT && !isUnreadPMI)
+           {
+             continue;
+           }
