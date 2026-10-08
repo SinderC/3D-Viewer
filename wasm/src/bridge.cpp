@@ -143,6 +143,8 @@ struct Pmi
   std::vector<double>      plusMinus;  // lower and upper tolerance, if any
   std::vector<double>      range;      // lower and upper limit, if any
   bool                     angular = false; // values in degrees, not model units
+  std::vector<double>      perUnit;  // length or area sides a tolerance applies per, if any
+  std::string              unitArea; // circular, rectangular or square for a unit area
   std::vector<std::string> datums;
 };
 
@@ -720,6 +722,20 @@ private:
       p.kind  = "tolerance";
       p.type  = toleranceType(obj->GetType());
       p.value = {obj->GetValue()};
+      if (obj->GetUnitSize() > 0)
+      {
+        p.perUnit = {obj->GetUnitSize()};
+        switch (obj->GetUnitArea())
+        {
+          case XCAFDimTolObjects_GeomToleranceUnitArea_Circular: p.unitArea = "circular"; break;
+          case XCAFDimTolObjects_GeomToleranceUnitArea_Square: p.unitArea = "square"; break;
+          case XCAFDimTolObjects_GeomToleranceUnitArea_Rectangular:
+            p.unitArea = "rectangular";
+            p.perUnit.push_back(obj->GetSecondUnitSize());
+            break;
+          default: break;
+        }
+      }
       LabelSequence datums;
       XCAFDoc_DimTolTool::GetDatumOfTolerLabels(l, datums);
       for (const TDF_Label& d : datums)
@@ -1327,6 +1343,9 @@ std::string toJson(const Source& src, const Builder& b)
     numbers("value", p.value);
     numbers("plusMinus", p.plusMinus);
     numbers("range", p.range);
+    numbers("perUnit", p.perUnit);
+    if (!p.unitArea.empty())
+      o << ",\"unitArea\":\"" << p.unitArea << '"';
     if (p.angular)
       o << ",\"angular\":true";
     if (!p.datums.empty())

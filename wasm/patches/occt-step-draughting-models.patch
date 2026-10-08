@@ -22,14 +22,79 @@ Changes to OCCT (V8_0_1) for the 3D Viewer. Applied by wasm/scripts/build-occt.s
 - Dimensions without a value still read their presentation.
 - A presentation whose PMI could not be read (an unsupported entity, e.g. a tolerance with a
   defined unit or area unit) is imported as a note, even when other PMI shares its shape aspect.
+- STEP: read tolerances per unit length or area (a tolerance type with
+  GEOMETRIC_TOLERANCE_WITH_DEFINED_UNIT and optionally _WITH_DEFINED_AREA_UNIT) as the new
+  complex entity StepDimTol_GeoTolAndGeoTolWthDefUnit (type 827). XCAF tolerances get the unit
+  size, second unit size and unit area shape (XCAFDimTolObjects_GeomToleranceUnitArea), stored
+  under a new child label. OCCT read these as unknown entities and dropped them.
 - Tolerances on the whole part find the B-rep through shape_representation_relationship when
   the part's shape representation is not the B-rep itself.
 
+diff --git a/src/DataExchange/TKDESTEP/RWStepAP214/RWStepAP214_GeneralModule.cxx b/src/DataExchange/TKDESTEP/RWStepAP214/RWStepAP214_GeneralModule.cxx
+index 7bdca385..0a7c1e69 100644
+--- a/src/DataExchange/TKDESTEP/RWStepAP214/RWStepAP214_GeneralModule.cxx
++++ b/src/DataExchange/TKDESTEP/RWStepAP214/RWStepAP214_GeneralModule.cxx
+@@ -1150,6 +1150,8 @@ IMPLEMENT_STANDARD_RTTIEXT(RWStepAP214_GeneralModule, StepData_GeneralModule)
+ #include "../RWStepDimTol/RWStepDimTol_RWGeneralDatumReference.pxx"
+ #include "../RWStepDimTol/RWStepDimTol_RWGeoTolAndGeoTolWthDatRef.pxx"
+ #include "../RWStepDimTol/RWStepDimTol_RWGeoTolAndGeoTolWthDatRefAndGeoTolWthMod.pxx"
++#include "../RWStepDimTol/RWStepDimTol_RWGeoTolAndGeoTolWthDefUnit.pxx"
++#include <StepDimTol_GeoTolAndGeoTolWthDefUnit.hxx>
+ #include "../RWStepDimTol/RWStepDimTol_RWGeoTolAndGeoTolWthMod.pxx"
+ #include "../RWStepDimTol/RWStepDimTol_RWGeoTolAndGeoTolWthDatRefAndUneqDisGeoTol.pxx"
+ #include "../RWStepRepr/RWStepRepr_RWCompGroupShAspAndCompShAspAndDatumFeatAndShAsp.pxx"
+@@ -4568,6 +4570,12 @@ void RWStepAP214_GeneralModule::FillSharedCase(const int
+       tool.Share(anent, iter);
+     }
+     break;
++    case 827: {
++      DeclareAndCast(StepDimTol_GeoTolAndGeoTolWthDefUnit, anent, ent);
++      RWStepDimTol_RWGeoTolAndGeoTolWthDefUnit tool;
++      tool.Share(anent, iter);
++    }
++    break;
+     case 697: {
+       DeclareAndCast(StepDimTol_GeoTolAndGeoTolWthDatRefAndUneqDisGeoTol, anent, ent);
+       RWStepDimTol_RWGeoTolAndGeoTolWthDatRefAndUneqDisGeoTol tool;
+@@ -7224,6 +7232,9 @@ bool RWStepAP214_GeneralModule::NewVoid(const int CN, occ::handle<Standard_Trans
+     case 696:
+       ent = new StepDimTol_GeoTolAndGeoTolWthMod;
+       break;
++    case 827:
++      ent = new StepDimTol_GeoTolAndGeoTolWthDefUnit;
++      break;
+     case 697:
+       ent = new StepDimTol_GeoTolAndGeoTolWthDatRefAndUneqDisGeoTol;
+       break;
+@@ -8320,6 +8331,7 @@ int RWStepAP214_GeneralModule::CategoryNumber(const int CN,
+     case 695:
+     case 696:
+     case 697:
++    case 827:
+       return cataux;
+     case 698:
+     case 699:
 diff --git a/src/DataExchange/TKDESTEP/RWStepAP214/RWStepAP214_ReadWriteModule.cxx b/src/DataExchange/TKDESTEP/RWStepAP214/RWStepAP214_ReadWriteModule.cxx
-index f339ce69..3399fa22 100644
+index f339ce69..f9aad21c 100644
 --- a/src/DataExchange/TKDESTEP/RWStepAP214/RWStepAP214_ReadWriteModule.cxx
 +++ b/src/DataExchange/TKDESTEP/RWStepAP214/RWStepAP214_ReadWriteModule.cxx
-@@ -2377,6 +2377,9 @@ static constexpr std::string_view Reco_FeatureForDatumTargetRelationship(
+@@ -1349,6 +1349,7 @@ IMPLEMENT_STANDARD_RTTIEXT(RWStepAP214_ReadWriteModule, StepData_ReadWriteModule
+ #include "../RWStepRepr/RWStepRepr_RWReprItemAndPlaneAngleMeasureWithUnitAndQRI.pxx"
+ #include "../RWStepDimTol/RWStepDimTol_RWGeoTolAndGeoTolWthDatRef.pxx"
+ #include "../RWStepDimTol/RWStepDimTol_RWGeoTolAndGeoTolWthDatRefAndGeoTolWthMod.pxx"
++#include "../RWStepDimTol/RWStepDimTol_RWGeoTolAndGeoTolWthDefUnit.pxx"
+ #include "../RWStepDimTol/RWStepDimTol_RWGeoTolAndGeoTolWthMod.pxx"
+ #include "../RWStepDimTol/RWStepDimTol_RWGeoTolAndGeoTolWthDatRefAndUneqDisGeoTol.pxx"
+ #include "../RWStepRepr/RWStepRepr_RWCompGroupShAspAndCompShAspAndDatumFeatAndShAsp.pxx"
+@@ -1402,6 +1403,7 @@ IMPLEMENT_STANDARD_RTTIEXT(RWStepAP214_ReadWriteModule, StepData_ReadWriteModule
+ #include <StepRepr_ReprItemAndPlaneAngleMeasureWithUnitAndQRI.hxx>
+ #include <StepDimTol_GeoTolAndGeoTolWthDatRef.hxx>
+ #include <StepDimTol_GeoTolAndGeoTolWthDatRefAndGeoTolWthMod.hxx>
++#include <StepDimTol_GeoTolAndGeoTolWthDefUnit.hxx>
+ #include <StepDimTol_GeoTolAndGeoTolWthMod.hxx>
+ #include <StepDimTol_GeoTolAndGeoTolWthDatRefAndUneqDisGeoTol.hxx>
+ #include <StepRepr_CompGroupShAspAndCompShAspAndDatumFeatAndShAsp.hxx>
+@@ -2377,6 +2379,9 @@ static constexpr std::string_view Reco_FeatureForDatumTargetRelationship(
    "FEATURE_FOR_DATUM_TARGET_RELATIONSHIP");
  static constexpr std::string_view Reco_DraughtingModelItemAssociation(
    "DRAUGHTING_MODEL_ITEM_ASSOCIATION");
@@ -39,7 +104,7 @@ index f339ce69..3399fa22 100644
  static constexpr std::string_view Reco_AnnotationPlane("ANNOTATION_PLANE");
  
  static constexpr std::string_view Reco_TessellatedAnnotationOccurrence(
-@@ -3639,6 +3642,7 @@ static void initializeTypenums(StringViewDataMap& theTypenums)
+@@ -3639,6 +3644,7 @@ static void initializeTypenums(StringViewDataMap& theTypenums)
    theTypenums.Bind(Reco_ValueRepresentationItem, 701);
    theTypenums.Bind(Reco_FeatureForDatumTargetRelationship, 702);
    theTypenums.Bind(Reco_DraughtingModelItemAssociation, 703);
@@ -47,7 +112,37 @@ index f339ce69..3399fa22 100644
    theTypenums.Bind(Reco_AnnotationPlane, 704);
  
    theTypenums.Bind(Reco_TessellatedAnnotationOccurrence, 707);
-@@ -4516,6 +4520,13 @@ int RWStepAP214_ReadWriteModule::CaseStep(
+@@ -4418,6 +4424,29 @@ int RWStepAP214_ReadWriteModule::CaseStep(
+       }
+     }
+ 
++    // Tolerance per unit length or area: a tolerance type with geometric_tolerance and
++    // geometric_tolerance_with_defined_unit (and _with_defined_area_unit), nothing else
++    {
++      bool hasTolerance = false, hasUnit = false, hasType = false, hasOther = false;
++      for (i = 1; i <= NbComp; i++)
++      {
++        int aType = 0;
++        THE_TYPENUMS.Find(static_cast<std::string_view>(types(i)), aType);
++        if (aType == 625)
++          hasTolerance = true;
++        else if (aType == 674)
++          hasUnit = true;
++        else if (aType == 609 || (aType >= 611 && aType <= 624))
++          hasType = true;
++        else if (aType != 673)
++          hasOther = true;
++      }
++      if (hasTolerance && hasUnit && hasType && !hasOther)
++      {
++        return 827;
++      }
++    }
++
+     if (NbComp == 8)
+     {
+       if ((types(1).IsEqual(StepType(729))) && (types(2).IsEqual(StepType(144)))
+@@ -4516,6 +4545,13 @@ int RWStepAP214_ReadWriteModule::CaseStep(
        {
          return 337;
        }
@@ -61,7 +156,7 @@ index f339ce69..3399fa22 100644
      }
      else if (NbComp == 5)
      {
-@@ -4650,6 +4661,12 @@ int RWStepAP214_ReadWriteModule::CaseStep(
+@@ -4650,6 +4686,12 @@ int RWStepAP214_ReadWriteModule::CaseStep(
        {
          return 715;
        }
@@ -74,6 +169,52 @@ index f339ce69..3399fa22 100644
      }
      else if (NbComp == 3)
      {
+@@ -4917,6 +4959,8 @@ bool RWStepAP214_ReadWriteModule::IsComplex(const int CN) const
+       return true;
+     case 696:
+       return true;
++    case 827:
++      return true;
+     case 697:
+       return true;
+     case 698:
+@@ -6668,6 +6712,10 @@ bool RWStepAP214_ReadWriteModule::ComplexType(
+       types.Append(TCollection_AsciiString(StepType(676)));
+       types.Append(TCollection_AsciiString(StepType(625)));
+       break;
++    case 827:
++      types.Append(TCollection_AsciiString(StepType(625)));
++      types.Append(TCollection_AsciiString(StepType(674)));
++      break;
+     case 696:
+       types.Append(TCollection_AsciiString(StepType(625)));
+       types.Append(TCollection_AsciiString(StepType(676)));
+@@ -10580,6 +10628,12 @@ void RWStepAP214_ReadWriteModule::ReadStep(const int
+       tool.ReadStep(data, num, ach, anent);
+     }
+     break;
++    case 827: {
++      DeclareAndCast(StepDimTol_GeoTolAndGeoTolWthDefUnit, anent, ent);
++      RWStepDimTol_RWGeoTolAndGeoTolWthDefUnit tool;
++      tool.ReadStep(data, num, ach, anent);
++    }
++    break;
+     case 697: {
+       DeclareAndCast(StepDimTol_GeoTolAndGeoTolWthDatRefAndUneqDisGeoTol, anent, ent);
+       RWStepDimTol_RWGeoTolAndGeoTolWthDatRefAndUneqDisGeoTol tool;
+@@ -15481,6 +15535,12 @@ void RWStepAP214_ReadWriteModule::WriteStep(const int
+       tool.WriteStep(SW, anent);
+     }
+     break;
++    case 827: {
++      DeclareAndCast(StepDimTol_GeoTolAndGeoTolWthDefUnit, anent, ent);
++      RWStepDimTol_RWGeoTolAndGeoTolWthDefUnit tool;
++      tool.WriteStep(SW, anent);
++    }
++    break;
+     case 697: {
+       DeclareAndCast(StepDimTol_GeoTolAndGeoTolWthDatRefAndUneqDisGeoTol, anent, ent);
+       RWStepDimTol_RWGeoTolAndGeoTolWthDatRefAndUneqDisGeoTol tool;
 diff --git a/src/DataExchange/TKDESTEP/RWStepAP242/RWStepAP242_RWDraughtingModelItemAssociation.cxx b/src/DataExchange/TKDESTEP/RWStepAP242/RWStepAP242_RWDraughtingModelItemAssociation.cxx
 index c8fea49a..44e19524 100644
 --- a/src/DataExchange/TKDESTEP/RWStepAP242/RWStepAP242_RWDraughtingModelItemAssociation.cxx
@@ -106,8 +247,277 @@ index aac5b931..6471b4d2 100644
      int nbElements = data->NbParams(nbSub);
      anItems = new NCollection_HArray1<occ::handle<StepRepr_RepresentationItem>>(1, nbElements);
      for (int i = 1; i <= nbElements; i++)
+diff --git a/src/DataExchange/TKDESTEP/RWStepDimTol/FILES.cmake b/src/DataExchange/TKDESTEP/RWStepDimTol/FILES.cmake
+index 420c5b61..df8ff7ce 100644
+--- a/src/DataExchange/TKDESTEP/RWStepDimTol/FILES.cmake
++++ b/src/DataExchange/TKDESTEP/RWStepDimTol/FILES.cmake
+@@ -60,6 +60,8 @@ set(OCCT_RWStepDimTol_FILES
+   RWStepDimTol_RWGeoTolAndGeoTolWthDatRefAndUneqDisGeoTol.pxx
+   RWStepDimTol_RWGeoTolAndGeoTolWthMaxTol.cxx
+   RWStepDimTol_RWGeoTolAndGeoTolWthMaxTol.pxx
++  RWStepDimTol_RWGeoTolAndGeoTolWthDefUnit.cxx
++  RWStepDimTol_RWGeoTolAndGeoTolWthDefUnit.pxx
+   RWStepDimTol_RWGeoTolAndGeoTolWthMod.cxx
+   RWStepDimTol_RWGeoTolAndGeoTolWthMod.pxx
+   RWStepDimTol_RWLineProfileTolerance.cxx
+diff --git a/src/DataExchange/TKDESTEP/RWStepDimTol/RWStepDimTol_RWGeoTolAndGeoTolWthDefUnit.cxx b/src/DataExchange/TKDESTEP/RWStepDimTol/RWStepDimTol_RWGeoTolAndGeoTolWthDefUnit.cxx
+new file mode 100644
+index 00000000..0efb4484
+--- /dev/null
++++ b/src/DataExchange/TKDESTEP/RWStepDimTol/RWStepDimTol_RWGeoTolAndGeoTolWthDefUnit.cxx
+@@ -0,0 +1,200 @@
++// This file is part of Open CASCADE Technology software library.
++//
++// This library is free software; you can redistribute it and/or modify it under
++// the terms of the GNU Lesser General Public License version 2.1 as published
++// by the Free Software Foundation, with special exception defined in the file
++// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
++// distribution for complete text of the license and disclaimer of any warranty.
++//
++// Alternatively, this file may be used under the terms of Open CASCADE
++// commercial license or contractual agreement.
++
++#include "RWStepDimTol_RWGeoTolAndGeoTolWthDefUnit.pxx"
++
++#include <Interface_Check.hxx>
++#include <Interface_EntityIterator.hxx>
++#include <StepBasic_LengthMeasureWithUnit.hxx>
++#include <StepData_StepReaderData.hxx>
++#include <StepData_StepWriter.hxx>
++#include <StepDimTol_GeoTolAndGeoTolWthDefUnit.hxx>
++#include <StepDimTol_GeometricToleranceTarget.hxx>
++#include <TCollection_HAsciiString.hxx>
++
++#include <cstring>
++
++namespace
++{
++const struct
++{
++  const char*                       Name;
++  StepDimTol_GeometricToleranceType Type;
++} THE_TOLERANCE_TYPES[] = {{"ANGULARITY_TOLERANCE", StepDimTol_GTTAngularityTolerance},
++                           {"CIRCULAR_RUNOUT_TOLERANCE", StepDimTol_GTTCircularRunoutTolerance},
++                           {"COAXIALITY_TOLERANCE", StepDimTol_GTTCoaxialityTolerance},
++                           {"CONCENTRICITY_TOLERANCE", StepDimTol_GTTConcentricityTolerance},
++                           {"CYLINDRICITY_TOLERANCE", StepDimTol_GTTCylindricityTolerance},
++                           {"FLATNESS_TOLERANCE", StepDimTol_GTTFlatnessTolerance},
++                           {"LINE_PROFILE_TOLERANCE", StepDimTol_GTTLineProfileTolerance},
++                           {"PARALLELISM_TOLERANCE", StepDimTol_GTTParallelismTolerance},
++                           {"PERPENDICULARITY_TOLERANCE", StepDimTol_GTTPerpendicularityTolerance},
++                           {"POSITION_TOLERANCE", StepDimTol_GTTPositionTolerance},
++                           {"ROUNDNESS_TOLERANCE", StepDimTol_GTTRoundnessTolerance},
++                           {"STRAIGHTNESS_TOLERANCE", StepDimTol_GTTStraightnessTolerance},
++                           {"SURFACE_PROFILE_TOLERANCE", StepDimTol_GTTSurfaceProfileTolerance},
++                           {"SYMMETRY_TOLERANCE", StepDimTol_GTTSymmetryTolerance},
++                           {"TOTAL_RUNOUT_TOLERANCE", StepDimTol_GTTTotalRunoutTolerance}};
++
++const struct
++{
++  const char*             Name;
++  StepDimTol_AreaUnitType Type;
++} THE_AREA_TYPES[] = {{".CIRCULAR.", StepDimTol_Circular},
++                      {".RECTANGULAR.", StepDimTol_Rectangular},
++                      {".SQUARE.", StepDimTol_Square}};
++} // namespace
++
++//=================================================================================================
++
++void RWStepDimTol_RWGeoTolAndGeoTolWthDefUnit::ReadStep(
++  const occ::handle<StepData_StepReaderData>&              data,
++  const int                                                num0,
++  occ::handle<Interface_Check>&                            ach,
++  const occ::handle<StepDimTol_GeoTolAndGeoTolWthDefUnit>& ent) const
++{
++  NCollection_Sequence<TCollection_AsciiString> aTypes;
++  data->ComplexType(num0, aTypes);
++  bool hasAreaUnit = false;
++  for (const TCollection_AsciiString& aName : aTypes)
++  {
++    hasAreaUnit = hasAreaUnit || aName == "GEOMETRIC_TOLERANCE_WITH_DEFINED_AREA_UNIT";
++    for (const auto& aType : THE_TOLERANCE_TYPES)
++    {
++      if (aName == aType.Name)
++      {
++        ent->SetToleranceType(aType.Type);
++      }
++    }
++  }
++  ent->SetHasAreaUnit(hasAreaUnit);
++
++  int num = 0;
++  data->NamedForComplex("GEOMETRIC_TOLERANCE", "GMTTLR", num0, num, ach);
++  if (!data->CheckNbParams(num, 4, ach, "geometric_tolerance"))
++  {
++    return;
++  }
++  occ::handle<TCollection_HAsciiString> aName;
++  data->ReadString(num, 1, "name", ach, aName);
++  occ::handle<TCollection_HAsciiString> aDescription;
++  data->ReadString(num, 2, "description", ach, aDescription);
++  occ::handle<Standard_Transient> aMagnitude;
++  data->ReadEntity(num, 3, "magnitude", ach, STANDARD_TYPE(Standard_Transient), aMagnitude);
++  StepDimTol_GeometricToleranceTarget aTolerancedShapeAspect;
++  data->ReadEntity(num, 4, "toleranced_shape_aspect", ach, aTolerancedShapeAspect);
++  ent->StepDimTol_GeometricTolerance::Init(aName, aDescription, aMagnitude, aTolerancedShapeAspect);
++
++  if (hasAreaUnit)
++  {
++    data->NamedForComplex("GEOMETRIC_TOLERANCE_WITH_DEFINED_AREA_UNIT", num0, num, ach);
++    if (data->CheckNbParams(num, 2, ach, "geometric_tolerance_with_defined_area_unit"))
++    {
++      const char* anArea = data->ParamType(num, 1) == Interface_ParamEnum ? data->ParamCValue(num, 1) : "";
++      for (const auto& aType : THE_AREA_TYPES)
++      {
++        if (strcmp(anArea, aType.Name) == 0)
++        {
++          ent->SetAreaType(aType.Type);
++        }
++      }
++      occ::handle<Standard_Transient> aSecondUnitSize;
++      if (data->IsParamDefined(num, 2))
++      {
++        data->ReadEntity(num,
++                         2,
++                         "second_unit_size",
++                         ach,
++                         STANDARD_TYPE(Standard_Transient),
++                         aSecondUnitSize);
++      }
++      ent->SetSecondUnitSizeMeasure(aSecondUnitSize);
++      ent->SetSecondUnitSize(occ::down_cast<StepBasic_LengthMeasureWithUnit>(aSecondUnitSize));
++    }
++  }
++
++  data->NamedForComplex("GEOMETRIC_TOLERANCE_WITH_DEFINED_UNIT", num0, num, ach);
++  if (data->CheckNbParams(num, 1, ach, "geometric_tolerance_with_defined_unit"))
++  {
++    // Also a complex length measure with a representation item, so read any entity
++    occ::handle<Standard_Transient> anUnitSize;
++    data->ReadEntity(num, 1, "unit_size", ach, STANDARD_TYPE(Standard_Transient), anUnitSize);
++    ent->SetUnitSizeMeasure(anUnitSize);
++    ent->SetUnitSize(occ::down_cast<StepBasic_LengthMeasureWithUnit>(anUnitSize));
++  }
++}
++
++//=================================================================================================
++
++void RWStepDimTol_RWGeoTolAndGeoTolWthDefUnit::WriteStep(
++  StepData_StepWriter&                                     SW,
++  const occ::handle<StepDimTol_GeoTolAndGeoTolWthDefUnit>& ent) const
++{
++  // Components in alphabetical order; the tolerance type sorts before or after the others
++  const char* aTypeName = "";
++  for (const auto& aType : THE_TOLERANCE_TYPES)
++  {
++    if (ent->GetToleranceType() == aType.Type)
++    {
++      aTypeName = aType.Name;
++    }
++  }
++  const bool isTypeFirst = strcmp(aTypeName, "GEOMETRIC_TOLERANCE") < 0;
++  if (isTypeFirst)
++  {
++    SW.StartEntity(aTypeName);
++  }
++  SW.StartEntity("GEOMETRIC_TOLERANCE");
++  SW.Send(ent->Name());
++  SW.Send(ent->Description());
++  SW.Send(ent->Magnitude());
++  SW.Send(ent->TolerancedShapeAspect().Value());
++  if (ent->HasAreaUnit())
++  {
++    SW.StartEntity("GEOMETRIC_TOLERANCE_WITH_DEFINED_AREA_UNIT");
++    for (const auto& aType : THE_AREA_TYPES)
++    {
++      if (ent->AreaType() == aType.Type)
++      {
++        SW.SendEnum(aType.Name);
++      }
++    }
++    if (ent->SecondUnitSizeMeasure().IsNull())
++    {
++      SW.SendUndef();
++    }
++    else
++    {
++      SW.Send(ent->SecondUnitSizeMeasure());
++    }
++  }
++  SW.StartEntity("GEOMETRIC_TOLERANCE_WITH_DEFINED_UNIT");
++  SW.Send(ent->UnitSizeMeasure());
++  if (!isTypeFirst)
++  {
++    SW.StartEntity(aTypeName);
++  }
++}
++
++//=================================================================================================
++
++void RWStepDimTol_RWGeoTolAndGeoTolWthDefUnit::Share(
++  const occ::handle<StepDimTol_GeoTolAndGeoTolWthDefUnit>& ent,
++  Interface_EntityIterator&                                iter) const
++{
++  iter.AddItem(ent->Magnitude());
++  iter.AddItem(ent->TolerancedShapeAspect().Value());
++  iter.AddItem(ent->UnitSizeMeasure());
++  if (!ent->SecondUnitSizeMeasure().IsNull())
++  {
++    iter.AddItem(ent->SecondUnitSizeMeasure());
++  }
++}
+diff --git a/src/DataExchange/TKDESTEP/RWStepDimTol/RWStepDimTol_RWGeoTolAndGeoTolWthDefUnit.pxx b/src/DataExchange/TKDESTEP/RWStepDimTol/RWStepDimTol_RWGeoTolAndGeoTolWthDefUnit.pxx
+new file mode 100644
+index 00000000..80225b83
+--- /dev/null
++++ b/src/DataExchange/TKDESTEP/RWStepDimTol/RWStepDimTol_RWGeoTolAndGeoTolWthDefUnit.pxx
+@@ -0,0 +1,44 @@
++// This file is part of Open CASCADE Technology software library.
++//
++// This library is free software; you can redistribute it and/or modify it under
++// the terms of the GNU Lesser General Public License version 2.1 as published
++// by the Free Software Foundation, with special exception defined in the file
++// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
++// distribution for complete text of the license and disclaimer of any warranty.
++//
++// Alternatively, this file may be used under the terms of Open CASCADE
++// commercial license or contractual agreement.
++
++#ifndef _RWStepDimTol_RWGeoTolAndGeoTolWthDefUnit_HeaderFile
++#define _RWStepDimTol_RWGeoTolAndGeoTolWthDefUnit_HeaderFile
++
++#include <Standard.hxx>
++#include <Standard_DefineAlloc.hxx>
++#include <Standard_Handle.hxx>
++
++class StepData_StepReaderData;
++class Interface_Check;
++class StepDimTol_GeoTolAndGeoTolWthDefUnit;
++class StepData_StepWriter;
++class Interface_EntityIterator;
++
++//! Read & Write Module for GeoTolAndGeoTolWthDefUnit
++class RWStepDimTol_RWGeoTolAndGeoTolWthDefUnit
++{
++public:
++  DEFINE_STANDARD_ALLOC
++
++  Standard_HIDDEN RWStepDimTol_RWGeoTolAndGeoTolWthDefUnit() = default;
++
++  Standard_HIDDEN void ReadStep(const occ::handle<StepData_StepReaderData>&              data,
++                                const int                                                num0,
++                                occ::handle<Interface_Check>&                            ach,
++                                const occ::handle<StepDimTol_GeoTolAndGeoTolWthDefUnit>& ent) const;
++
++  Standard_HIDDEN void WriteStep(StepData_StepWriter&                                     SW,
++                                 const occ::handle<StepDimTol_GeoTolAndGeoTolWthDefUnit>& ent) const;
++
++  Standard_HIDDEN void Share(const occ::handle<StepDimTol_GeoTolAndGeoTolWthDefUnit>& ent,
++                             Interface_EntityIterator&                                iter) const;
++};
++#endif // _RWStepDimTol_RWGeoTolAndGeoTolWthDefUnit_HeaderFile
 diff --git a/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx b/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx
-index 1262ea95..858a3344 100644
+index 1262ea95..b6e3c85c 100644
 --- a/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx
 +++ b/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx
 @@ -21,6 +21,7 @@
@@ -118,7 +528,16 @@ index 1262ea95..858a3344 100644
  #include <HeaderSection_FileSchema.hxx>
  #include <Message_ProgressScope.hxx>
  #include <NCollection_DataMap.hxx>
-@@ -2769,29 +2770,48 @@ bool readAnnotationPlane(const occ::handle<StepVisual_AnnotationPlane>& theAnnot
+@@ -94,6 +95,8 @@
+ #include <StepDimTol_ToleranceZoneForm.hxx>
+ #include <StepDimTol_TotalRunoutTolerance.hxx>
+ #include <StepDimTol_GeoTolAndGeoTolWthDatRefAndGeoTolWthMod.hxx>
++#include <StepBasic_LengthMeasureWithUnit.hxx>
++#include <StepDimTol_GeoTolAndGeoTolWthDefUnit.hxx>
+ #include <StepDimTol_GeoTolAndGeoTolWthMod.hxx>
+ #include <StepDimTol_GeometricToleranceWithMaximumTolerance.hxx>
+ #include <StepGeom_Plane.hxx>
+@@ -2769,29 +2772,48 @@ bool readAnnotationPlane(const occ::handle<StepVisual_AnnotationPlane>& theAnnot
  // purpose  : read annotation plane and position for given GDT
  // (Dimension, Geometric_Tolerance, Datum_Feature or Placed_Datum_Target_Feature)
  //=======================================================================
@@ -180,7 +599,7 @@ index 1262ea95..858a3344 100644
      occ::handle<TCollection_HAsciiString> aName = aDMIA->Name();
      aName->LowerCase();
      if (!aName->Search(new TCollection_HAsciiString("pmi representation to presentation link")))
-@@ -2799,6 +2819,24 @@ void readAnnotation(const occ::handle<XSControl_TransferReader>& theTR,
+@@ -2799,6 +2821,24 @@ void readAnnotation(const occ::handle<XSControl_TransferReader>& theTR,
        aDMIA = nullptr;
      }
    }
@@ -205,7 +624,7 @@ index 1262ea95..858a3344 100644
    if (aDMIA.IsNull() || aDMIA->NbIdentifiedItem() == 0)
    {
      return;
-@@ -3241,6 +3279,21 @@ static int FindShapeIndexForDGT(const occ::handle<Standard_Transient>&    theEnt
+@@ -3241,6 +3281,21 @@ static int FindShapeIndexForDGT(const occ::handle<Standard_Transient>&    theEnt
  
  //=================================================================================================
  
@@ -227,7 +646,7 @@ index 1262ea95..858a3344 100644
  static void collectShapeAspect(const occ::handle<StepRepr_ShapeAspect>&                 theSA,
                                 const occ::handle<XSControl_WorkSession>&                theWS,
                                 NCollection_Sequence<occ::handle<StepRepr_ShapeAspect>>& theSAs)
-@@ -3399,6 +3452,51 @@ bool STEPCAFControl_Reader::setDatumToXCAF(
+@@ -3399,6 +3454,51 @@ bool STEPCAFControl_Reader::setDatumToXCAF(
        }
      }
    }
@@ -279,7 +698,7 @@ index 1262ea95..858a3344 100644
  
    // Process datum targets and create objects for them
    bool isExistDatumTarget = false;
-@@ -3938,6 +4036,26 @@ TDF_Label STEPCAFControl_Reader::createGDTObjectInXCAF(
+@@ -3938,6 +4038,26 @@ TDF_Label STEPCAFControl_Reader::createGDTObjectInXCAF(
              {
                aSeqRI1.Append(anAtrABSR);
              }
@@ -306,7 +725,7 @@ index 1262ea95..858a3344 100644
            }
          }
        }
-@@ -3981,13 +4099,21 @@ TDF_Label STEPCAFControl_Reader::createGDTObjectInXCAF(
+@@ -3981,13 +4101,21 @@ TDF_Label STEPCAFControl_Reader::createGDTObjectInXCAF(
             i <= aSAs.Upper();
             i++)
        {
@@ -334,7 +753,7 @@ index 1262ea95..858a3344 100644
          }
          if (!PropD.IsNull()) // for old version
          {
-@@ -4772,23 +4898,19 @@ static void setDimObjectToXCAF(const occ::handle<Standard_Transient>&    theEnt,
+@@ -4772,23 +4900,19 @@ static void setDimObjectToXCAF(const occ::handle<Standard_Transient>&    theEnt,
      }
    }
  
@@ -362,7 +781,65 @@ index 1262ea95..858a3344 100644
    {
      occ::handle<NCollection_HArray1<double>> anArr = new NCollection_HArray1<double>(1, 3);
      if (!isPlusMinusTolerance)
-@@ -5304,6 +5426,36 @@ static void setGeomTolObjectToXCAF(const occ::handle<Standard_Transient>&    the
+@@ -5036,6 +5160,12 @@ static bool getTolType(const occ::handle<Standard_Transient>& theEnt,
+       occ::down_cast<StepDimTol_GeoTolAndGeoTolWthMod>(theEnt);
+     theType = STEPCAFControl_GDTProperty::GetGeomToleranceType(anE->GetToleranceType());
+   }
++  else if (theEnt->IsKind(STANDARD_TYPE(StepDimTol_GeoTolAndGeoTolWthDefUnit)))
++  {
++    occ::handle<StepDimTol_GeoTolAndGeoTolWthDefUnit> anE =
++      occ::down_cast<StepDimTol_GeoTolAndGeoTolWthDefUnit>(theEnt);
++    theType = STEPCAFControl_GDTProperty::GetGeomToleranceType(anE->GetToleranceType());
++  }
+   else if (theEnt->IsKind(STANDARD_TYPE(StepDimTol_GeoTolAndGeoTolWthDatRefAndUneqDisGeoTol)))
+   {
+     occ::handle<StepDimTol_GeoTolAndGeoTolWthDatRefAndUneqDisGeoTol> anE =
+@@ -5109,6 +5239,20 @@ static bool getTolType(const occ::handle<Standard_Transient>& theEnt,
+ 
+ //=================================================================================================
+ 
++// A length in model units, 0 if not given
++static double lengthValue(const occ::handle<StepBasic_MeasureWithUnit>& theMWU,
++                          const StepData_Factors&                       theLocalFactors)
++{
++  if (theMWU.IsNull() || theMWU->UnitComponent().IsNull()
++      || theMWU->UnitComponent().CaseNum(theMWU->UnitComponent().Value()) != 1)
++  {
++    return 0.;
++  }
++  STEPConstruct_UnitContext anUnitCtx;
++  anUnitCtx.ComputeFactors(theMWU->UnitComponent().NamedUnit(), theLocalFactors);
++  return theMWU->ValueComponent() * anUnitCtx.LengthFactor();
++}
++
+ static void setGeomTolObjectToXCAF(const occ::handle<Standard_Transient>&    theEnt,
+                                    const TDF_Label&                          theTolL,
+                                    const occ::handle<TDocStd_Document>&      theDoc,
+@@ -5154,6 +5298,23 @@ static void setGeomTolObjectToXCAF(const occ::handle<Standard_Transient>&    the
+       aTolObj->SetValue(aVal);
+     }
+   }
++  // unit length or area the tolerance applies per
++  if (occ::handle<StepDimTol_GeoTolAndGeoTolWthDefUnit> aDefUnit =
++        occ::down_cast<StepDimTol_GeoTolAndGeoTolWthDefUnit>(theEnt))
++  {
++    aTolObj->SetUnitSize(
++      lengthValue(GetMeasureWithUnit(aDefUnit->UnitSizeMeasure()), theLocalFactors));
++    if (aDefUnit->HasAreaUnit())
++    {
++      const XCAFDimTolObjects_GeomToleranceUnitArea anAreas[] = {
++        XCAFDimTolObjects_GeomToleranceUnitArea_Circular,
++        XCAFDimTolObjects_GeomToleranceUnitArea_Rectangular,
++        XCAFDimTolObjects_GeomToleranceUnitArea_Square};
++      aTolObj->SetUnitArea(anAreas[aDefUnit->AreaType()]);
++      aTolObj->SetSecondUnitSize(
++        lengthValue(GetMeasureWithUnit(aDefUnit->SecondUnitSizeMeasure()), theLocalFactors));
++    }
++  }
+   // get modifiers
+   XCAFDimTolObjects_GeomToleranceTypeValue aTypeV = XCAFDimTolObjects_GeomToleranceTypeValue_None;
+   Interface_EntityIterator                 anIter = aGraph.Sharings(aTolEnt);
+@@ -5304,6 +5465,36 @@ static void setGeomTolObjectToXCAF(const occ::handle<Standard_Transient>&    the
  
  //=================================================================================================
  
@@ -399,7 +876,7 @@ index 1262ea95..858a3344 100644
  bool STEPCAFControl_Reader::ReadGDTs(const occ::handle<XSControl_WorkSession>& theWS,
                                       const occ::handle<TDocStd_Document>&      theDoc,
                                       const StepData_Factors&                   theLocalFactors)
-@@ -5326,6 +5478,8 @@ bool STEPCAFControl_Reader::ReadGDTs(const occ::handle<XSControl_WorkSession>& t
+@@ -5326,6 +5517,8 @@ bool STEPCAFControl_Reader::ReadGDTs(const occ::handle<XSControl_WorkSession>& t
    }
  
    int nb = aModel->NbEntities();
@@ -408,7 +885,7 @@ index 1262ea95..858a3344 100644
    for (int i = 1; i <= nb; i++)
    {
      occ::handle<Standard_Transient> anEnt = aModel->Value(i);
-@@ -5333,6 +5487,10 @@ bool STEPCAFControl_Reader::ReadGDTs(const occ::handle<XSControl_WorkSession>& t
+@@ -5333,6 +5526,10 @@ bool STEPCAFControl_Reader::ReadGDTs(const occ::handle<XSControl_WorkSession>& t
          || anEnt->IsKind(STANDARD_TYPE(StepShape_DimensionalLocation))
          || anEnt->IsKind(STANDARD_TYPE(StepDimTol_GeometricTolerance)))
      {
@@ -419,7 +896,7 @@ index 1262ea95..858a3344 100644
        TDF_Label aGDTL = createGDTObjectInXCAF(anEnt, theDoc, theWS, theLocalFactors);
        if (!aGDTL.IsNull())
        {
-@@ -5350,6 +5508,10 @@ bool STEPCAFControl_Reader::ReadGDTs(const occ::handle<XSControl_WorkSession>& t
+@@ -5350,6 +5547,10 @@ bool STEPCAFControl_Reader::ReadGDTs(const occ::handle<XSControl_WorkSession>& t
               || anEnt->IsKind(STANDARD_TYPE(StepVisual_AnnotationOccurrence))
               || anEnt->IsKind(STANDARD_TYPE(StepVisual_TessellatedAnnotationOccurrence)))
      {
@@ -430,7 +907,7 @@ index 1262ea95..858a3344 100644
        // Protection against import presentation twice
        occ::handle<StepVisual_DraughtingCallout> aDC;
        for (Interface_EntityIterator anIter = aGraph.Sharings(anEnt); anIter.More() && aDC.IsNull();
-@@ -5361,14 +5523,54 @@ bool STEPCAFControl_Reader::ReadGDTs(const occ::handle<XSControl_WorkSession>& t
+@@ -5361,14 +5562,54 @@ bool STEPCAFControl_Reader::ReadGDTs(const occ::handle<XSControl_WorkSession>& t
        {
          continue;
        }
@@ -489,7 +966,7 @@ index 1262ea95..858a3344 100644
        }
        if (!aDMIA.IsNull())
        {
-@@ -5426,7 +5628,7 @@ bool STEPCAFControl_Reader::ReadGDTs(const occ::handle<XSControl_WorkSession>& t
+@@ -5426,7 +5667,7 @@ bool STEPCAFControl_Reader::ReadGDTs(const occ::handle<XSControl_WorkSession>& t
                }
              }
            }
@@ -498,3 +975,255 @@ index 1262ea95..858a3344 100644
            {
              continue;
            }
+diff --git a/src/DataExchange/TKDESTEP/StepAP214/StepAP214_Protocol.cxx b/src/DataExchange/TKDESTEP/StepAP214/StepAP214_Protocol.cxx
+index 3dbaf2d4..00b27efe 100644
+--- a/src/DataExchange/TKDESTEP/StepAP214/StepAP214_Protocol.cxx
++++ b/src/DataExchange/TKDESTEP/StepAP214/StepAP214_Protocol.cxx
+@@ -620,6 +620,7 @@ static const char* schemaAP242DIS =
+ #include <StepRepr_CompositeGroupShapeAspect.hxx>
+ #include <StepRepr_ContinuosShapeAspect.hxx>
+ #include <StepDimTol_GeometricToleranceWithDefinedAreaUnit.hxx>
++#include <StepDimTol_GeoTolAndGeoTolWthDefUnit.hxx>
+ #include <StepDimTol_GeometricToleranceWithDefinedUnit.hxx>
+ #include <StepDimTol_GeometricToleranceWithMaximumTolerance.hxx>
+ #include <StepDimTol_GeometricToleranceWithModifiers.hxx>
+@@ -1573,6 +1574,7 @@ StepAP214_Protocol::StepAP214_Protocol()
+   types.Bind(STANDARD_TYPE(StepRepr_MechanicalDesignAndDraughtingRelationship), 824);
+   types.Bind(STANDARD_TYPE(StepVisual_SurfaceStyleReflectanceAmbientDiffuse), 825);
+   types.Bind(STANDARD_TYPE(StepVisual_SurfaceStyleReflectanceAmbientDiffuseSpecular), 826);
++  types.Bind(STANDARD_TYPE(StepDimTol_GeoTolAndGeoTolWthDefUnit), 827);
+ }
+ 
+ //=================================================================================================
+diff --git a/src/DataExchange/TKDESTEP/StepDimTol/FILES.cmake b/src/DataExchange/TKDESTEP/StepDimTol/FILES.cmake
+index 5f3d57c9..5c4e090a 100644
+--- a/src/DataExchange/TKDESTEP/StepDimTol/FILES.cmake
++++ b/src/DataExchange/TKDESTEP/StepDimTol/FILES.cmake
+@@ -73,6 +73,8 @@ set(OCCT_StepDimTol_FILES
+   StepDimTol_GeoTolAndGeoTolWthDatRefAndUneqDisGeoTol.hxx
+   StepDimTol_GeoTolAndGeoTolWthMaxTol.cxx
+   StepDimTol_GeoTolAndGeoTolWthMaxTol.hxx
++  StepDimTol_GeoTolAndGeoTolWthDefUnit.cxx
++  StepDimTol_GeoTolAndGeoTolWthDefUnit.hxx
+   StepDimTol_GeoTolAndGeoTolWthMod.cxx
+   StepDimTol_GeoTolAndGeoTolWthMod.hxx
+ 
+diff --git a/src/DataExchange/TKDESTEP/StepDimTol/StepDimTol_GeoTolAndGeoTolWthDefUnit.cxx b/src/DataExchange/TKDESTEP/StepDimTol/StepDimTol_GeoTolAndGeoTolWthDefUnit.cxx
+new file mode 100644
+index 00000000..e021cc1a
+--- /dev/null
++++ b/src/DataExchange/TKDESTEP/StepDimTol/StepDimTol_GeoTolAndGeoTolWthDefUnit.cxx
+@@ -0,0 +1,21 @@
++// This file is part of Open CASCADE Technology software library.
++//
++// This library is free software; you can redistribute it and/or modify it under
++// the terms of the GNU Lesser General Public License version 2.1 as published
++// by the Free Software Foundation, with special exception defined in the file
++// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
++// distribution for complete text of the license and disclaimer of any warranty.
++//
++// Alternatively, this file may be used under the terms of Open CASCADE
++// commercial license or contractual agreement.
++
++#include <StepDimTol_GeoTolAndGeoTolWthDefUnit.hxx>
++
++IMPLEMENT_STANDARD_RTTIEXT(StepDimTol_GeoTolAndGeoTolWthDefUnit,
++                           StepDimTol_GeometricToleranceWithDefinedAreaUnit)
++
++StepDimTol_GeoTolAndGeoTolWthDefUnit::StepDimTol_GeoTolAndGeoTolWthDefUnit()
++    : myToleranceType(StepDimTol_GTTPositionTolerance),
++      myHasAreaUnit(false)
++{
++}
+diff --git a/src/DataExchange/TKDESTEP/StepDimTol/StepDimTol_GeoTolAndGeoTolWthDefUnit.hxx b/src/DataExchange/TKDESTEP/StepDimTol/StepDimTol_GeoTolAndGeoTolWthDefUnit.hxx
+new file mode 100644
+index 00000000..5841d831
+--- /dev/null
++++ b/src/DataExchange/TKDESTEP/StepDimTol/StepDimTol_GeoTolAndGeoTolWthDefUnit.hxx
+@@ -0,0 +1,63 @@
++// This file is part of Open CASCADE Technology software library.
++//
++// This library is free software; you can redistribute it and/or modify it under
++// the terms of the GNU Lesser General Public License version 2.1 as published
++// by the Free Software Foundation, with special exception defined in the file
++// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
++// distribution for complete text of the license and disclaimer of any warranty.
++//
++// Alternatively, this file may be used under the terms of Open CASCADE
++// commercial license or contractual agreement.
++
++#ifndef _StepDimTol_GeoTolAndGeoTolWthDefUnit_HeaderFile
++#define _StepDimTol_GeoTolAndGeoTolWthDefUnit_HeaderFile
++
++#include <StepDimTol_GeometricToleranceType.hxx>
++#include <StepDimTol_GeometricToleranceWithDefinedAreaUnit.hxx>
++
++//! Complex instance of a geometric tolerance of some type with geometric_tolerance_with_defined_unit
++//! and, optionally, geometric_tolerance_with_defined_area_unit: a tolerance per unit length or area.
++class StepDimTol_GeoTolAndGeoTolWthDefUnit : public StepDimTol_GeometricToleranceWithDefinedAreaUnit
++{
++public:
++  Standard_EXPORT StepDimTol_GeoTolAndGeoTolWthDefUnit();
++
++  StepDimTol_GeometricToleranceType GetToleranceType() const { return myToleranceType; }
++
++  void SetToleranceType(const StepDimTol_GeometricToleranceType theType) { myToleranceType = theType; }
++
++  //! The unit size as written: a length_measure_with_unit, or a complex instance that includes
++  //! one (UnitSize() holds only the former)
++  const occ::handle<Standard_Transient>& UnitSizeMeasure() const { return myUnitSizeMeasure; }
++
++  void SetUnitSizeMeasure(const occ::handle<Standard_Transient>& theMeasure)
++  {
++    myUnitSizeMeasure = theMeasure;
++  }
++
++  //! The second unit size as written, if any (see UnitSizeMeasure())
++  const occ::handle<Standard_Transient>& SecondUnitSizeMeasure() const
++  {
++    return mySecondUnitSizeMeasure;
++  }
++
++  void SetSecondUnitSizeMeasure(const occ::handle<Standard_Transient>& theMeasure)
++  {
++    mySecondUnitSizeMeasure = theMeasure;
++  }
++
++  //! Whether the instance includes geometric_tolerance_with_defined_area_unit
++  bool HasAreaUnit() const { return myHasAreaUnit; }
++
++  void SetHasAreaUnit(const bool theHasAreaUnit) { myHasAreaUnit = theHasAreaUnit; }
++
++  DEFINE_STANDARD_RTTIEXT(StepDimTol_GeoTolAndGeoTolWthDefUnit,
++                          StepDimTol_GeometricToleranceWithDefinedAreaUnit)
++
++private:
++  StepDimTol_GeometricToleranceType myToleranceType;
++  bool                              myHasAreaUnit;
++  occ::handle<Standard_Transient>   myUnitSizeMeasure;
++  occ::handle<Standard_Transient>   mySecondUnitSizeMeasure;
++};
++#endif // _StepDimTol_GeoTolAndGeoTolWthDefUnit_HeaderFile
+diff --git a/src/DataExchange/TKXCAF/XCAFDimTolObjects/XCAFDimTolObjects_GeomToleranceObject.cxx b/src/DataExchange/TKXCAF/XCAFDimTolObjects/XCAFDimTolObjects_GeomToleranceObject.cxx
+index 35a3140a..3807ff33 100644
+--- a/src/DataExchange/TKXCAF/XCAFDimTolObjects/XCAFDimTolObjects_GeomToleranceObject.cxx
++++ b/src/DataExchange/TKXCAF/XCAFDimTolObjects/XCAFDimTolObjects_GeomToleranceObject.cxx
+@@ -24,6 +24,9 @@ XCAFDimTolObjects_GeomToleranceObject::XCAFDimTolObjects_GeomToleranceObject()
+   myHasPnt            = false;
+   myHasPntText        = false;
+   myAffectedPlaneType = XCAFDimTolObjects_ToleranceZoneAffectedPlane_None;
++  myUnitSize          = 0.;
++  mySecondUnitSize    = 0.;
++  myUnitArea          = XCAFDimTolObjects_GeomToleranceUnitArea_None;
+ }
+ 
+ //=================================================================================================
+@@ -39,6 +42,9 @@ XCAFDimTolObjects_GeomToleranceObject::XCAFDimTolObjects_GeomToleranceObject(
+   myValueOfZoneModif  = theObj->myValueOfZoneModif;
+   myModifiers         = theObj->myModifiers;
+   myMaxValueModif     = theObj->myMaxValueModif;
++  myUnitSize          = theObj->myUnitSize;
++  mySecondUnitSize    = theObj->mySecondUnitSize;
++  myUnitArea          = theObj->myUnitArea;
+   myAxis              = theObj->myAxis;
+   myHasAxis           = theObj->myHasAxis;
+   myPlane             = theObj->myPlane;
+diff --git a/src/DataExchange/TKXCAF/XCAFDimTolObjects/XCAFDimTolObjects_GeomToleranceObject.hxx b/src/DataExchange/TKXCAF/XCAFDimTolObjects/XCAFDimTolObjects_GeomToleranceObject.hxx
+index 10fb35f8..dca713c3 100644
+--- a/src/DataExchange/TKXCAF/XCAFDimTolObjects/XCAFDimTolObjects_GeomToleranceObject.hxx
++++ b/src/DataExchange/TKXCAF/XCAFDimTolObjects/XCAFDimTolObjects_GeomToleranceObject.hxx
+@@ -32,6 +32,15 @@
+ #include <TCollection_HAsciiString.hxx>
+ 
+ //! Access object to store dimension and tolerance
++//! Shape of the area a tolerance per unit area applies to
++enum XCAFDimTolObjects_GeomToleranceUnitArea
++{
++  XCAFDimTolObjects_GeomToleranceUnitArea_None,
++  XCAFDimTolObjects_GeomToleranceUnitArea_Circular,
++  XCAFDimTolObjects_GeomToleranceUnitArea_Rectangular,
++  XCAFDimTolObjects_GeomToleranceUnitArea_Square
++};
++
+ class XCAFDimTolObjects_GeomToleranceObject : public Standard_Transient
+ {
+ 
+@@ -101,6 +110,23 @@ public:
+   //! Returns the maximal upper tolerance.
+   Standard_EXPORT double GetMaxValueModifier() const;
+ 
++  //! Sets the length a tolerance applies per (e.g. straightness 0.2 per 15), or the size of the
++  //! area with an area type (e.g. flatness 0.05 per Ø25 area). 0 means the whole feature.
++  void SetUnitSize(const double theSize) { myUnitSize = theSize; }
++
++  //! Returns the unit length or area size, 0 if the tolerance applies to the whole feature.
++  double GetUnitSize() const { return myUnitSize; }
++
++  //! Sets the second side of a rectangular unit area.
++  void SetSecondUnitSize(const double theSize) { mySecondUnitSize = theSize; }
++
++  double GetSecondUnitSize() const { return mySecondUnitSize; }
++
++  //! Sets the shape of the unit area; None for a unit length.
++  void SetUnitArea(const XCAFDimTolObjects_GeomToleranceUnitArea theArea) { myUnitArea = theArea; }
++
++  XCAFDimTolObjects_GeomToleranceUnitArea GetUnitArea() const { return myUnitArea; }
++
+   Standard_EXPORT void SetAxis(const gp_Ax2& theAxis);
+ 
+   Standard_EXPORT gp_Ax2 GetAxis() const;
+@@ -206,6 +232,9 @@ private:
+   double                                                     myValueOfZoneModif;
+   NCollection_Sequence<XCAFDimTolObjects_GeomToleranceModif> myModifiers;
+   double                                                     myMaxValueModif;
++  double                                                     myUnitSize;
++  double                                                     mySecondUnitSize;
++  XCAFDimTolObjects_GeomToleranceUnitArea                    myUnitArea;
+   gp_Ax2                                                     myAxis;
+   bool                                                       myHasAxis;
+   gp_Ax2                                                     myPlane;
+diff --git a/src/DataExchange/TKXCAF/XCAFDoc/XCAFDoc_GeomTolerance.cxx b/src/DataExchange/TKXCAF/XCAFDoc/XCAFDoc_GeomTolerance.cxx
+index 337c6440..eb5dc4d9 100644
+--- a/src/DataExchange/TKXCAF/XCAFDoc/XCAFDoc_GeomTolerance.cxx
++++ b/src/DataExchange/TKXCAF/XCAFDoc/XCAFDoc_GeomTolerance.cxx
+@@ -51,6 +51,7 @@ enum ChildLab
+   ChildLab_PntText,
+   ChildLab_Presentation,
+   ChildLab_AffectedPlane,
++  ChildLab_UnitSize,
+   ChildLab_End
+ };
+ 
+@@ -157,6 +158,16 @@ void XCAFDoc_GeomTolerance::SetObject(
+                          theObject->GetMaxValueModifier());
+   }
+ 
++  if (theObject->GetUnitSize() > 0)
++  {
++    // unit size, second unit size, unit area
++    occ::handle<TDataStd_RealArray> aUnit =
++      TDataStd_RealArray::Set(Label().FindChild(ChildLab_UnitSize), 1, 3);
++    aUnit->SetValue(1, theObject->GetUnitSize());
++    aUnit->SetValue(2, theObject->GetSecondUnitSize());
++    aUnit->SetValue(3, theObject->GetUnitArea());
++  }
++
+   if (theObject->HasAxis())
+   {
+     gp_Ax2 anAx = theObject->GetAxis();
+@@ -377,6 +388,15 @@ occ::handle<XCAFDimTolObjects_GeomToleranceObject> XCAFDoc_GeomTolerance::GetObj
+     anObj->SetMaxValueModifier(aMaxValueModif->Get());
+   }
+ 
++  occ::handle<TDataStd_RealArray> aUnit;
++  if (Label().FindChild(ChildLab_UnitSize).FindAttribute(TDataStd_RealArray::GetID(), aUnit)
++      && aUnit->Length() == 3)
++  {
++    anObj->SetUnitSize(aUnit->Value(1));
++    anObj->SetSecondUnitSize(aUnit->Value(2));
++    anObj->SetUnitArea((XCAFDimTolObjects_GeomToleranceUnitArea)(int)aUnit->Value(3));
++  }
++
+   occ::handle<TDataStd_RealArray> aLoc;
+   occ::handle<TDataStd_RealArray> aN;
+   occ::handle<TDataStd_RealArray> aR;
