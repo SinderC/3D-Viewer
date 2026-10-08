@@ -91,6 +91,8 @@ input[type='checkbox'] { accent-color: var(--accent); margin: 0; }
   margin: 0;
   padding: 8px 10px;
   border-top: 1px solid var(--line);
+  max-height: 50%; /* long attribute lists scroll instead of covering the tree */
+  overflow-y: auto;
 }
 .info dt { color: var(--muted); }
 .info dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

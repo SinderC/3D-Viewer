@@ -70,6 +70,23 @@ function measureStats(geometry, protos) {
   return { planes, circles, measureOk };
 }
 
+// Validation checks passed / made, as in web/src/core/product.ts: the file's volume, area and
+// centroid within 0.1 %, and its stated PMI and view counts.
+function validation(model) {
+  const checks = [];
+  for (const { volume, area, centroid } of model.products) {
+    for (const [file, computed] of [volume, area].filter(Boolean)) if (computed !== undefined) checks.push(Math.abs(computed - file) <= 0.001 * file);
+    if (centroid?.length === 6 && volume) {
+      const d = Math.hypot(centroid[0] - centroid[3], centroid[1] - centroid[4], centroid[2] - centroid[5]);
+      checks.push(d <= 0.001 * Math.cbrt(volume[0]));
+    }
+  }
+  const { annotations, views } = model.counts;
+  if (annotations !== undefined) checks.push(model.pmi.length === annotations);
+  if (views !== undefined) checks.push(model.views.length === views);
+  return checks.length ? `${checks.filter(Boolean).length}/${checks.length}` : '';
+}
+
 const occt = await createOcctViewer();
 const rows = [];
 let failed = 0;
@@ -88,7 +105,9 @@ for (const target of targets) {
       const tris = model.protos.reduce((n, p) => n + p.indices[1] / 3, 0);
       const edges = model.protos.reduce((n, p) => n + p.edges[1] / 6, 0);
       const { planes, circles, measureOk } = measureStats(geometry, model.protos);
-      const ok = tris > 0 && model.nodes.length > 0 && res.geometry.byteLength > 0 && measureOk;
+      const valid = validation(model);
+      const [passed, checked = passed] = valid.split('/');
+      const ok = tris > 0 && model.nodes.length > 0 && res.geometry.byteLength > 0 && measureOk && passed === checked;
       Object.assign(row, {
         status: ok ? 'ok' : 'FAIL',
         format: model.format === 'STEP' ? `STEP ${apOf(model.schema)}` : model.format,
@@ -102,6 +121,7 @@ for (const target of targets) {
         circles,
         pmi: model.pmi.length,
         views: model.views.length,
+        valid,
         open: model.protos.map((p) => (openEdgeRatio(geometry, p) * 100).toFixed(1) + '%').join(' '),
       });
     }

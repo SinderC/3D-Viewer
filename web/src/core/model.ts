@@ -8,7 +8,7 @@ export interface RawModel {
   schema: string; // STEP only
   fileUnit: string;
   colors: [number, number, number, number][];
-  nodes: { name: string; parent: number; proto: number; color: number; matrix?: number[] }[];
+  nodes: { name: string; parent: number; proto: number; color: number; product?: number; matrix?: number[] }[];
   protos: {
     positions: Range;
     normals: Range;
@@ -22,6 +22,27 @@ export interface RawModel {
   }[];
   pmi: (Omit<PmiItem, 'segments' | 'triangles'> & { segments: Range; triangles: Range })[];
   views: SavedView[];
+  products: Product[];
+  counts: Counts;
+}
+
+/** What a file says about a part or assembly beyond its shape. Lengths in mm. */
+export interface Product {
+  /** STEP product data in display order: part number, revision, approval, people and dates in their roles. */
+  props: [string, string][];
+  /** User-defined attributes, by name. */
+  attributes: [string, string][];
+  /** Validation properties: the file's value, then the loaded geometry's if it has exact surfaces. */
+  volume?: [file: number, computed?: number];
+  area?: [file: number, computed?: number];
+  /** File xyz, then computed xyz. */
+  centroid?: number[];
+}
+
+/** Counts a file states for validation. */
+export interface Counts {
+  annotations?: number;
+  views?: number;
 }
 
 export type PmiKind = 'dimension' | 'tolerance' | 'datum' | 'note';
@@ -83,6 +104,8 @@ export interface ModelNode {
   children: number[];
   proto: number;
   color: number;
+  /** Index into Model.products. */
+  product?: number;
   matrix?: number[];
 }
 
@@ -98,6 +121,8 @@ export interface Model {
   triangles: number;
   pmi: PmiItem[];
   views: SavedView[];
+  products: Product[];
+  counts: Counts;
 }
 
 /** The saved view a file opens in: its default camera, else an isometric view, else the first. */
@@ -163,5 +188,7 @@ export function decodeModel(raw: RawModel, geometry: ArrayBuffer): Model {
     triangles,
     pmi: raw.pmi.map((p) => ({ ...p, segments: f32(p.segments), triangles: f32(p.triangles) })),
     views: raw.views,
+    products: raw.products,
+    counts: raw.counts,
   };
 }

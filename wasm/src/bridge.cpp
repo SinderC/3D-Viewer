@@ -11,6 +11,7 @@
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepBndLib.hxx>
+#include <BRepGProp.hxx>
 #include <BRepLib_ToolTriangulatedShape.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepTools.hxx>
@@ -20,9 +21,12 @@
 #include <DESTEP_Parameters.hxx>
 #include <GCPnts_AbscissaPoint.hxx>
 #include <GCPnts_TangentialDeflection.hxx>
+#include <GProp_GProps.hxx>
 #include <HeaderSection_FileSchema.hxx>
 #include <IGESCAFControl_Reader.hxx>
 #include <IGESData_IGESModel.hxx>
+#include <Interface_EntityIterator.hxx>
+#include <Interface_Graph.hxx>
 #include <Interface_HArray1OfHAsciiString.hxx>
 #include <Message.hxx>
 #include <Message_Messenger.hxx>
@@ -35,10 +39,50 @@
 #include <RWObj_CafReader.hxx>
 #include <RWStl.hxx>
 #include <STEPCAFControl_Reader.hxx>
+#include <STEPConstruct_UnitContext.hxx>
+#include <STEPConstruct_ValidationProps.hxx>
 #include <STEPControl_Reader.hxx>
+#include <StepBasic_Approval.hxx>
+#include <StepBasic_ApprovalAssignment.hxx>
+#include <StepBasic_ApprovalStatus.hxx>
+#include <StepBasic_AreaUnit.hxx>
+#include <StepBasic_CalendarDate.hxx>
+#include <StepBasic_DateAndTime.hxx>
+#include <StepBasic_DateAndTimeAssignment.hxx>
+#include <StepBasic_DateAssignment.hxx>
+#include <StepBasic_DateRole.hxx>
+#include <StepBasic_DateTimeRole.hxx>
+#include <StepBasic_DerivedUnit.hxx>
+#include <StepBasic_DerivedUnitElement.hxx>
+#include <StepBasic_LocalTime.hxx>
+#include <StepBasic_MeasureValueMember.hxx>
+#include <StepBasic_MeasureWithUnit.hxx>
+#include <StepBasic_NamedUnit.hxx>
+#include <StepBasic_Organization.hxx>
+#include <StepBasic_Person.hxx>
+#include <StepBasic_PersonAndOrganization.hxx>
+#include <StepBasic_PersonAndOrganizationAssignment.hxx>
+#include <StepBasic_PersonAndOrganizationRole.hxx>
+#include <StepBasic_Product.hxx>
+#include <StepBasic_ProductDefinition.hxx>
+#include <StepBasic_ProductDefinitionFormation.hxx>
+#include <StepBasic_SecurityClassification.hxx>
+#include <StepBasic_SecurityClassificationAssignment.hxx>
+#include <StepBasic_SecurityClassificationLevel.hxx>
+#include <StepBasic_VolumeUnit.hxx>
 #include <StepData_StepModel.hxx>
+#include <StepGeom_GeomRepContextAndGlobUnitAssCtxAndGlobUncertaintyAssCtx.hxx>
+#include <StepGeom_GeometricRepresentationContextAndGlobalUnitAssignedContext.hxx>
+#include <StepRepr_GlobalUnitAssignedContext.hxx>
+#include <StepRepr_MeasureRepresentationItem.hxx>
+#include <StepRepr_ProductDefinitionShape.hxx>
+#include <StepRepr_PropertyDefinition.hxx>
+#include <StepRepr_PropertyDefinitionRepresentation.hxx>
+#include <StepRepr_Representation.hxx>
+#include <StepRepr_ValueRepresentationItem.hxx>
 #include <TDF_Tool.hxx>
 #include <TDataStd_Name.hxx>
+#include <TDataStd_NamedData.hxx>
 #include <TDocStd_Document.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
@@ -48,6 +92,8 @@
 #include <TopoDS_Compound.hxx>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
+#include <TransferBRep.hxx>
+#include <Transfer_TransientProcess.hxx>
 #include <VrmlAPI_CafReader.hxx>
 #include <XCAFApp_Application.hxx>
 #include <XCAFDimTolObjects_DatumObject.hxx>
@@ -65,6 +111,8 @@
 #include <XCAFView_Object.hxx>
 #include <XCAFPrs.hxx>
 #include <XCAFPrs_Style.hxx>
+#include <XSControl_TransferReader.hxx>
+#include <XSControl_WorkSession.hxx>
 
 #include "jt_reader.h"
 
@@ -157,6 +205,30 @@ struct SavedView
   std::vector<int> pmi;
 };
 
+// Name/value pairs in display order.
+using Props = std::vector<std::pair<std::string, std::string>>;
+// Product data per XCAF definition label entry.
+using ProductProps = std::map<std::string, Props>;
+
+// Geometric validation properties a file states for a part or assembly, in mm.
+struct FileValidation
+{
+  std::vector<double> volume, area; // empty = not stated
+  std::vector<double> centroid;     // xyz
+  bool                wetted = false; // area of the solids' boundary only, not of every face
+};
+using ValidationProps = std::map<std::string, FileValidation>; // by definition label entry
+
+// What a file says about a part or assembly definition, beyond its shape.
+struct Product
+{
+  Props               props;      // STEP product data: part number, revision, approval, ...
+  Props               attributes; // user-defined attributes
+  std::vector<double> volume;     // validation property from the file, then as computed, if any
+  std::vector<double> area;       // same, for the surface area
+  std::vector<double> centroid;   // same, xyz then xyz
+};
+
 struct Node
 {
   std::string name;
@@ -165,6 +237,7 @@ struct Node
   double      matrix[16]; // column-major
   int         proto = -1;
   int         color = -1;
+  int         product = -1;
 };
 
 std::vector<uint8_t> gGeometry;
@@ -299,8 +372,11 @@ public:
   {
   }
 
-  void build(const JtPmi& jtPmi)
+  void build(const JtPmi& jtPmi, const ProductProps& productProps, const ValidationProps& validation)
   {
+    myProductProps = &productProps;
+    myValidation   = &validation;
+
     // Every part definition is meshed once; count them so meshing can report progress.
     LabelSequence all;
     myShapes->GetShapes(all);
@@ -324,6 +400,7 @@ public:
   const std::vector<RGBA>&      colors() const { return myColorTable; }
   const std::vector<Pmi>&       pmi() const { return myPmi; }
   const std::vector<SavedView>& views() const { return myViewList; }
+  const std::vector<Product>&   products() const { return myProducts; }
 
 private:
   int colorIndex(const RGBA& c)
@@ -373,6 +450,7 @@ private:
       if (node.proto < 0)
         return; // no renderable geometry (e.g. empty PMI/presentation shapes)
     }
+    node.product = productFor(def);
 
     const int id = int(myNodes.size());
     myNodes.push_back(node);
@@ -403,6 +481,93 @@ private:
     myProtoByEntry[entry.ToCString()] = idx;
     myProgress("mesh", int(100 * std::min(++myPartsMeshed, myPartCount) / std::max(myPartCount, 1)));
     return idx;
+  }
+
+  // Product data, user-defined attributes and validation properties of a definition; -1 if none.
+  int productFor(const TDF_Label& def)
+  {
+    TCollection_AsciiString entry;
+    TDF_Tool::Entry(def, entry);
+    auto it = myProductByEntry.find(entry.ToCString());
+    if (it != myProductByEntry.end())
+      return it->second;
+
+    Product p;
+    if (auto props = myProductProps->find(entry.ToCString()); props != myProductProps->end())
+      p.props = props->second;
+    p.attributes = namedData(def);
+
+    // Validation properties: the file's value, then the B-rep's when it has exact surfaces.
+    if (auto v = myValidation->find(entry.ToCString()); v != myValidation->end())
+    {
+      const FileValidation& file = v->second;
+      p.volume                   = file.volume;
+      p.area                     = file.area;
+      p.centroid                 = file.centroid;
+      const TopoDS_Shape shape   = XCAFDoc_ShapeTool::GetShape(def);
+      // Volume and centroid of the solids when there are any (open surfaces have no volume).
+      TopoDS_Compound solids;
+      BRep_Builder    bb;
+      bb.MakeCompound(solids);
+      bool hasSolids = false, exact = false;
+      for (TopExp_Explorer ex(shape, TopAbs_SOLID); ex.More(); ex.Next(), hasSolids = true)
+        bb.Add(solids, ex.Current());
+      for (TopExp_Explorer ex(shape, TopAbs_FACE); ex.More() && !exact; ex.Next())
+        exact = !BRep_Tool::Surface(TopoDS::Face(ex.Current())).IsNull();
+      if (exact)
+      {
+        GProp_GProps volume, area;
+        if (hasSolids && (!p.volume.empty() || !p.centroid.empty()))
+          BRepGProp::VolumeProperties(solids, volume);
+        if (!p.area.empty() || (!p.centroid.empty() && !hasSolids))
+          BRepGProp::SurfaceProperties(file.wetted && hasSolids ? TopoDS_Shape(solids) : shape, area);
+        if (!p.volume.empty() && hasSolids)
+          p.volume.push_back(volume.Mass());
+        if (!p.area.empty())
+          p.area.push_back(area.Mass());
+        if (!p.centroid.empty())
+        {
+          const gp_Pnt g = (hasSolids ? volume : area).CentreOfMass();
+          p.centroid.insert(p.centroid.end(), {g.X(), g.Y(), g.Z()});
+        }
+      }
+    }
+
+    int idx = -1;
+    if (!p.props.empty() || !p.attributes.empty() || !p.volume.empty() || !p.area.empty() || !p.centroid.empty())
+    {
+      idx = int(myProducts.size());
+      myProducts.push_back(std::move(p));
+    }
+    myProductByEntry[entry.ToCString()] = idx;
+    return idx;
+  }
+
+  // Strings, integers and reals of a label's named data (e.g. STEP user-defined attributes), by name.
+  static Props namedData(const TDF_Label& l)
+  {
+    Handle(TDataStd_NamedData) data;
+    if (!l.FindAttribute(TDataStd_NamedData::GetID(), data))
+      return {};
+    data->LoadDeferredData();
+    Props out;
+    auto  name = [](const TCollection_ExtendedString& s) { return std::string(TCollection_AsciiString(s).ToCString()); };
+    if (data->HasStrings())
+      for (const auto& [key, value] : data->GetStringsContainer().Items())
+        out.emplace_back(name(key), name(value));
+    if (data->HasIntegers())
+      for (const auto& [key, value] : data->GetIntegersContainer().Items())
+        out.emplace_back(name(key), std::to_string(value));
+    if (data->HasReals())
+      for (const auto& [key, value] : data->GetRealsContainer().Items())
+      {
+        std::ostringstream s;
+        s.precision(9);
+        s << value;
+        out.emplace_back(name(key), s.str());
+      }
+    std::sort(out.begin(), out.end()); // the maps keep no file order
+    return out;
   }
 
   Proto meshPart(const TDF_Label& def, const TopoDS_Shape& shape)
@@ -950,6 +1115,10 @@ private:
   std::map<std::string, int> myPmiByEntry;
   std::map<std::string, int> myDatumByKey; // part, type and name → PMI index
   std::vector<SavedView>     myViewList;
+  std::vector<Product>       myProducts;
+  std::map<std::string, int> myProductByEntry;
+  const ProductProps*        myProductProps = nullptr;
+  const ValidationProps*     myValidation   = nullptr;
 };
 
 // Readers: each fills the XCAF document and describes the source.
@@ -960,6 +1129,11 @@ struct Source
   std::string schema; // STEP only
   std::string unit;   // file length unit name as in STEP ("MILLIMETRE", "INCH", ...); empty = mm
   JtPmi       jtPmi;  // JT only (STEP PMI is in the XCAF document)
+  // STEP only:
+  ProductProps    products;
+  ValidationProps validation;
+  // Counts the file states for validation; -1 = not stated.
+  int annotations = -1, views = -1;
 };
 
 // OCCT's IGES reader, TKJT (and glTF buffers, read lazily by file name) need a real file: MEMFS.
@@ -998,6 +1172,270 @@ std::string fileLengthUnit(STEPControl_Reader& reader)
   return len.IsEmpty() ? std::string() : std::string(len.First().ToCString());
 }
 
+// STEP string without the blanks files put in for "no value".
+std::string stepText(const Handle(TCollection_HAsciiString)& s)
+{
+  std::string t = s.IsNull() ? std::string() : s->ToCString();
+  t.erase(0, t.find_first_not_of(' '));
+  t.erase(t.find_last_not_of(' ') + 1);
+  return t;
+}
+
+// "design_owner" → "Design owner"
+std::string roleLabel(const Handle(TCollection_HAsciiString)& role)
+{
+  std::string t = stepText(role);
+  std::replace(t.begin(), t.end(), '_', ' ');
+  if (!t.empty())
+    t[0] = char(std::toupper(static_cast<unsigned char>(t[0])));
+  return t;
+}
+
+std::string dateText(const Handle(StepBasic_Date)& date, const Handle(StepBasic_LocalTime)& time)
+{
+  const auto cal = Handle(StepBasic_CalendarDate)::DownCast(date);
+  if (cal.IsNull() || cal->YearComponent() <= 0) // year 0: a placeholder date
+    return {};
+  char buf[32];
+  int  n = std::snprintf(buf, sizeof buf, "%04d-%02d-%02d", cal->YearComponent(), cal->MonthComponent(), cal->DayComponent());
+  const int minute = time.IsNull() || !time->HasMinuteComponent() ? 0 : time->MinuteComponent();
+  if (!time.IsNull() && (time->HourComponent() || minute)) // midnight: most writers give no time
+    std::snprintf(buf + n, sizeof buf - n, " %02d:%02d", time->HourComponent(), minute);
+  return buf;
+}
+
+std::string personText(const Handle(StepBasic_PersonAndOrganization)& po)
+{
+  std::string person, org;
+  if (const auto p = po->ThePerson(); !p.IsNull())
+  {
+    const std::string first = p->HasFirstName() ? stepText(p->FirstName()) : std::string();
+    const std::string last  = p->HasLastName() ? stepText(p->LastName()) : std::string();
+    person                  = first.empty() || last.empty() ? first + last : first + ' ' + last;
+    if (person.empty())
+      person = stepText(p->Id());
+  }
+  if (!po->TheOrganization().IsNull())
+    org = stepText(po->TheOrganization()->Name());
+  return person.empty() || org.empty() ? person + org : person + ", " + org;
+}
+
+// XCAF label entry of a product definition's shape; empty if it has none.
+std::string pdEntry(STEPCAFControl_Reader& reader, const Handle(StepBasic_ProductDefinition)& pd)
+{
+  const Handle(Transfer_TransientProcess)& tp     = reader.ChangeReader().WS()->TransferReader()->TransientProcess();
+  const Handle(Transfer_Binder)            binder = pd.IsNull() ? nullptr : tp->Find(pd);
+  const TopoDS_Shape shape = binder.IsNull() ? TopoDS_Shape() : TransferBRep::ShapeResult(tp, binder);
+  const TDF_Label*   label = shape.IsNull() ? nullptr : reader.GetShapeLabelMap().Seek(shape); // transferred shape → label
+  if (!label)
+    return {};
+  TCollection_AsciiString entry;
+  TDF_Tool::Entry(*label, entry);
+  return entry.ToCString();
+}
+
+// Configuration management data of each product (ISO 10303-203 part, version and their approvals,
+// security classification, people and dates; AP214/AP242 assign the same through applied_*
+// subtypes), keyed by the product definition's XCAF label.
+ProductProps readProductProps(STEPCAFControl_Reader& reader)
+{
+  const Handle(XSControl_WorkSession)    ws    = reader.ChangeReader().WS();
+  const Interface_Graph&                 graph = ws->Graph();
+  const Handle(Interface_InterfaceModel) model = ws->Model();
+
+  ProductProps out;
+  for (int i = 1; i <= model->NbEntities(); ++i)
+  {
+    const auto        pd    = Handle(StepBasic_ProductDefinition)::DownCast(model->Value(i));
+    const std::string entry = pdEntry(reader, pd);
+    if (entry.empty())
+      continue;
+
+    Props props;
+    auto  add = [&props](const std::string& key, const std::string& value) {
+      if (!key.empty() && !value.empty() && std::find(props.begin(), props.end(), std::pair(key, value)) == props.end())
+        props.emplace_back(key, value);
+    };
+    const Handle(StepBasic_ProductDefinitionFormation) version = pd->Formation();
+    const Handle(StepBasic_Product) product = version.IsNull() ? nullptr : version->OfProduct();
+    if (!product.IsNull())
+      add("Part number", stepText(product->Id()));
+    if (!version.IsNull())
+      add("Revision", stepText(version->Id()));
+    if (!product.IsNull())
+      add("Description", stepText(product->Description()));
+
+    for (const Handle(Standard_Transient)& item : {Handle(Standard_Transient)(product), Handle(Standard_Transient)(version), Handle(Standard_Transient)(pd)})
+    {
+      if (item.IsNull())
+        continue;
+      for (Interface_EntityIterator it = graph.Sharings(item); it.More(); it.Next())
+      {
+        const Handle(Standard_Transient)& e = it.Value();
+        if (const auto a = Handle(StepBasic_ApprovalAssignment)::DownCast(e); !a.IsNull())
+        {
+          if (!a->AssignedApproval().IsNull() && !a->AssignedApproval()->Status().IsNull())
+            add("Approval", stepText(a->AssignedApproval()->Status()->Name()));
+        }
+        else if (const auto s = Handle(StepBasic_SecurityClassificationAssignment)::DownCast(e); !s.IsNull())
+        {
+          const auto c = s->AssignedSecurityClassification();
+          if (!c.IsNull() && !c->SecurityLevel().IsNull())
+            add("Security", stepText(c->SecurityLevel()->Name()));
+        }
+        else if (const auto p = Handle(StepBasic_PersonAndOrganizationAssignment)::DownCast(e); !p.IsNull())
+        {
+          if (!p->AssignedPersonAndOrganization().IsNull() && !p->Role().IsNull())
+            add(roleLabel(p->Role()->Name()), personText(p->AssignedPersonAndOrganization()));
+        }
+        else if (const auto d = Handle(StepBasic_DateAndTimeAssignment)::DownCast(e); !d.IsNull())
+        {
+          const auto dt = d->AssignedDateAndTime();
+          if (!dt.IsNull() && !d->Role().IsNull())
+            add(roleLabel(d->Role()->Name()), dateText(dt->DateComponent(), dt->TimeComponent()));
+        }
+        else if (const auto d = Handle(StepBasic_DateAssignment)::DownCast(e); !d.IsNull())
+        {
+          if (!d->Role().IsNull())
+            add(roleLabel(d->Role()->Name()), dateText(d->AssignedDate(), nullptr));
+        }
+      }
+    }
+
+    if (!props.empty())
+      out[entry] = std::move(props);
+  }
+  return out;
+}
+
+// Length unit in mm of a STEP unit; 0 if it is not a length unit.
+double unitLength(const Handle(StepBasic_NamedUnit)& unit)
+{
+  STEPConstruct_UnitContext ctx;
+  return ctx.ComputeFactors(unit) == 0 && ctx.LengthDone() ? ctx.LengthFactor() : 0.;
+}
+
+// Length unit in mm of a representation context (as OCCT's GetPropPnt reads it); 1 if it has none.
+double contextLength(const Handle(StepRepr_RepresentationContext)& context)
+{
+  Handle(StepRepr_GlobalUnitAssignedContext) units;
+  if (const auto c = Handle(StepGeom_GeometricRepresentationContextAndGlobalUnitAssignedContext)::DownCast(context); !c.IsNull())
+    units = c->GlobalUnitAssignedContext();
+  else if (const auto c = Handle(StepGeom_GeomRepContextAndGlobUnitAssCtxAndGlobUncertaintyAssCtx)::DownCast(context); !c.IsNull())
+    units = c->GlobalUnitAssignedContext();
+  STEPConstruct_UnitContext ctx;
+  return !units.IsNull() && ctx.ComputeFactors(units) == 0 ? ctx.LengthFactor() : 1.;
+}
+
+// Factor from a measure's unit to mm^dim (a measure without a unit is in the representation's);
+// 0 if unknown. OCCT's own validation property reader does not convert derived units.
+double measureFactor(const StepBasic_Unit& unit, int dim, double contextLength)
+{
+  if (const auto derived = unit.DerivedUnit(); !derived.IsNull())
+  {
+    double f = 1;
+    for (int i = 1; i <= derived->NbElements(); ++i)
+    {
+      const auto   e = derived->ElementsValue(i);
+      const double l = e.IsNull() ? 0. : unitLength(e->Unit());
+      if (l <= 0)
+        return 0;
+      f *= std::pow(l, e->Exponent());
+    }
+    return f;
+  }
+  if (const auto named = unit.NamedUnit(); !named.IsNull())
+  {
+    // OCCT reads AREA_UNIT((DERIVED_UNIT_ELEMENT(...))) and VOLUME_UNIT as plain named units and
+    // drops their elements: assume they are built on the representation's length unit.
+    if (named->DynamicType() == STANDARD_TYPE(StepBasic_AreaUnit) || named->DynamicType() == STANDARD_TYPE(StepBasic_VolumeUnit))
+      return std::pow(contextLength, dim);
+    STEPConstruct_UnitContext ctx;
+    if (ctx.ComputeFactors(named) != 0)
+      return 0;
+    if (dim == 2 && ctx.AreaDone())
+      return ctx.AreaFactor();
+    if (dim == 3 && ctx.VolumeDone())
+      return ctx.VolumeFactor();
+    return ctx.LengthDone() ? std::pow(ctx.LengthFactor(), dim) : 0.;
+  }
+  return std::pow(contextLength, dim);
+}
+
+// Geometric validation properties (ISO 10303-203 Amd 1 property_definition_representation) of
+// product definitions: 'volume measure', 'surface area measure' (AP242: 'wetted area measure') and
+// 'centre point', in mm. Only
+// those on the product definition (or its shape) itself: properties of shape aspects, such as
+// a part's construction surfaces, describe something else.
+ValidationProps readValidationProps(STEPCAFControl_Reader& reader)
+{
+  const Handle(XSControl_WorkSession)    ws    = reader.ChangeReader().WS();
+  const Interface_Graph&                 graph = ws->Graph();
+  const Handle(Interface_InterfaceModel) model = ws->Model();
+  STEPConstruct_ValidationProps          props(ws);
+
+  ValidationProps out;
+  for (int i = 1; i <= model->NbEntities(); ++i)
+  {
+    const auto prop = Handle(StepRepr_PropertyDefinition)::DownCast(model->Value(i));
+    if (prop.IsNull() || stepText(prop->Name()) != "geometric validation property")
+      continue;
+    Handle(StepBasic_ProductDefinition) pd = prop->Definition().ProductDefinition();
+    if (const auto pds = prop->Definition().ProductDefinitionShape(); pd.IsNull() && !pds.IsNull())
+      pd = pds->Definition().ProductDefinition();
+    const std::string entry = pdEntry(reader, pd);
+    if (entry.empty())
+      continue;
+
+    FileValidation& v = out[entry];
+    for (Interface_EntityIterator it = graph.Sharings(prop); it.More(); it.Next())
+    {
+      const auto pdr = Handle(StepRepr_PropertyDefinitionRepresentation)::DownCast(it.Value());
+      const auto rep = pdr.IsNull() ? nullptr : pdr->UsedRepresentation();
+      if (rep.IsNull() || rep->Items().IsNull())
+        continue;
+      gp_Pnt centre;
+      for (const auto& item : *rep->Items())
+      {
+        const std::string name = item.IsNull() ? std::string() : stepText(item->Name());
+        if (const auto m = Handle(StepRepr_MeasureRepresentationItem)::DownCast(item); !m.IsNull() && !m->Measure().IsNull())
+        {
+          // A surface area is of every face; a wetted area (AP242) of the solids' boundary only.
+          const int dim = name == "volume measure" ? 3 : name == "surface area measure" || name == "wetted area measure" ? 2 : 0;
+          if (!dim)
+            continue;
+          const double f = measureFactor(m->Measure()->UnitComponent(), dim, contextLength(rep->ContextOfItems()));
+          if (f > 0)
+            (dim == 3 ? v.volume : v.area) = {m->Measure()->ValueComponent() * f};
+          if (dim == 2)
+            v.wetted = name == "wetted area measure";
+        }
+        else if (name == "centre point" && props.GetPropPnt(item, rep->ContextOfItems(), centre))
+          v.centroid = {centre.X(), centre.Y(), centre.Z()};
+      }
+    }
+  }
+  return out;
+}
+
+// Counts that validation properties state for the whole file: PMI annotations and saved views
+// (presentation PMI).
+void readValidationCounts(const Handle(Interface_InterfaceModel)& model, Source& src)
+{
+  for (int i = 1; i <= model->NbEntities(); ++i)
+  {
+    const Handle(Standard_Transient)& e = model->Value(i);
+    if (const auto v = Handle(StepRepr_ValueRepresentationItem)::DownCast(e); !v.IsNull() && !v->ValueComponentMember().IsNull())
+    {
+      const std::string name = stepText(v->Name());
+      if (name == "number of annotations")
+        src.annotations = int(v->ValueComponentMember()->Real());
+      else if (name == "number of views")
+        src.views = int(v->ValueComponentMember()->Real());
+    }
+  }
+}
+
 Source readStepDoc(const std::string& bytes, const Handle(TDocStd_Document)& doc, Progress& progress)
 {
   STEPCAFControl_Reader reader;
@@ -1006,7 +1444,8 @@ Source readStepDoc(const std::string& bytes, const Handle(TDocStd_Document)& doc
   reader.SetLayerMode(true);
   reader.SetGDTMode(true);  // PMI: dimensions, tolerances, datums with their presentations
   reader.SetViewMode(true); // saved views
-  reader.SetPropsMode(false);
+  reader.SetPropsMode(false); // validation properties are read by readValidationProps
+  reader.SetMetaMode(true);   // user-defined attributes
 
   MemBuf       buf(const_cast<char*>(bytes.data()), bytes.size(), progress);
   std::istream stream(&buf);
@@ -1030,6 +1469,9 @@ Source readStepDoc(const std::string& bytes, const Handle(TDocStd_Document)& doc
   progress("transfer", -1);
   if (!reader.Transfer(doc))
     throw std::runtime_error("STEP transfer failed");
+  src.products   = readProductProps(reader);
+  src.validation = readValidationProps(reader);
+  readValidationCounts(reader.ChangeReader().Model(), src);
   return src;
 }
 
@@ -1281,6 +1723,8 @@ std::string toJson(const Source& src, const Builder& b)
     const Node& n = b.nodes()[i];
     o << (i ? "," : "") << "{\"name\":\"" << jsonEscape(n.name) << "\",\"parent\":" << n.parent
       << ",\"proto\":" << n.proto << ",\"color\":" << n.color;
+    if (n.product >= 0)
+      o << ",\"product\":" << n.product;
     if (n.hasMatrix)
     {
       o << ",\"matrix\":[";
@@ -1369,7 +1813,34 @@ std::string toJson(const Source& src, const Builder& b)
       o << (k ? "," : "") << v.pmi[k];
     o << "]}";
   }
-  o << "]}";
+  o << "],\"products\":[";
+  auto pairs = [&o](const Props& props) {
+    o << '[';
+    for (size_t k = 0; k < props.size(); ++k)
+      o << (k ? "," : "") << "[\"" << jsonEscape(props[k].first) << "\",\"" << jsonEscape(props[k].second) << "\"]";
+    o << ']';
+  };
+  for (size_t i = 0; i < b.products().size(); ++i)
+  {
+    const Product& p = b.products()[i];
+    o << (i ? "," : "") << "{\"props\":";
+    pairs(p.props);
+    o << ",\"attributes\":";
+    pairs(p.attributes);
+    numbers("volume", p.volume);
+    numbers("area", p.area);
+    numbers("centroid", p.centroid);
+    o << '}';
+  }
+  o << "],\"counts\":{";
+  const char* sep = "";
+  for (const auto& [key, n] : {std::pair("annotations", src.annotations), std::pair("views", src.views)})
+    if (n >= 0)
+    {
+      o << sep << '"' << key << "\":" << n;
+      sep = ",";
+    }
+  o << "}}";
   return o.str();
 }
 
@@ -1406,7 +1877,7 @@ val readModel(const std::string& bytes, const std::string& fileName, val jsOptio
     const Source src = readDoc(bytes, fileName, doc, progress);
 
     Builder builder(doc, opts, progress);
-    builder.build(src.jtPmi);
+    builder.build(src.jtPmi, src.products, src.validation);
 
     result.set("json", toJson(src, builder));
     result.set("geometry", val(emscripten::typed_memory_view(gGeometry.size(), gGeometry.data())));

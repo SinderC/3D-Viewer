@@ -1,5 +1,6 @@
 import { useEffect, useState, type Dispatch } from 'react';
 import { pmiInfo } from '../core/pmi';
+import { countInfo, productInfo } from '../core/product';
 import { ModelTree } from './ModelTree';
 import { PmiList } from './PmiList';
 import type { Action, State } from './state';
@@ -11,7 +12,7 @@ interface Props {
   dispatch: Dispatch<Action>;
 }
 
-// Model tree, PMI and saved views (when the file has them), and details of the file or selected PMI.
+// Model tree, PMI and saved views (when the file has them), and details of the file, selected part or PMI.
 export function Sidebar({ state, dispatch }: Props) {
   const { model, unit } = state;
   const [tab, setTab] = useState<Tab>('model');
@@ -29,6 +30,8 @@ export function Sidebar({ state, dispatch }: Props) {
   if (model.pmi.length) tabs.push(['pmi', `PMI ${model.pmi.length}`]);
   if (model.views.length) tabs.push(['views', `Views ${model.views.length}`]);
   const pmi = state.selectedPmi === null ? undefined : model.pmi[state.selectedPmi];
+  const node = state.selected === null ? undefined : model.nodes[state.selected];
+  const product = node?.product === undefined ? undefined : model.products[node.product];
 
   return (
     <aside className="sidebar">
@@ -68,6 +71,13 @@ export function Sidebar({ state, dispatch }: Props) {
           pmiInfo(pmi, unit).map(([label, value]) => (
             <Row key={label} label={label} value={value} />
           ))
+        ) : product && node ? (
+          <>
+            <Row label="Name" value={node.name} />
+            {productInfo(product, unit).map(([label, value, title], i) => (
+              <Row key={i} label={label} value={value} title={title} />
+            ))}
+          </>
         ) : (
           <>
             <Row label="File" value={state.fileName ?? ''} />
@@ -75,12 +85,23 @@ export function Sidebar({ state, dispatch }: Props) {
             <Row label="Units" value={model.unit} />
             <Row label="Parts" value={`${model.protos.length} (${model.nodes.filter((n) => n.proto >= 0).length} instances)`} />
             <Row label="Triangles" value={model.triangles.toLocaleString()} />
+            {model.counts.annotations !== undefined && (
+              <CountRow label="PMI" loaded={model.pmi.length} stated={model.counts.annotations} />
+            )}
+            {model.counts.views !== undefined && (
+              <CountRow label="Views" loaded={model.views.length} stated={model.counts.views} />
+            )}
             <Row label="Load time" value={`${((state.loadMs ?? 0) / 1000).toFixed(2)} s`} />
           </>
         )}
       </dl>
     </aside>
   );
+}
+
+function CountRow({ label, loaded, stated }: { label: string; loaded: number; stated: number }) {
+  const [value, title] = countInfo(loaded, stated);
+  return <Row label={label} value={value} title={title} />;
 }
 
 function Row({ label, value, title }: { label: string; value: string; title?: string }) {

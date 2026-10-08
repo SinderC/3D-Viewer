@@ -40,6 +40,8 @@ function rawFixture(): { raw: RawModel; geometry: ArrayBuffer } {
     ],
     pmi: [{ kind: 'dimension', type: 'Distance', name: 'd1', proto: 0, segments: [84, 6], triangles: [0, 9], faces: [0], value: [1] }],
     views: [{ name: 'MBD_A', direction: [0, 0, -1], up: [0, 1, 0], pmi: [0] }],
+    products: [],
+    counts: {},
   };
   return { raw, geometry: buf };
 }
