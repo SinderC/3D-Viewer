@@ -4,12 +4,41 @@ Changes to OCCT (V8_0_1) for the 3D Viewer. Applied by wasm/scripts/build-occt.s
   (complex instances with SHAPE_REPRESENTATION and TESSELLATED_SHAPE_REPRESENTATION, with or
   without CHARACTERIZED_OBJECT). OCCT skipped them, so PMI in them lost its length unit (inch
   PMI read as mm) and saved views attached to them were dropped. Seen in the NIST AP242 PMI files.
+- STEP AP242 e3: read DRAUGHTING_MODEL_ITEM_ASSOCIATION_WITH_PLACEHOLDER as the association it
+  extends (the placeholder is ignored). It links PMI to its presentation, so OCCT dropped the
+  graphics of every dimension, tolerance and datum that used only it, and imported datum
+  symbols as notes. Seen in the NIST e3 files (stc_06..08, stc_10, ctc_02, ctc_03, ftc_06).
+  - readAnnotation skips associations to callouts holding only an annotation placeholder.
+  - PMI presentations are read after semantic PMI. A presentation is not read again as a note
+    when the semantic PMI already took it (this also drops duplicate notes in e1/e2 files),
+    and the note path prefers an association to a plain shape aspect over one to the PMI.
+- Datums take their faces from item_identified_representation_usage (not only
+  geometric_item_specific_usage) on the datum or its features, and identified items given as
+  a typed list, SET_REPRESENTATION_ITEM((...)), are read. Datums in the NIST files had no faces.
 
 diff --git a/src/DataExchange/TKDESTEP/RWStepAP214/RWStepAP214_ReadWriteModule.cxx b/src/DataExchange/TKDESTEP/RWStepAP214/RWStepAP214_ReadWriteModule.cxx
-index f339ce69..fbfe2fe7 100644
+index f339ce69..3399fa22 100644
 --- a/src/DataExchange/TKDESTEP/RWStepAP214/RWStepAP214_ReadWriteModule.cxx
 +++ b/src/DataExchange/TKDESTEP/RWStepAP214/RWStepAP214_ReadWriteModule.cxx
-@@ -4516,6 +4516,13 @@ int RWStepAP214_ReadWriteModule::CaseStep(
+@@ -2377,6 +2377,9 @@ static constexpr std::string_view Reco_FeatureForDatumTargetRelationship(
+   "FEATURE_FOR_DATUM_TARGET_RELATIONSHIP");
+ static constexpr std::string_view Reco_DraughtingModelItemAssociation(
+   "DRAUGHTING_MODEL_ITEM_ASSOCIATION");
++// AP242 e3 subtype; read as its supertype (the placeholder is ignored)
++static constexpr std::string_view Reco_DraughtingModelItemAssociationWithPlaceholder(
++  "DRAUGHTING_MODEL_ITEM_ASSOCIATION_WITH_PLACEHOLDER");
+ static constexpr std::string_view Reco_AnnotationPlane("ANNOTATION_PLANE");
+ 
+ static constexpr std::string_view Reco_TessellatedAnnotationOccurrence(
+@@ -3639,6 +3642,7 @@ static void initializeTypenums(StringViewDataMap& theTypenums)
+   theTypenums.Bind(Reco_ValueRepresentationItem, 701);
+   theTypenums.Bind(Reco_FeatureForDatumTargetRelationship, 702);
+   theTypenums.Bind(Reco_DraughtingModelItemAssociation, 703);
++  theTypenums.Bind(Reco_DraughtingModelItemAssociationWithPlaceholder, 703);
+   theTypenums.Bind(Reco_AnnotationPlane, 704);
+ 
+   theTypenums.Bind(Reco_TessellatedAnnotationOccurrence, 707);
+@@ -4516,6 +4520,13 @@ int RWStepAP214_ReadWriteModule::CaseStep(
        {
          return 337;
        }
@@ -23,7 +52,7 @@ index f339ce69..fbfe2fe7 100644
      }
      else if (NbComp == 5)
      {
-@@ -4650,6 +4657,12 @@ int RWStepAP214_ReadWriteModule::CaseStep(
+@@ -4650,6 +4661,12 @@ int RWStepAP214_ReadWriteModule::CaseStep(
        {
          return 715;
        }
@@ -36,3 +65,284 @@ index f339ce69..fbfe2fe7 100644
      }
      else if (NbComp == 3)
      {
+diff --git a/src/DataExchange/TKDESTEP/RWStepAP242/RWStepAP242_RWDraughtingModelItemAssociation.cxx b/src/DataExchange/TKDESTEP/RWStepAP242/RWStepAP242_RWDraughtingModelItemAssociation.cxx
+index c8fea49a..44e19524 100644
+--- a/src/DataExchange/TKDESTEP/RWStepAP242/RWStepAP242_RWDraughtingModelItemAssociation.cxx
++++ b/src/DataExchange/TKDESTEP/RWStepAP242/RWStepAP242_RWDraughtingModelItemAssociation.cxx
+@@ -37,7 +37,8 @@ void RWStepAP242_RWDraughtingModelItemAssociation::ReadStep(
+   const occ::handle<StepAP242_DraughtingModelItemAssociation>& ent) const
+ {
+   // Number of Parameter Control
+-  if (!data->CheckNbParams(num, 5, ach, "geometric_item_specific_usage"))
++  // 6 for draughting_model_item_association_with_placeholder, whose placeholder is ignored
++  if (data->NbParams(num) != 6 && !data->CheckNbParams(num, 5, ach, "geometric_item_specific_usage"))
+   {
+     return;
+   }
+diff --git a/src/DataExchange/TKDESTEP/RWStepAP242/RWStepAP242_RWItemIdentifiedRepresentationUsage.cxx b/src/DataExchange/TKDESTEP/RWStepAP242/RWStepAP242_RWItemIdentifiedRepresentationUsage.cxx
+index aac5b931..6471b4d2 100644
+--- a/src/DataExchange/TKDESTEP/RWStepAP242/RWStepAP242_RWItemIdentifiedRepresentationUsage.cxx
++++ b/src/DataExchange/TKDESTEP/RWStepAP242/RWStepAP242_RWItemIdentifiedRepresentationUsage.cxx
+@@ -88,6 +88,13 @@ void RWStepAP242_RWItemIdentifiedRepresentationUsage::ReadStep(
+                              ach,
+                              nbSub))
+   {
++    // A typed list, SET_REPRESENTATION_ITEM((#1,#2,...)), holds the items in its one parameter
++    int nbList = 0;
++    if (data->NbParams(nbSub) == 1 && data->ParamType(nbSub, 1) == Interface_ParamSub
++        && data->ReadSubList(nbSub, 1, "set_representation_item", ach, nbList))
++    {
++      nbSub = nbList;
++    }
+     int nbElements = data->NbParams(nbSub);
+     anItems = new NCollection_HArray1<occ::handle<StepRepr_RepresentationItem>>(1, nbElements);
+     for (int i = 1; i <= nbElements; i++)
+diff --git a/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx b/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx
+index 1262ea95..1020509e 100644
+--- a/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx
++++ b/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx
+@@ -2769,29 +2769,48 @@ bool readAnnotationPlane(const occ::handle<StepVisual_AnnotationPlane>& theAnnot
+ // purpose  : read annotation plane and position for given GDT
+ // (Dimension, Geometric_Tolerance, Datum_Feature or Placed_Datum_Target_Feature)
+ //=======================================================================
+-void readAnnotation(const occ::handle<XSControl_TransferReader>& theTR,
+-                    const occ::handle<Standard_Transient>&       theGDT,
+-                    const occ::handle<Standard_Transient>&       theDimObject,
+-                    const StepData_Factors&                      theLocalFactors)
++// Whether a presentation has annotations readPMIPresentation can read
++static bool hasAnnotation(const occ::handle<Standard_Transient>& thePresentEntity)
+ {
+-  if (theGDT.IsNull() || theDimObject.IsNull())
++  occ::handle<StepVisual_DraughtingCallout> aDCallout =
++    occ::down_cast<StepVisual_DraughtingCallout>(thePresentEntity);
++  if (aDCallout.IsNull())
+   {
+-    return;
++    return !thePresentEntity.IsNull();
+   }
+-  occ::handle<TCollection_HAsciiString>  aPresentName;
+-  TopoDS_Compound                        aResAnnotation;
+-  occ::handle<Transfer_TransientProcess> aTP    = theTR->TransientProcess();
+-  const Interface_Graph&                 aGraph = aTP->Graph();
+-  // find the proper DraughtingModelItemAssociation
+-  Interface_EntityIterator                              subs = aGraph.Sharings(theGDT);
++  for (int i = 1; i <= aDCallout->NbContents(); i++)
++  {
++    const occ::handle<Standard_Transient>& anItem = aDCallout->ContentsValue(i).Value();
++    if (!anItem.IsNull()
++        && (anItem->IsKind(STANDARD_TYPE(StepVisual_AnnotationOccurrence))
++            || anItem->IsKind(STANDARD_TYPE(StepVisual_TessellatedAnnotationOccurrence))))
++    {
++      return true;
++    }
++  }
++  return false;
++}
++
++// The DraughtingModelItemAssociation that readAnnotation takes the presentation of a GDT from
++static occ::handle<StepAP242_DraughtingModelItemAssociation> findPresentationLink(
++  const Interface_Graph&                 theGraph,
++  const occ::handle<Standard_Transient>& theGDT)
++{
+   occ::handle<StepAP242_DraughtingModelItemAssociation> aDMIA;
+-  for (subs.Start(); subs.More() && aDMIA.IsNull(); subs.Next())
++  for (Interface_EntityIterator subs = theGraph.Sharings(theGDT); subs.More() && aDMIA.IsNull();
++       subs.Next())
+   {
+     if (!subs.Value()->IsKind(STANDARD_TYPE(StepAP242_DraughtingModelItemAssociation)))
+     {
+       continue;
+     }
+     aDMIA = occ::down_cast<StepAP242_DraughtingModelItemAssociation>(subs.Value());
++    // AP242 e3 may also link the PMI to a callout holding only a placeholder: take another one
++    if (aDMIA->NbIdentifiedItem() == 0 || !hasAnnotation(aDMIA->IdentifiedItemValue(1)))
++    {
++      aDMIA = nullptr;
++      continue;
++    }
+     occ::handle<TCollection_HAsciiString> aName = aDMIA->Name();
+     aName->LowerCase();
+     if (!aName->Search(new TCollection_HAsciiString("pmi representation to presentation link")))
+@@ -2799,6 +2818,24 @@ void readAnnotation(const occ::handle<XSControl_TransferReader>& theTR,
+       aDMIA = nullptr;
+     }
+   }
++  return aDMIA;
++}
++
++void readAnnotation(const occ::handle<XSControl_TransferReader>& theTR,
++                    const occ::handle<Standard_Transient>&       theGDT,
++                    const occ::handle<Standard_Transient>&       theDimObject,
++                    const StepData_Factors&                      theLocalFactors)
++{
++  if (theGDT.IsNull() || theDimObject.IsNull())
++  {
++    return;
++  }
++  occ::handle<TCollection_HAsciiString>  aPresentName;
++  TopoDS_Compound                        aResAnnotation;
++  occ::handle<Transfer_TransientProcess> aTP    = theTR->TransientProcess();
++  const Interface_Graph&                 aGraph = aTP->Graph();
++  Interface_EntityIterator                              subs;
++  occ::handle<StepAP242_DraughtingModelItemAssociation> aDMIA = findPresentationLink(aGraph, theGDT);
+   if (aDMIA.IsNull() || aDMIA->NbIdentifiedItem() == 0)
+   {
+     return;
+@@ -3399,6 +3436,33 @@ bool STEPCAFControl_Reader::setDatumToXCAF(
+       }
+     }
+   }
++  // Some writers (AP242 e3) link the geometry to the datum itself rather than to its feature, or
++  // with an item_identified_representation_usage rather than a geometric_item_specific_usage
++  NCollection_Sequence<occ::handle<Standard_Transient>> aLinked;
++  aLinked.Append(theDat);
++  for (int i = 1; i <= aSAs.Length(); i++)
++  {
++    aLinked.Append(aSAs.Value(i));
++  }
++  for (int i = 1; i <= aLinked.Length() && aShapeLabels.IsEmpty(); i++)
++  {
++    for (Interface_EntityIterator anIter = aGraph.Sharings(aLinked.Value(i)); anIter.More();
++         anIter.Next())
++    {
++      occ::handle<StepAP242_ItemIdentifiedRepresentationUsage> anIIRU =
++        occ::down_cast<StepAP242_ItemIdentifiedRepresentationUsage>(anIter.Value());
++      for (int j = 1; !anIIRU.IsNull() && j <= anIIRU->NbIdentifiedItem(); j++)
++      {
++        TDF_Label aShapeL = anIIRU->IdentifiedItemValue(j).IsNull()
++                              ? TDF_Label()
++                              : getShapeLabel(anIIRU->IdentifiedItemValue(j), theWS, aSTool);
++        if (!aShapeL.IsNull())
++        {
++          aShapeLabels.Append(aShapeL);
++        }
++      }
++    }
++  }
+ 
+   // Process datum targets and create objects for them
+   bool isExistDatumTarget = false;
+@@ -5304,6 +5368,36 @@ static void setGeomTolObjectToXCAF(const occ::handle<Standard_Transient>&    the
+ 
+ //=================================================================================================
+ 
++// Whether an entity is PMI that readAnnotation reads the presentation of
++static bool isSemanticGDT(const occ::handle<Standard_Transient>& theEnt)
++{
++  return !theEnt.IsNull()
++         && (theEnt->IsKind(STANDARD_TYPE(StepDimTol_Datum))
++             || theEnt->IsKind(STANDARD_TYPE(StepDimTol_DatumFeature))
++             || theEnt->IsKind(STANDARD_TYPE(StepDimTol_DatumTarget))
++             || theEnt->IsKind(STANDARD_TYPE(StepDimTol_GeometricTolerance))
++             || theEnt->IsKind(STANDARD_TYPE(StepShape_DimensionalSize))
++             || theEnt->IsKind(STANDARD_TYPE(StepShape_DimensionalLocation)));
++}
++
++// Whether the GDT object on a label has a presentation
++static bool hasPresentation(const TDF_Label& theGDTL)
++{
++  occ::handle<XCAFDoc_Dimension>     aDim;
++  occ::handle<XCAFDoc_GeomTolerance> aTol;
++  occ::handle<XCAFDoc_Datum>         aDat;
++  if (theGDTL.FindAttribute(XCAFDoc_Dimension::GetID(), aDim) && !aDim->GetObject().IsNull())
++  {
++    return !aDim->GetObject()->GetPresentation().IsNull();
++  }
++  if (theGDTL.FindAttribute(XCAFDoc_GeomTolerance::GetID(), aTol) && !aTol->GetObject().IsNull())
++  {
++    return !aTol->GetObject()->GetPresentation().IsNull();
++  }
++  return theGDTL.FindAttribute(XCAFDoc_Datum::GetID(), aDat) && !aDat->GetObject().IsNull()
++         && !aDat->GetObject()->GetPresentation().IsNull();
++}
++
+ bool STEPCAFControl_Reader::ReadGDTs(const occ::handle<XSControl_WorkSession>& theWS,
+                                      const occ::handle<TDocStd_Document>&      theDoc,
+                                      const StepData_Factors&                   theLocalFactors)
+@@ -5326,6 +5420,8 @@ bool STEPCAFControl_Reader::ReadGDTs(const occ::handle<XSControl_WorkSession>& t
+   }
+ 
+   int nb = aModel->NbEntities();
++  // Semantic PMI first, so that the presentations it read are known when reading the rest
++  for (int aPass = 1; aPass <= 2; aPass++)
+   for (int i = 1; i <= nb; i++)
+   {
+     occ::handle<Standard_Transient> anEnt = aModel->Value(i);
+@@ -5333,6 +5429,10 @@ bool STEPCAFControl_Reader::ReadGDTs(const occ::handle<XSControl_WorkSession>& t
+         || anEnt->IsKind(STANDARD_TYPE(StepShape_DimensionalLocation))
+         || anEnt->IsKind(STANDARD_TYPE(StepDimTol_GeometricTolerance)))
+     {
++      if (aPass == 2)
++      {
++        continue;
++      }
+       TDF_Label aGDTL = createGDTObjectInXCAF(anEnt, theDoc, theWS, theLocalFactors);
+       if (!aGDTL.IsNull())
+       {
+@@ -5350,6 +5450,10 @@ bool STEPCAFControl_Reader::ReadGDTs(const occ::handle<XSControl_WorkSession>& t
+              || anEnt->IsKind(STANDARD_TYPE(StepVisual_AnnotationOccurrence))
+              || anEnt->IsKind(STANDARD_TYPE(StepVisual_TessellatedAnnotationOccurrence)))
+     {
++      if (aPass == 1)
++      {
++        continue;
++      }
+       // Protection against import presentation twice
+       occ::handle<StepVisual_DraughtingCallout> aDC;
+       for (Interface_EntityIterator anIter = aGraph.Sharings(anEnt); anIter.More() && aDC.IsNull();
+@@ -5361,14 +5465,51 @@ bool STEPCAFControl_Reader::ReadGDTs(const occ::handle<XSControl_WorkSession>& t
+       {
+         continue;
+       }
++      // Skip presentations already read with the semantic PMI they present (AP242 e3 also
++      // links them to a plain shape aspect, which would read them a second time as a note)
++      bool isRead = false;
++      for (Interface_EntityIterator anIter = aGraph.Sharings(anEnt); anIter.More() && !isRead;
++           anIter.Next())
++      {
++        occ::handle<StepAP242_DraughtingModelItemAssociation> anAssoc =
++          occ::down_cast<StepAP242_DraughtingModelItemAssociation>(anIter.Value());
++        const occ::handle<Standard_Transient> aDef =
++          anAssoc.IsNull() ? occ::handle<Standard_Transient>() : anAssoc->Definition().Value();
++        if (!isSemanticGDT(aDef) || !myGDTMap.IsBound(aDef) || !hasPresentation(myGDTMap.Find(aDef)))
++        {
++          continue;
++        }
++        occ::handle<StepAP242_DraughtingModelItemAssociation> aLink =
++          findPresentationLink(aGraph, aDef);
++        isRead = !aLink.IsNull() && aLink->IdentifiedItemValue(1) == anEnt;
++      }
++      if (isRead)
++      {
++        continue;
++      }
+       // Read presentations for PMIs without semantic data.
+       occ::handle<StepAP242_DraughtingModelItemAssociation> aDMIA;
+       NCollection_Sequence<TDF_Label>                       aShapesL;
+-      for (Interface_EntityIterator anIter = aGraph.Sharings(anEnt);
+-           anIter.More() && aDMIA.IsNull();
+-           anIter.Next())
++      for (Interface_EntityIterator anIter = aGraph.Sharings(anEnt); anIter.More(); anIter.Next())
+       {
+-        aDMIA = occ::down_cast<StepAP242_DraughtingModelItemAssociation>(anIter.Value());
++        occ::handle<StepAP242_DraughtingModelItemAssociation> anAssoc =
++          occ::down_cast<StepAP242_DraughtingModelItemAssociation>(anIter.Value());
++        if (anAssoc.IsNull())
++        {
++          continue;
++        }
++        if (aDMIA.IsNull())
++        {
++          aDMIA = anAssoc;
++        }
++        // Prefer an association to a plain shape aspect over one (AP242 e3) to the PMI itself
++        if ((!anAssoc->Definition().ShapeAspect().IsNull()
++             || !anAssoc->Definition().PropertyDefinition().IsNull())
++            && !isSemanticGDT(anAssoc->Definition().Value()))
++        {
++          aDMIA = anAssoc;
++          break;
++        }
+       }
+       if (!aDMIA.IsNull())
+       {
