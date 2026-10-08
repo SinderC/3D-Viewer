@@ -7,7 +7,7 @@
   --accent: #5aa9ff;
   --select: #2b4a6e;
   color-scheme: dark;
-  font: 13px/1.4 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font: 13px/1.4 'Geist Variable', system-ui, -apple-system, 'Segoe UI', sans-serif;
   color: var(--text);
   background: var(--bg);
 }

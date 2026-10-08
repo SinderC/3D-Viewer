@@ -22,3 +22,6 @@ The base schema table in wasm/src/xt_schema13006.inc is partly derived from para
 (https://github.com/monozukuri-ai/parasolid-kit), Copyright (c) 2026 parasolid-kit contributors,
 licensed under the MIT License. The Parasolid XT format is read as documented in the Parasolid XT
 Format Reference published by Siemens Industry Software; Parasolid is a trademark of Siemens.
+
+It also includes the Geist font (https://github.com/vercel/geist-font), Copyright 2024 The Geist
+Project Authors, licensed under the SIL Open Font License, Version 1.1.
