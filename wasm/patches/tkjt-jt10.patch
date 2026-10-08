@@ -1,4 +1,4 @@
-Changes to TKJT (PyOpenJt 21faef4) for the 3D Viewer. Applied by wasm/scripts/build-jt-deps.sh.
+Changes to TKJT (PyOpenJt 21faef4) for the Open CAD Viewer. Applied by wasm/scripts/build-jt-deps.sh.
 
 - JT 10 (ISO 14306-4) reading, verified on NX-written 10.3 and 10.5 files:
   one-byte element version numbers (JtData_Reader::ReadVersion), removed reserved fields
@@ -395,7 +395,7 @@ index 0000000..2354b8f
 +++ b/TKJT/src/JtDecode/JtDecode_Int32CDP_MTF.cxx
 @@ -0,0 +1,57 @@
 +// JT format reading and visualization tools
-+// Copyright (C) 2026 3D Viewer contributors
++// Copyright (C) 2026 Open CAD Viewer contributors
 +//
 +// This program is free software; you can redistribute it and/or modify
 +// it under the terms of the GNU General Public License as published by
@@ -458,7 +458,7 @@ index 0000000..94cf6a8
 +++ b/TKJT/src/JtDecode/JtDecode_Int32CDP_MTF.hxx
 @@ -0,0 +1,42 @@
 +// JT format reading and visualization tools
-+// Copyright (C) 2026 3D Viewer contributors
++// Copyright (C) 2026 Open CAD Viewer contributors
 +//
 +// This program is free software; you can redistribute it and/or modify
 +// it under the terms of the GNU General Public License as published by

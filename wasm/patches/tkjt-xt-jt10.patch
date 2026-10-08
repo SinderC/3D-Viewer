@@ -1,4 +1,4 @@
-Changes to TKJT (PyOpenJt 21faef4) for the 3D Viewer. Applied by wasm/scripts/build-jt-deps.sh.
+Changes to TKJT (PyOpenJt 21faef4) for the Open CAD Viewer. Applied by wasm/scripts/build-jt-deps.sh.
 
 - JT 10 XT B-Rep elements (the embedded Parasolid data): 16-bit version and a byte after the
   Parasolid build number, verified on NX-written 10.3 and 10.5 files.

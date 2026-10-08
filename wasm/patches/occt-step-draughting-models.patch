@@ -1,4 +1,4 @@
-Changes to OCCT (V8_0_1) for the 3D Viewer. Applied by wasm/scripts/build-occt.sh.
+Changes to OCCT (V8_0_1) for the Open CAD Viewer. Applied by wasm/scripts/build-occt.sh.
 
 - STEP AP242: recognise draughting models that are also tessellated shape representations
   (complex instances with SHAPE_REPRESENTATION and TESSELLATED_SHAPE_REPRESENTATION, with or

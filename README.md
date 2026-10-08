@@ -1,4 +1,4 @@
-# 3D Viewer
+# Open CAD Viewer
 
 Browser-based 3D viewer for CAD and mesh files: STEP, IGES, BREP, JT, glTF/GLB, OBJ, STL and VRML.
 Geometry is read and tessellated by

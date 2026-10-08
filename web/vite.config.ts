@@ -42,8 +42,8 @@ export default defineConfig({
         maximumFileSizeToCacheInBytes: 30 * 1024 * 1024,
       },
       manifest: {
-        name: '3D Viewer',
-        short_name: '3D Viewer',
+        name: 'Open CAD Viewer',
+        short_name: 'Open CAD Viewer',
         description: 'Offline CAD and mesh viewer (STEP, IGES, JT, glTF, OBJ, STL, VRML). Files never leave your device.',
         theme_color: '#1b1d22',
         background_color: '#1b1d22',
