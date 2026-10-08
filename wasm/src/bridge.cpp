@@ -742,6 +742,8 @@ private:
       Pmi p;
       p.kind = "datum";
       p.type = "Datum " + str(obj->GetName());
+      if (obj->IsDatumTarget() && obj->GetDatumTargetNumber() > 0)
+        p.type = "Datum target " + str(obj->GetName()) + std::to_string(obj->GetDatumTargetNumber());
       addPmi(l, std::move(p), obj->GetPresentation(), obj->GetPresentationName());
     }
   }
