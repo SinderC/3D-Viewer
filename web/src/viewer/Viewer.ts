@@ -3,13 +3,15 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from 'three-mesh-bvh';
-import { APPEARANCES, type Appearance, type AppearanceId } from '../core/appearances';
+import { APPEARANCES, type AppearanceId } from '../core/appearances';
 import { EDGE_STRIDE, FACE_STRIDE, faceTriangles, type Model, type Proto } from '../core/model';
 import type { UnitId } from '../core/units';
 import { Measure, type EdgePick, type FacePick, type MeasureMode, type Pick } from './measure';
 import { isShown } from './objects';
+import { boxUvs } from './boxUv';
 import { applyExplode, explodeOffsets, type ExplodeItem } from './explode';
 import { toGlb, toStl } from './export';
+import { Finishes, FINISH_UVS } from './finishes';
 import { PmiLayer } from './pmi';
 import { buildSectionCaps, disposeCaps, sectionPlane, sectionPosition } from './section';
 import { AxisTriad } from './AxisTriad';
@@ -74,6 +76,7 @@ export class Viewer {
   private readonly light = new THREE.DirectionalLight(0xffffff, 2.2);
   // Reflections for PBR materials (glTF, appearances); plain CAD colours do without, as before.
   private readonly environment: THREE.Texture;
+  private readonly finishes: Finishes;
   private readonly modelRoot = new THREE.Group();
   private readonly measure: Measure;
   private readonly clipPlane = new THREE.Plane();
@@ -131,6 +134,7 @@ export class Viewer {
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setPixelRatio(window.devicePixelRatio);
     this.renderer.localClippingEnabled = true;
+    this.finishes = new Finishes(this.renderer.capabilities.getMaxAnisotropy());
     const pmrem = new THREE.PMREMGenerator(this.renderer);
     const room = new RoomEnvironment();
     this.environment = pmrem.fromScene(room, 0.04).texture;
@@ -186,6 +190,7 @@ export class Viewer {
     this.capOutline.dispose();
     this.ghostMaterial.dispose();
     this.environment.dispose();
+    this.finishes.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }
@@ -209,7 +214,7 @@ export class Viewer {
       g.setAttribute('position', new THREE.BufferAttribute(p.positions, 3));
       g.setAttribute('normal', new THREE.BufferAttribute(p.normals, 3));
       g.setIndex(new THREE.BufferAttribute(p.indices, 1));
-      if (p.uvs) g.setAttribute('uv', new THREE.BufferAttribute(p.uvs, 2));
+      for (const [set, uvs] of Object.entries(p.uvs ?? {})) g.setAttribute(set, new THREE.BufferAttribute(uvs, 2));
       if (p.vertexColors) g.setAttribute('color', new THREE.BufferAttribute(p.vertexColors.array, p.vertexColors.itemSize));
       p.groups.forEach((grp, i) => g.addGroup(grp.start, grp.count, i));
       // Indirect: keep the index order, which faceStarts refers to.
@@ -288,11 +293,14 @@ export class Viewer {
     const key = `${id}:${file.uuid}`;
     let m = this.appearanceMaterials.get(key);
     if (!m) {
-      const a: Appearance = APPEARANCES[id];
+      const a = APPEARANCES[id];
       const fileColor = 'color' in file && file.color instanceof THREE.Color ? file.color : DEFAULT_COLOR;
+      const maps = a.finish ? this.finishes.get(a.finish) : undefined;
       m = this.surface(
         new THREE.MeshPhysicalMaterial({
-          color: a.color ? new THREE.Color().setRGB(...a.color, THREE.SRGBColorSpace) : fileColor,
+          ...maps,
+          // A colour texture carries the colour itself.
+          color: maps?.map ? 0xffffff : a.color ? new THREE.Color().setRGB(...a.color, THREE.SRGBColorSpace) : fileColor,
           metalness: a.metalness,
           roughness: a.roughness,
           clearcoat: a.clearcoat ?? 0,
@@ -304,6 +312,7 @@ export class Viewer {
           opacity: file.opacity,
         }),
       );
+      if (maps?.map && a.color) m.userData.capColor = new THREE.Color().setRGB(...a.color, THREE.SRGBColorSpace);
       this.appearanceMaterials.set(key, m);
     }
     return m;
@@ -314,6 +323,12 @@ export class Viewer {
     for (const mesh of this.meshes) {
       const file = mesh.userData.fileMaterial as THREE.Material | THREE.Material[];
       const id = appearanceOf(mesh.userData.nodeId);
+      // Finishes are mapped by box UVs, made once per prototype the first time one needs them.
+      const { geometry } = mesh;
+      if (id && APPEARANCES[id].finish && !geometry.hasAttribute(FINISH_UVS)) {
+        const uvs = boxUvs(geometry.getAttribute('position').array, geometry.getAttribute('normal').array);
+        geometry.setAttribute(FINISH_UVS, new THREE.BufferAttribute(uvs, 2));
+      }
       const base = !id ? file : Array.isArray(file) ? file.map((f) => this.appearanceMaterial(id, f)) : this.appearanceMaterial(id, file);
       if (mesh.material !== this.highlight) mesh.material = base;
       mesh.userData.baseMaterial = base;
@@ -535,7 +550,9 @@ export class Viewer {
 
   private capMaterial(mesh: THREE.Mesh): THREE.MeshStandardMaterial {
     const base = mesh.userData.baseMaterial as THREE.MeshStandardMaterial | THREE.MeshStandardMaterial[];
-    const color = (Array.isArray(base) ? base[0] : base).color;
+    const first = Array.isArray(base) ? base[0] : base;
+    // A textured finish is white under its texture; its cut shows the finish's own colour.
+    const color: THREE.Color = first.userData.capColor ?? first.color;
     const key = color.getHex();
     let m = this.capMaterials.get(key);
     if (!m) {

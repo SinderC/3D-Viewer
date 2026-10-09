@@ -93,10 +93,14 @@ export interface Proto {
   /** Per edge, EDGE_STRIDE values: kind (0 other, 1 line, 2 circle), length, radius, centre xyz, axis xyz. */
   edgeData: Float64Array;
   groups: { start: number; count: number; color: number }[];
-  /** Texture coordinates and per-vertex colours, from glTF only. */
-  uvs?: Float32Array;
+  /** Texture coordinates by three.js attribute name, and per-vertex colours; from glTF only. */
+  uvs?: Partial<Record<UvSet, Float32Array>>;
   vertexColors?: { array: Float32Array; itemSize: 3 | 4 };
 }
+
+/** The texture coordinate sets three.js materials can use (Texture.channel 0–3). */
+export const UV_SETS = ['uv', 'uv1', 'uv2', 'uv3'] as const;
+export type UvSet = (typeof UV_SETS)[number];
 
 export const FACE_STRIDE = 7;
 export const EDGE_STRIDE = 9;

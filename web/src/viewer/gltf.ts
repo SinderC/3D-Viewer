@@ -1,7 +1,7 @@
 // glTF / GLB read by three.js, which keeps what OCCT drops (textures, vertex colours, PBR maps),
 // converted into the app's Model: one node per glTF node, one prototype per mesh primitive.
 import * as THREE from 'three';
-import type { Model, ModelNode, Proto } from '../core/model';
+import { UV_SETS, type Model, type ModelNode, type Proto } from '../core/model';
 
 // glTF is in metres and Y-up; models here are in mm and Z-up.
 const TO_MODEL = new THREE.Matrix4().makeRotationX(Math.PI / 2).scale(new THREE.Vector3(1000, 1000, 1000));
@@ -23,7 +23,6 @@ function proto(geometry: THREE.BufferGeometry, color: number): Proto {
   }
   const position = geometry.getAttribute('position');
   const indices = geometry.index ? Uint32Array.from(geometry.index.array) : Uint32Array.from({ length: position.count }, (_, i) => i);
-  const uv = geometry.getAttribute('uv');
   const vertexColor = geometry.getAttribute('color');
   return {
     positions: floats(position),
@@ -35,7 +34,7 @@ function proto(geometry: THREE.BufferGeometry, color: number): Proto {
     edgeStarts: EMPTY_U32,
     edgeData: new Float64Array(0),
     groups: [{ start: 0, count: indices.length, color }],
-    uvs: uv && floats(uv),
+    uvs: Object.fromEntries(UV_SETS.flatMap((set) => (geometry.hasAttribute(set) ? [[set, floats(geometry.getAttribute(set))]] : []))),
     vertexColors: vertexColor && { array: floats(vertexColor), itemSize: vertexColor.itemSize as 3 | 4 },
   };
 }

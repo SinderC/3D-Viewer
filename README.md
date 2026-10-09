@@ -29,8 +29,10 @@ only allows requests to the app's own origin (and local `blob:`/`data:` URLs). A
 - Assembly tree with name search and show/hide/isolate (hidden parts optionally shown as translucent ghosts), colours from the file, feature edges (B-rep formats and JT
   with XT data)
 - Pick to select, section plane along X/Y/Z or a picked planar face, with solid caps
-- Appearances for the selected part or the whole model: polished, brushed or cast metals, brass,
-  copper, anodised, glossy/matte/textured plastic and rubber, with environment reflections
+- Appearances for the selected part or the whole model: polished, brushed, sand-blasted or cast
+  metals, brass, copper, anodised, glossy/matte/textured plastic, rubber, carbon fibre and wood, with
+  environment reflections. Textures are generated in the browser and box-mapped at a physical scale
+  (seams can show on curved faces); GLB export keeps them
 - Exploded view: a slider moves the parts away from the model centre
 - Properties: bounding-box size of the model and of the selected part
 - Measure: edge length / radius / diameter, distance between points (vertex snapping), point to
