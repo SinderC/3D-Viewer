@@ -109,6 +109,7 @@
 #include <XCAFDoc_ShapeTool.hxx>
 #include <XCAFDoc_View.hxx>
 #include <XCAFDoc_ViewTool.hxx>
+#include <XCAFDoc_VisMaterial.hxx>
 #include <XCAFView_Object.hxx>
 #include <XCAFPrs.hxx>
 #include <XCAFPrs_Style.hxx>
@@ -716,10 +717,12 @@ private:
     std::vector<std::pair<TopoDS_Shape, int>> entries;
     for (ShapeStyleMap::Iterator it(styles); it.More(); it.Next())
     {
+      // glTF (and the other mesh readers) give a visual material only, no surface colour.
       const XCAFPrs_Style& st = it.Value();
-      if (!st.IsSetColorSurf())
-        continue;
-      entries.emplace_back(it.Key(), colorIndex(toRGBA(st.GetColorSurfRGBA())));
+      if (st.IsSetColorSurf())
+        entries.emplace_back(it.Key(), colorIndex(toRGBA(st.GetColorSurfRGBA())));
+      else if (!st.Material().IsNull())
+        entries.emplace_back(it.Key(), colorIndex(toRGBA(st.Material()->BaseColor())));
     }
     std::stable_sort(entries.begin(), entries.end(), [](const auto& a, const auto& b) {
       return a.first.ShapeType() < b.first.ShapeType();
