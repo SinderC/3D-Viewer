@@ -28,6 +28,7 @@ only allows requests to the app's own origin. After the first visit the app work
 - Assembly tree with show/hide/isolate, colours from the file, feature edges (B-rep formats and JT
   with XT data)
 - Pick to select, X/Y/Z section plane with solid caps
+- Properties: bounding-box size of the model and of the selected part
 - Measure: edge length / radius / diameter, distance between points (vertex snapping), distance and
   angle between planar faces; display in mm, cm, m, in, ft or ft-in (1/16")
 - Fit all / zoom to selection, six standard views and iso, ViewCube, perspective or orthographic,

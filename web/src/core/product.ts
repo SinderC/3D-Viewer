@@ -20,6 +20,11 @@ export function formatMeasure(mm: number, unit: UnitId, dim: Dim): string {
   return `${number(mm, unit, dim)} ${label(unit, dim)}`;
 }
 
+/** Extents along X, Y and Z, e.g. "120 × 80 × 25 mm". */
+export function formatSize(size: number[], unit: UnitId): string {
+  return `${size.map((v) => number(v, unit, 1)).join(' × ')} ${label(unit, 1)}`;
+}
+
 const notComputed = (stated: string) => `${stated} in the file; not computed for tessellated geometry`;
 
 // The stated value after its check mark (first, so a long value cannot hide it); the tooltip has

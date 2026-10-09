@@ -1,6 +1,7 @@
 import { Fragment, useState } from 'react';
+import { sizeOf } from '../core/bounds';
 import { pmiInfo } from '../core/pmi';
-import { countInfo, failures, validationInfo, type Row } from '../core/product';
+import { countInfo, failures, formatSize, validationInfo, type Row } from '../core/product';
 import { QUALITY } from '../worker/protocol';
 import { Chevron } from './icons';
 import type { State } from './state';
@@ -16,12 +17,18 @@ export function Properties({ state }: { state: State }) {
   const node = state.selected === null ? undefined : model.nodes[state.selected];
   const product = node?.product === undefined ? undefined : model.products[node.product];
 
+  const size = (id: number | null): Row[] => {
+    const s = sizeOf(model, id);
+    return s ? [['Size', formatSize(s, unit), 'Bounding box along X × Y × Z']] : [];
+  };
+
   const file: Row[] = [
     ['File', state.fileName ?? ''],
     ['Format', model.format, model.schema || undefined],
     ['Units', model.unit],
     ['Parts', `${model.protos.length} (${model.nodes.filter((n) => n.proto >= 0).length} instances)`],
     ['Triangles', model.triangles.toLocaleString()],
+    ...size(null),
   ];
   if (state.quality) file.push(['Mesh quality', QUALITY[state.quality].label]);
   if (model.counts.annotations !== undefined) file.push(['PMI', ...countInfo(model.pmi.length, model.counts.annotations)]);
@@ -62,7 +69,7 @@ export function Properties({ state }: { state: State }) {
   return (
     <>
       {pmi && section('PMI', pmiInfo(pmi, unit))}
-      {node && section('Part', [['Name', node.name], ...(product?.props ?? [])])}
+      {node && section('Part', [['Name', node.name], ...size(node.id), ...(product?.props ?? [])])}
       {product && section('Validation', validationInfo(product, unit))}
       {product && section('Attributes', product.attributes, true)}
       {section('File', file)}
