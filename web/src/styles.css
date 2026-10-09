@@ -458,3 +458,35 @@ button.icon[aria-pressed='true'] { color: var(--accent); background: var(--accen
   .splitter, .toolbar .props-toggle, .app-name { display: none; }
   .repo-link { margin-left: auto; }
 }
+
+/* Keyboard shortcuts dialog (ShortcutHelp.tsx); the padding is inside, so a click on the dialog itself is on the backdrop. */
+.help {
+  max-width: min(640px, calc(100vw - 32px));
+  max-height: calc(100vh - 64px);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-l);
+  background: var(--raised);
+  color: var(--text);
+  box-shadow: var(--shadow-2), var(--menu-edge);
+}
+.help::backdrop { background: rgb(0 0 0 / 0.35); }
+.help-body { padding: 16px 20px 20px; }
+.help h2 { margin: 0 0 12px; font-size: 15px; }
+.help h3 { margin: 0 0 6px; font-size: 12px; font-weight: 600; color: var(--text-2); }
+.help-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px 24px; }
+.help dl { margin: 0; }
+.help dl div { display: flex; gap: 10px; padding: 2px 0; }
+.help dt { min-width: 64px; }
+.help dd { margin: 0; color: var(--text-2); }
+.help kbd {
+  display: inline-block;
+  min-width: 20px;
+  padding: 1px 6px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 4px;
+  background: var(--surface-2);
+  font: inherit;
+  font-size: 12px;
+  text-align: center;
+}

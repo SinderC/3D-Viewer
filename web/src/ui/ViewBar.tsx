@@ -18,6 +18,7 @@ import {
   ZoomSelectionIcon,
 } from './icons';
 import { Menu } from './Menu';
+import { keyLabel } from './shortcuts';
 import type { BarSize } from './ViewMenu';
 import { displayStyle, hasEdges, measureMode, type Action, type State } from './state';
 
@@ -28,7 +29,7 @@ interface Props {
   size: BarSize;
 }
 
-const VIEWS: Record<ViewName, string> = {
+export const VIEWS: Record<ViewName, string> = {
   iso: 'Isometric',
   front: 'Front',
   back: 'Back',
@@ -76,7 +77,7 @@ export function ViewBar({ state, dispatch, viewer, size }: Props) {
       </Menu>
       <button
         className="icon"
-        title="Orthographic projection"
+        title="Orthographic projection (O)"
         aria-label="Orthographic projection"
         aria-pressed={state.ortho}
         onClick={() => dispatch({ type: 'toggleOrtho' })}
@@ -84,7 +85,7 @@ export function ViewBar({ state, dispatch, viewer, size }: Props) {
         <OrthoIcon />
       </button>
       <span className="sep" />
-      <Menu up title="Display style" className="icon wide" label={<>{DISPLAY[display].icon}<Chevron /></>}>
+      <Menu up title="Display style (D)" className="icon wide" label={<>{DISPLAY[display].icon}<Chevron /></>}>
         {Object.entries(DISPLAY).map(([id, { label, icon }]) => (
           <button
             key={id}
@@ -100,7 +101,7 @@ export function ViewBar({ state, dispatch, viewer, size }: Props) {
       </Menu>
       <button
         className="icon"
-        title="Ground grid"
+        title="Ground grid (G)"
         aria-label="Ground grid"
         aria-pressed={state.grid}
         onClick={() => dispatch({ type: 'toggleGrid' })}
@@ -193,7 +194,7 @@ export function ViewBar({ state, dispatch, viewer, size }: Props) {
       <span className="sep" />
       <button
         className="icon"
-        title="Show all"
+        title={`Show all (${keyLabel({ key: 'H' })})`}
         aria-label="Show all"
         disabled={state.hidden.size === 0}
         onClick={() => dispatch({ type: 'setHidden', hidden: new Set() })}

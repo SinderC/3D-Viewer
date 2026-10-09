@@ -33,6 +33,7 @@ only allows requests to the app's own origin. After the first visit the app work
   angle between planar faces; display in mm, cm, m, in, ft or ft-in (1/16"); measurements stay on screen until removed
 - Fit all / zoom to selection, six standard views and iso, ViewCube, perspective or orthographic,
   shaded / shaded with edges / wireframe, ground grid; save the view as a PNG
+- Keyboard shortcuts for views (1–7), display style, hide/isolate and more; press ? for the list
 - Installable PWA; when installed (Chromium) it can be the OS handler for the supported extensions
 
 Not yet: section caps, 3MF, PLY, FBX.

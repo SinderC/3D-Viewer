@@ -32,6 +32,7 @@ interface Props {
   prefs: ViewPrefs;
   /** No properties panel in narrow windows (they show an Info tab instead). */
   narrow: boolean;
+  onHelp: () => void;
 }
 
 const SHIFT = MAC ? '⇧' : 'Shift+';
@@ -47,7 +48,7 @@ function useFullscreen(): boolean {
 }
 
 // Panels, viewport overlays and appearance; the view toolbar's toggles too, with their shortcuts.
-export function ViewMenu({ state, dispatch, viewer, prefs, narrow }: Props) {
+export function ViewMenu({ state, dispatch, viewer, prefs, narrow, onHelp }: Props) {
   const full = useFullscreen();
   const loaded = state.status === 'ready';
   const measuring = state.tool === 'measure';
@@ -58,8 +59,8 @@ export function ViewMenu({ state, dispatch, viewer, prefs, narrow }: Props) {
       <hr className="menu-sep" />
       <MenuItem label="View cube" checked={prefs.cube} onClick={prefs.toggleCube} />
       <MenuItem label="Axes" checked={prefs.axes} onClick={prefs.toggleAxes} />
-      <MenuItem label="Ground grid" checked={state.grid} onClick={() => dispatch({ type: 'toggleGrid' })} />
-      <MenuItem label="Orthographic" checked={state.ortho} onClick={() => dispatch({ type: 'toggleOrtho' })} />
+      <MenuItem label="Ground grid" kbd="G" checked={state.grid} onClick={() => dispatch({ type: 'toggleGrid' })} />
+      <MenuItem label="Orthographic" kbd="O" checked={state.ortho} onClick={() => dispatch({ type: 'toggleOrtho' })} />
       <MenuItem
         label="PMI"
         kbd="P"
@@ -96,6 +97,8 @@ export function ViewMenu({ state, dispatch, viewer, prefs, narrow }: Props) {
       <MenuChoices label="Theme" options={THEMES} value={prefs.theme} onChange={prefs.setTheme} />
       <hr className="menu-sep" />
       <MenuChoices label="Toolbar size" options={BAR_SIZES} value={prefs.barSize} onChange={prefs.setBarSize} />
+      <hr className="menu-sep" />
+      <MenuItem label="Keyboard shortcuts" kbd="?" onClick={onHelp} />
     </Menu>
   );
 }

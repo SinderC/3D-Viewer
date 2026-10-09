@@ -6,6 +6,8 @@ import { QUALITY, type Quality } from '../worker/protocol';
 import { baseName, download } from './download';
 import { LockIcon, OpenFileIcon } from './icons';
 import { Properties } from './Properties';
+import { findShortcut, type ShortcutContext } from './shortcuts';
+import { ShortcutHelp } from './ShortcutHelp';
 import { Sidebar } from './Sidebar';
 import { Splitter } from './Splitter';
 import { initialState, reducer, type State } from './state';
@@ -137,27 +139,24 @@ export function App() {
     });
   }, [open]);
 
-  // Keyboard shortcuts.
+  // Keyboard shortcuts (shortcuts.ts), read through a ref so the handler is registered once.
+  const [help, setHelp] = useState(false);
+  const shortcutCtx = useRef<ShortcutContext>(null!);
+  shortcutCtx.current = { state, dispatch, viewer: null, openFile: () => fileInput.current?.click(), showHelp: () => setHelp(true) };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'o') {
-        e.preventDefault();
-        fileInput.current?.click();
-        return;
-      }
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
-      if (e.key === 'f') viewer.current?.fit();
-      if (e.key === 'F') viewer.current?.fitSelection();
-      if (e.key === 'm') dispatch({ type: 'setTool', tool: state.tool === 'measure' ? 'select' : 'measure' });
-      if (e.key === 'p') dispatch({ type: 'togglePmi' });
-      if (e.key === 'Escape') {
-        dispatch({ type: 'setTool', tool: 'select' });
-        dispatch({ type: 'select', id: null });
-      }
+      const shortcut = findShortcut(e);
+      if (!shortcut) return;
+      // Typing in a field, or a dialog open: only Cmd/Ctrl shortcuts apply.
+      const t = e.target;
+      const typing = t instanceof HTMLInputElement || t instanceof HTMLSelectElement || (t instanceof Element && t.closest('dialog'));
+      if (typing && !shortcut.mod) return;
+      e.preventDefault();
+      shortcut.run({ ...shortcutCtx.current, viewer: viewer.current });
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [state.tool]);
+  }, []);
 
   const { status } = state;
   return (
@@ -193,7 +192,7 @@ export function App() {
         showProps={showProps}
         onToggleProps={toggleProps}
       >
-        <ViewMenu state={state} dispatch={dispatch} viewer={viewer} prefs={prefs} narrow={narrow} />
+        <ViewMenu state={state} dispatch={dispatch} viewer={viewer} prefs={prefs} narrow={narrow} onHelp={() => setHelp(true)} />
       </Toolbar>
       <input
         ref={fileInput}
@@ -243,6 +242,7 @@ export function App() {
           </div>
         )}
         {dragging && <div className="overlay drop">Drop to open</div>}
+        <ShortcutHelp open={help} onClose={() => setHelp(false)} />
       </main>
       {propsPanel && (
         <aside className="props">
