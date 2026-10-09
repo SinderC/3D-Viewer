@@ -22,7 +22,7 @@ import {
 import { Menu } from './Menu';
 import { keyLabel } from './shortcuts';
 import type { BarSize } from './ViewMenu';
-import { canExplode, displayStyle, hasEdges, hasFaces, measureMode, type Action, type State } from './state';
+import { canExplode, displayStyle, hasEdges, measureMode, unavailable, type Action, type State } from './state';
 
 interface Props {
   state: State;
@@ -153,8 +153,7 @@ export function ViewBar({ state, dispatch, viewer, size }: Props) {
           ))}
           <button
             aria-pressed={section.axis === 'face' || state.tool === 'sectionFace'}
-            disabled={!hasFaces(state.model)}
-            title={hasFaces(state.model) ? 'Click a planar face to cut along it' : 'This model has no B-rep faces'}
+            title="Click a planar face to cut along it"
             onClick={(e) => {
               e.currentTarget.closest<HTMLElement>('[popover]')?.hidePopover();
               dispatch({ type: 'setTool', tool: 'sectionFace' });
@@ -195,14 +194,14 @@ export function ViewBar({ state, dispatch, viewer, size }: Props) {
         <MeasureIcon />
       </button>
       <Menu up title="Measurement" className="icon narrow" label={<Chevron />}>
-        {Object.entries(MEASURE_MODES).map(([id, { label, pick }]) => (
+        {(Object.entries(MEASURE_MODES) as [MeasureMode, { label: string }][]).map(([id, { label }]) => (
           <button
             key={id}
             className="menu-item"
             aria-pressed={measuring && id === mode}
-            disabled={!edges && pick === 'edge'}
-            title={!edges && pick === 'edge' ? noEdges : undefined}
-            onClick={() => dispatch({ type: 'setMeasureMode', mode: id as MeasureMode })}
+            disabled={!!unavailable(id, state.model)}
+            title={unavailable(id, state.model)}
+            onClick={() => dispatch({ type: 'setMeasureMode', mode: id })}
           >
             {label}
           </button>

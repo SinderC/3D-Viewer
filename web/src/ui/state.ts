@@ -89,15 +89,17 @@ export const canExplode = (model?: Model): boolean => (model?.nodes.filter((n) =
 
 export const hasEdges = (model?: Model): boolean => !!model?.protos.some((p) => p.edges.length);
 
-// Likewise B-rep faces, which face picks (section on a face, face measurements) need.
-export const hasFaces = (model?: Model): boolean => !!model?.protos.some((p) => p.faceStarts.length);
-
 // The chosen style is kept for the next model that has edges.
 export const displayStyle = (state: State): DisplayStyle => (hasEdges(state.model) ? state.display : 'shaded');
 
+/** Why a measurement cannot be taken on the model, or undefined. Meshes have faces (non-planar), but no edges. */
+export function unavailable(mode: MeasureMode, model?: Model): string | undefined {
+  if (MEASURE_MODES[mode].picks.includes('edge') && !hasEdges(model)) return 'This model has no edges';
+}
+
 // Likewise edge measurements: without edges, measure between points.
 export const measureMode = (state: State): MeasureMode =>
-  MEASURE_MODES[state.measureMode].pick === 'edge' && !hasEdges(state.model) ? 'pointDistance' : state.measureMode;
+  unavailable(state.measureMode, state.model) ? 'pointDistance' : state.measureMode;
 
 export function reducer(state: State, action: Action): State {
   switch (action.type) {

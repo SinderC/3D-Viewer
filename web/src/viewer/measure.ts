@@ -2,15 +2,26 @@
 import * as THREE from 'three';
 import { formatLength, type UnitId } from '../core/units';
 
-export type MeasureMode = 'edgeLength' | 'edgeRadius' | 'edgeDiameter' | 'pointDistance' | 'faceDistance' | 'faceAngle';
+export type MeasureMode =
+  | 'edgeLength'
+  | 'edgeRadius'
+  | 'edgeDiameter'
+  | 'pointDistance'
+  | 'pointFace'
+  | 'faceDistance'
+  | 'faceAngle'
+  | 'pointCoords';
 
-export const MEASURE_MODES: Record<MeasureMode, { label: string; pick: Pick['kind']; count: 1 | 2 }> = {
-  edgeLength: { label: 'Length of edge', pick: 'edge', count: 1 },
-  edgeRadius: { label: 'Radius of edge', pick: 'edge', count: 1 },
-  edgeDiameter: { label: 'Diameter of edge', pick: 'edge', count: 1 },
-  pointDistance: { label: 'Distance between points', pick: 'point', count: 2 },
-  faceDistance: { label: 'Distance between faces', pick: 'face', count: 2 },
-  faceAngle: { label: 'Angle between faces', pick: 'face', count: 2 },
+/** Per mode, what each pick must be, in order. */
+export const MEASURE_MODES: Record<MeasureMode, { label: string; picks: Pick['kind'][] }> = {
+  edgeLength: { label: 'Length of edge', picks: ['edge'] },
+  edgeRadius: { label: 'Radius of edge', picks: ['edge'] },
+  edgeDiameter: { label: 'Diameter of edge', picks: ['edge'] },
+  pointDistance: { label: 'Distance between points', picks: ['point', 'point'] },
+  pointFace: { label: 'Distance from point to face', picks: ['point', 'face'] },
+  faceDistance: { label: 'Distance between faces', picks: ['face', 'face'] },
+  faceAngle: { label: 'Angle between faces', picks: ['face', 'face'] },
+  pointCoords: { label: 'Point coordinates', picks: ['point'] },
 };
 
 // Picks are in world space; `point` is where the user clicked.
@@ -70,6 +81,17 @@ export function evaluate(mode: MeasureMode, picks: Pick[], unit: UnitId): Result
     case 'pointDistance': {
       const [a, b] = picks.map((p) => p.point);
       return { text: fmt(a.distanceTo(b)), anchor: a.clone().lerp(b, 0.5), lines: [a, b] };
+    }
+    case 'pointFace': {
+      const p = picks[0].point;
+      const f = picks[1] as FacePick;
+      if (!f.plane) return warn('Select a planar face', f.point);
+      const foot = f.plane.projectPoint(p, new THREE.Vector3());
+      return { text: fmt(p.distanceTo(foot)), anchor: p.clone().lerp(foot, 0.5), lines: [p, foot] };
+    }
+    case 'pointCoords': {
+      const p = picks[0].point;
+      return { text: `X ${fmt(p.x)}   Y ${fmt(p.y)}   Z ${fmt(p.z)}`, anchor: p, lines: [] };
     }
     case 'faceDistance':
     case 'faceAngle': {
@@ -146,8 +168,9 @@ export class Measure {
     scene.add(this.group, this.hoverGroup);
   }
 
+  /** What the next pick must be. */
   get pickKind(): Pick['kind'] {
-    return MEASURE_MODES[this.mode].pick;
+    return MEASURE_MODES[this.mode].picks[this.picks.length];
   }
 
   /** Number of completed measurements. */
@@ -168,7 +191,7 @@ export class Measure {
 
   add(pick: Pick): void {
     this.picks.push(pick);
-    if (this.picks.length === MEASURE_MODES[this.mode].count) {
+    if (this.picks.length === MEASURE_MODES[this.mode].picks.length) {
       const d: Done = { mode: this.mode, picks: this.picks, result: evaluate(this.mode, this.picks, this.unit), label: this.makeLabel() };
       d.label.querySelector('button')!.onclick = () => this.remove(d);
       this.setResult(d, d.result);

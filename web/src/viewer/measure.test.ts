@@ -64,4 +64,18 @@ describe('evaluate', () => {
     expect(evaluate('faceAngle', [face(v(0, 0, 1), v(0, 0, 0)), face(v(0, 1, 1), v(1, 0, 0))], 'mm').text).toBe('45.00° (135.00°)');
     expect(evaluate('faceAngle', [face(v(0, 0, 1), v(0, 0, 0)), face(v(0, 0, -1), v(0, 0, 3))], 'mm').text).toBe('0.00° (parallel)');
   });
+
+  it('distance from a point to a planar face, perpendicular to it', () => {
+    const r = evaluate('pointFace', [{ kind: 'point', point: v(7, -2, 12) }, face(v(0, 0, 1), v(0, 0, 2))], 'mm');
+    expect(r.text).toBe('10.000 mm');
+    expect(r.lines.map((p) => p.toArray())).toEqual([
+      [7, -2, 12],
+      [7, -2, 2],
+    ]);
+    expect(evaluate('pointFace', [{ kind: 'point', point: v(0, 0, 0) }, face(v(0, 0, 1), v(0, 0, 2), false)], 'mm').warn).toBe(true);
+  });
+
+  it('point coordinates', () => {
+    expect(evaluate('pointCoords', [{ kind: 'point', point: v(1, -2, 25.4) }], 'mm').text).toBe('X 1.000 mm   Y -2.000 mm   Z 25.400 mm');
+  });
 });
