@@ -11,6 +11,7 @@ import {
   MeasureIcon,
   OrthoIcon,
   PmiIcon,
+  RealisticIcon,
   SectionIcon,
   ShadedEdgesIcon,
   ShadedIcon,
@@ -23,7 +24,7 @@ import { AppearanceMenu } from './AppearanceMenu';
 import { Menu } from './Menu';
 import { keyLabel } from './shortcuts';
 import type { BarSize } from './ViewMenu';
-import { canExplode, displayStyle, hasEdges, measureMode, unavailable, type Action, type State } from './state';
+import { canExplode, displayStyle, hasEdges, measureMode, needsEdges, unavailable, type Action, type State } from './state';
 
 interface Props {
   state: State;
@@ -45,6 +46,7 @@ export const VIEWS: Record<ViewName, string> = {
 const DISPLAY: Record<DisplayStyle, { label: string; icon: ReactNode }> = {
   shadedEdges: { label: 'Shaded with edges', icon: <ShadedEdgesIcon /> },
   shaded: { label: 'Shaded', icon: <ShadedIcon /> },
+  realistic: { label: 'Realistic', icon: <RealisticIcon /> },
   wireframe: { label: 'Wireframe', icon: <WireframeIcon /> },
 };
 
@@ -94,8 +96,8 @@ export function ViewBar({ state, dispatch, viewer, size }: Props) {
             key={id}
             className="menu-item"
             aria-pressed={id === display}
-            disabled={!edges && id !== 'shaded'}
-            title={!edges && id !== 'shaded' ? noEdges : undefined}
+            disabled={!edges && needsEdges(id as DisplayStyle)}
+            title={!edges && needsEdges(id as DisplayStyle) ? noEdges : undefined}
             onClick={() => dispatch({ type: 'setDisplay', display: id as DisplayStyle })}
           >
             {icon} {label}

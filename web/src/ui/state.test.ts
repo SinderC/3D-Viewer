@@ -31,6 +31,7 @@ describe('reducer', () => {
     const state: State = { ...initialState, display: 'wireframe' };
     expect(displayStyle({ ...state, model: withEdges })).toBe('wireframe');
     expect(displayStyle({ ...state, model: meshOnly })).toBe('shaded');
+    expect(displayStyle({ ...state, display: 'realistic', model: meshOnly })).toBe('realistic'); // needs no edges
     const edgeMeasure: State = { ...initialState, measureMode: 'edgeRadius' };
     expect(measureMode({ ...edgeMeasure, model: withEdges })).toBe('edgeRadius');
     expect(measureMode({ ...edgeMeasure, model: meshOnly })).toBe('pointDistance');

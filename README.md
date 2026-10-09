@@ -38,7 +38,8 @@ only allows requests to the app's own origin (and local `blob:`/`data:` URLs). A
 - Measure: edge length / radius / diameter, distance between points (vertex snapping), point to
   planar face, distance and angle between planar faces, point coordinates; display in mm, cm, m, in, ft or ft-in (1/16"); measurements stay on screen until removed
 - Fit all / zoom to selection, six standard views and iso, ViewCube, perspective or orthographic,
-  shaded / shaded with edges / wireframe, ground grid; save the view as a PNG
+  shaded / shaded with edges / wireframe / realistic (overhead light, ambient occlusion, contact
+  shadow, tone mapping), ground grid; save the view as a PNG
 - Export the shown parts as STL (mm) or glTF binary (GLB)
 - Keyboard shortcuts for views (1–7), display style, hide/isolate and more; press ? for the list
 - Installable PWA; when installed (Chromium) it can be the OS handler for the supported extensions

@@ -127,6 +127,14 @@ export const MeasureIcon = () => (
   </Icon>
 );
 
+export const RealisticIcon = () => (
+  <Icon>
+    <circle cx="8" cy="7" r="5" />
+    <path d="M5.5 5.2a3 3 0 0 1 2.3-1.7" />
+    <path d="M3.5 14.2h9" strokeOpacity="0.5" />
+  </Icon>
+);
+
 export const AppearanceIcon = () => (
   <Icon>
     <circle cx="8" cy="8" r="6.25" />

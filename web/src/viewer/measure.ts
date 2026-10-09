@@ -173,6 +173,11 @@ export class Measure {
     return MEASURE_MODES[this.mode].picks[this.picks.length];
   }
 
+  /** The scene objects it draws: highlights, dimension lines and markers. */
+  get objects(): THREE.Object3D[] {
+    return [this.group, this.hoverGroup];
+  }
+
   /** Number of completed measurements. */
   get count(): number {
     return this.done.length;

@@ -1,7 +1,7 @@
 // Keyboard shortcuts: one table drives both the key handler (App.tsx) and the help dialog.
 import type { Dispatch } from 'react';
 import type { DisplayStyle, ViewName, Viewer } from '../viewer/Viewer';
-import { displayStyle, hasEdges, isolate, type Action, type State } from './state';
+import { displayStyle, hasEdges, isolate, needsEdges, type Action, type State } from './state';
 import { MAC } from './Toolbar';
 import { VIEWS } from './ViewBar';
 
@@ -23,7 +23,7 @@ export interface Shortcut {
   run: (ctx: ShortcutContext) => void;
 }
 
-const DISPLAY_CYCLE: DisplayStyle[] = ['shadedEdges', 'shaded', 'wireframe'];
+const DISPLAY_CYCLE: DisplayStyle[] = ['shadedEdges', 'shaded', 'realistic', 'wireframe'];
 
 const hideSelected = ({ state, dispatch }: ShortcutContext) => {
   if (state.selected === null) return;
@@ -57,8 +57,8 @@ export const SHORTCUTS: Shortcut[] = [
     label: 'Next display style',
     group: 'Display',
     run: ({ state, dispatch }) => {
-      if (!hasEdges(state.model)) return;
-      const next = DISPLAY_CYCLE[(DISPLAY_CYCLE.indexOf(displayStyle(state)) + 1) % DISPLAY_CYCLE.length];
+      const styles = DISPLAY_CYCLE.filter((s) => hasEdges(state.model) || !needsEdges(s));
+      const next = styles[(styles.indexOf(displayStyle(state)) + 1) % styles.length];
       dispatch({ type: 'setDisplay', display: next });
     },
   },

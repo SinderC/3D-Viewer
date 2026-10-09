@@ -13,6 +13,7 @@ import { applyExplode, explodeOffsets, type ExplodeItem } from './explode';
 import { toGlb, toStl } from './export';
 import { Finishes, FINISH_UVS } from './finishes';
 import { PmiLayer } from './pmi';
+import { ContactShadow, Effects } from './realistic';
 import { buildSectionCaps, disposeCaps, sectionPlane, sectionPosition } from './section';
 import { AxisTriad } from './AxisTriad';
 import { ViewCube } from './ViewCube';
@@ -23,7 +24,7 @@ THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
 export type Tool = 'select' | 'measure' | 'sectionFace'; // sectionFace: the next click picks the face to cut along
 export type ViewName = 'iso' | 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom';
-export type DisplayStyle = 'shadedEdges' | 'shaded' | 'wireframe';
+export type DisplayStyle = 'shadedEdges' | 'shaded' | 'wireframe' | 'realistic';
 export type Axis = 'x' | 'y' | 'z';
 export interface Section {
   axis: Axis | 'face' | null;
@@ -58,6 +59,13 @@ const THEMES: Record<Theme, { background: number; grid: [number, number]; wire: 
   dark: { background: 0x2a2d34, grid: [0x565b66, 0x3a3e46], wire: 0xc8ccd4, pmi: 0x4fb4ff },
   light: { background: 0xeef0f3, grid: [0xb4b9c2, 0xd4d8de], wire: 0x3a3e46, pmi: 0x1f78d1 },
 };
+// Light intensities; in the realistic style the environment adds light, so the lamps dim.
+// The plain styles light from the camera, so every face towards you is lit; the realistic one lights
+// mostly from a fixed overhead sun, so shape reads from shading as in a photo.
+const LIGHTS = {
+  plain: { key: 2.2, fill: 1.4, sun: 0, environment: 0 },
+  realistic: { key: 0.35, fill: 0.1, sun: 3.2, environment: 0.35 },
+};
 const ANIMATION_MS = 300;
 const CLICK_TOLERANCE_PX = 4;
 const EDGE_PICK_PX = 6;
@@ -73,7 +81,13 @@ export class Viewer {
   private readonly ortho = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 1000);
   private camera: THREE.PerspectiveCamera | THREE.OrthographicCamera = this.perspective;
   private controls: OrbitControls;
-  private readonly light = new THREE.DirectionalLight(0xffffff, 2.2);
+  private readonly light = new THREE.DirectionalLight(0xffffff, LIGHTS.plain.key);
+  private readonly hemisphere = new THREE.HemisphereLight(0xffffff, 0x50545c, LIGHTS.plain.fill);
+  private readonly sun = new THREE.DirectionalLight(0xffffff, LIGHTS.plain.sun);
+  // Realistic style only, made on first use.
+  private effects: Effects | null = null;
+  private readonly background = new THREE.Color();
+  private contactShadow: ContactShadow | null = null;
   // Reflections for PBR materials (glTF, appearances); plain CAD colours do without, as before.
   private readonly environment: THREE.Texture;
   private readonly finishes: Finishes;
@@ -145,11 +159,13 @@ export class Viewer {
     this.ghostMaterial.clippingPlanes = this.clipping;
     container.appendChild(this.renderer.domElement);
 
-    this.scene.background = new THREE.Color(this.theme.background);
+    this.scene.background = this.background.set(this.theme.background);
     this.pmi.setColor(this.theme.pmi);
     this.perspective.up.copy(Z_UP);
     this.ortho.up.copy(Z_UP);
-    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x50545c, 1.4));
+    this.scene.add(this.hemisphere);
+    this.sun.position.set(-1, -1.5, 3); // from above, front left; a directional light only needs the direction
+    this.scene.add(this.sun);
     this.scene.add(this.camera);
     this.camera.add(this.light);
     this.light.position.set(0.5, 1, 1);
@@ -190,6 +206,8 @@ export class Viewer {
     this.capOutline.dispose();
     this.ghostMaterial.dispose();
     this.environment.dispose();
+    this.effects?.dispose();
+    this.contactShadow?.dispose();
     this.finishes.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
@@ -382,6 +400,7 @@ export class Viewer {
     this.nodeObjects.forEach((o, id) => (o.visible = !hidden.has(id)));
     this.updateGhosts();
     this.updateCaps();
+    this.updateRealistic();
     this.requestRender();
   }
 
@@ -392,6 +411,7 @@ export class Viewer {
     this.measure.clear(); // measured where the parts were
     this.updateGhosts();
     this.updateCaps();
+    this.updateRealistic();
     this.requestRender();
   }
 
@@ -421,9 +441,46 @@ export class Viewer {
     const faces = style !== 'wireframe';
     // Invisible materials are still raycast, so wireframe parts stay pickable.
     for (const m of [...this.materials, ...this.appearanceMaterials.values()]) m.visible = faces;
-    this.edgeLines.forEach((l) => (l.visible = style !== 'shaded'));
+    this.edgeLines.forEach((l) => (l.visible = style === 'shadedEdges' || style === 'wireframe'));
     this.edgeMaterial.color.set(faces ? EDGE_COLOR : this.theme.wire);
+    this.setRealistic(style === 'realistic');
     this.updateCaps();
+    this.requestRender();
+  }
+
+  // Tone mapping, environment light, ambient occlusion and a contact shadow, for a photographic look.
+  private setRealistic(on: boolean): void {
+    if (on && !this.effects) {
+      this.effects = new Effects(this.renderer, this.scene, this.camera, this.clipping, () => [
+        this.ghosts,
+        this.caps,
+        ...this.measure.objects,
+        ...(this.grid ? [this.grid] : []),
+        ...(this.contactShadow ? [this.contactShadow.mesh] : []),
+      ]);
+      this.effects.setBackground(this.theme.background);
+      this.contactShadow = new ContactShadow();
+      this.scene.add(this.contactShadow.mesh);
+      this.resize();
+    }
+    const lights = on ? LIGHTS.realistic : LIGHTS.plain;
+    this.light.intensity = lights.key;
+    this.hemisphere.intensity = lights.fill;
+    this.sun.intensity = lights.sun;
+    this.scene.environment = on ? this.environment : null;
+    this.scene.environmentIntensity = lights.environment;
+    this.scene.background = on ? null : this.background; // the effects composite it untouched
+    this.renderer.toneMapping = on ? THREE.NeutralToneMapping : THREE.NoToneMapping;
+    this.contactShadow?.setVisible(on);
+    this.updateRealistic();
+  }
+
+  // The contact shadow and the occlusion radius follow what is shown, not the camera.
+  private updateRealistic(): void {
+    if (this.display !== 'realistic' || !this.effects || !this.contactShadow) return;
+    const bounds = this.visibleBounds();
+    this.contactShadow.update(this.renderer, this.modelRoot, bounds);
+    this.effects.setOcclusionRadius(0.04 * bounds.getSize(new THREE.Vector3()).length());
     this.requestRender();
   }
 
@@ -448,7 +505,8 @@ export class Viewer {
 
   setTheme(theme: Theme): void {
     this.theme = THEMES[theme];
-    (this.scene.background as THREE.Color).set(this.theme.background);
+    this.background.set(this.theme.background);
+    this.effects?.setBackground(this.theme.background);
     if (this.display === 'wireframe') this.edgeMaterial.color.set(this.theme.wire);
     this.pmi.setColor(this.theme.pmi);
     // GridHelper bakes its colours into the geometry: rebuild it.
@@ -686,6 +744,7 @@ export class Viewer {
     this.camera.remove(this.light);
     this.scene.remove(this.camera);
     this.camera = next;
+    this.effects?.setCamera(next);
     this.scene.add(next);
     next.add(this.light);
     this.controls.object = next;
@@ -703,6 +762,7 @@ export class Viewer {
     const { clientWidth: w, clientHeight: h } = this.container;
     if (!w || !h) return;
     this.renderer.setSize(w, h);
+    this.effects?.setSize(w, h, this.renderer.getPixelRatio());
     const aspect = w / h;
     this.perspective.aspect = aspect;
     this.perspective.updateProjectionMatrix();
@@ -874,7 +934,7 @@ export class Viewer {
   /** The current view as a PNG: the canvas only, without the HTML overlays (ViewCube, axes, labels). */
   screenshot(): Promise<Blob> {
     // The drawing buffer is readable until the browser composites it, so render and capture in one task.
-    this.renderer.render(this.scene, this.camera);
+    this.draw();
     return new Promise((resolve, reject) =>
       this.renderer.domElement.toBlob((b) => (b ? resolve(b) : reject(new Error('Could not capture the view'))), 'image/png'),
     );
@@ -883,12 +943,17 @@ export class Viewer {
   // ---------------------------------------------------------------------------
   // Rendering (on demand)
 
+  private draw(): void {
+    if (this.display === 'realistic' && this.effects) this.effects.render();
+    else this.renderer.render(this.scene, this.camera);
+  }
+
   private requestRender = (): void => {
     if (this.renderQueued) return;
     this.renderQueued = true;
     requestAnimationFrame(() => {
       this.renderQueued = false;
-      this.renderer.render(this.scene, this.camera);
+      this.draw();
       this.cube.update(this.camera);
       this.triad.update(this.camera);
       this.measure.updateLabel(this.camera, this.renderer.domElement);

@@ -95,7 +95,10 @@ export const canExplode = (model?: Model): boolean => (model?.nodes.filter((n) =
 export const hasEdges = (model?: Model): boolean => !!model?.protos.some((p) => p.edges.length);
 
 // The chosen style is kept for the next model that has edges.
-export const displayStyle = (state: State): DisplayStyle => (hasEdges(state.model) ? state.display : 'shaded');
+export const needsEdges = (style: DisplayStyle): boolean => style === 'shadedEdges' || style === 'wireframe';
+
+export const displayStyle = (state: State): DisplayStyle =>
+  needsEdges(state.display) && !hasEdges(state.model) ? 'shaded' : state.display;
 
 /** Why a measurement cannot be taken on the model, or undefined. Meshes have faces (non-planar), but no edges. */
 export function unavailable(mode: MeasureMode, model?: Model): string | undefined {
