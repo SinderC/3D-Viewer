@@ -118,6 +118,11 @@ export function App() {
     if (png) download(png, `${baseName(state.fileName)}.png`);
   };
 
+  const exportModel = async (format: 'stl' | 'glb') => {
+    const blob = await viewer.current?.exportModel(format);
+    if (blob) download(blob, `${baseName(state.fileName)}.${format}`);
+  };
+
   // Quality is applied at load time, so reload the open model with the new setting.
   const changeQuality = (q: Quality) => {
     setQuality(q);
@@ -187,6 +192,7 @@ export function App() {
         onOpen={() => fileInput.current?.click()}
         onClose={close}
         onSaveImage={saveImage}
+        onExport={exportModel}
         quality={quality}
         onQuality={changeQuality}
         showProps={showProps}

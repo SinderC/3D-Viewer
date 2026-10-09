@@ -9,6 +9,7 @@ interface Props {
   onOpen: () => void;
   onClose: () => void;
   onSaveImage: () => void;
+  onExport: (format: 'stl' | 'glb') => void;
   quality: Quality;
   onQuality: (q: Quality) => void;
   showProps: boolean;
@@ -21,7 +22,7 @@ export const MAC = /Mac|iPhone|iPad/.test(navigator.userAgent);
 const MOD = MAC ? '⌘' : 'Ctrl+';
 const QUALITY_LABELS = Object.fromEntries(Object.entries(QUALITY).map(([id, q]) => [id, q.label])) as Record<Quality, string>;
 
-export function Toolbar({ status, onOpen, onClose, onSaveImage, quality, onQuality, showProps, onToggleProps, children }: Props) {
+export function Toolbar({ status, onOpen, onClose, onSaveImage, onExport, quality, onQuality, showProps, onToggleProps, children }: Props) {
   return (
     <header className="toolbar">
       <span className="app-name">Open CAD Viewer</span>
@@ -30,6 +31,8 @@ export function Toolbar({ status, onOpen, onClose, onSaveImage, quality, onQuali
         <MenuItem label="Close" disabled={status === 'idle'} onClick={onClose} />
         <hr className="menu-sep" />
         <MenuItem label="Save image…" disabled={status !== 'ready'} onClick={onSaveImage} />
+        <MenuItem label="Export STL…" disabled={status !== 'ready'} onClick={() => onExport('stl')} />
+        <MenuItem label="Export glTF (GLB)…" disabled={status !== 'ready'} onClick={() => onExport('glb')} />
         <hr className="menu-sep" />
         {/* Applied when a file is read: changing it reloads the open model. */}
         <MenuChoices

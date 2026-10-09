@@ -7,6 +7,7 @@ import type { UnitId } from '../core/units';
 import { Measure, type EdgePick, type FacePick, type MeasureMode, type Pick } from './measure';
 import { isShown } from './objects';
 import { applyExplode, explodeOffsets, type ExplodeItem } from './explode';
+import { toGlb, toStl } from './export';
 import { PmiLayer } from './pmi';
 import { buildSectionCaps, disposeCaps, sectionPlane, sectionPosition } from './section';
 import { AxisTriad } from './AxisTriad';
@@ -774,6 +775,12 @@ export class Viewer {
       }
     }
     return best.clone();
+  }
+
+  /** The shown parts, as placed now (exploded too), without PMI. */
+  exportModel(format: 'stl' | 'glb'): Promise<Blob> {
+    const shown = this.meshes.filter(isShown);
+    return format === 'stl' ? Promise.resolve(toStl(shown)) : toGlb(shown);
   }
 
   /** The current view as a PNG: the canvas only, without the HTML overlays (ViewCube, axes, labels). */
