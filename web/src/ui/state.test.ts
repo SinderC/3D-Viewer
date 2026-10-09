@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Model } from '../core/model';
-import { appearanceOf, displayStyle, initialState, measureMode, reducer, searchTree, type State } from './state';
+import { appearanceOf, colorOf, displayStyle, initialState, measureMode, reducer, searchTree, type State } from './state';
 
 describe('reducer', () => {
   it('close drops the model and keeps view preferences', () => {
@@ -121,5 +121,19 @@ describe('appearances', () => {
   it('resets when another file opens', () => {
     const s = reducer(loaded, { type: 'setAppearance', id: null, appearance: 'brass' });
     expect(reducer(s, { type: 'loadStart', fileName: 'b.step', quality: 'normal' }).appearances.size).toBe(0);
+  });
+
+  it('keeps colours apart from appearances, with the same subtree rules', () => {
+    let s = reducer(loaded, { type: 'setAppearance', id: null, appearance: 'brass' });
+    s = reducer(s, { type: 'setColor', id: null, color: '#d23c3c' });
+    s = reducer(s, { type: 'setColor', id: 2, color: '#2f6fd6' });
+    s = reducer(s, { type: 'setColor', id: 3, color: null });
+    expect([0, 1, 2, 3].map((id) => colorOf(model, s.colors, id))).toEqual(['#d23c3c', '#d23c3c', '#2f6fd6', undefined]);
+    expect(shown(s)).toEqual(['brass', 'brass', 'brass', 'brass']);
+    s = reducer(s, { type: 'setColor', id: null, color: null });
+    expect(s.colors.size).toBe(0);
+    expect(s.appearances.size).toBe(1);
+    s = reducer(s, { type: 'setColor', id: 1, color: '#f2f2f2' });
+    expect(reducer(s, { type: 'loadStart', fileName: 'b.step', quality: 'normal' }).colors.size).toBe(0);
   });
 });

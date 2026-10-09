@@ -1,4 +1,4 @@
-import type { AppearanceId, AppearanceSetting } from '../core/appearances';
+import type { AppearanceId, AppearanceSetting, ColorSetting, PartColor } from '../core/appearances';
 import type { Model } from '../core/model';
 import type { UnitId } from '../core/units';
 import { MEASURE_MODES, type MeasureMode } from '../viewer/measure';
@@ -25,6 +25,7 @@ export interface State {
   ghost: boolean; // draw hidden parts translucent
   explode: number; // 0 assembled .. 1 fully exploded
   appearances: ReadonlyMap<number, AppearanceSetting>; // per node, for its subtree (see appearanceOf)
+  colors: ReadonlyMap<number, ColorSetting>; // likewise (see colorOf)
   pmi: boolean; // show PMI
   hiddenPmi: ReadonlySet<number>;
   selectedPmi: number | null;
@@ -50,6 +51,8 @@ export type Action =
   | { type: 'setExplode'; amount: number }
   /** For a node's subtree, or the whole model when `id` is null; a null appearance restores the file's. */
   | { type: 'setAppearance'; id: number | null; appearance: AppearanceId | null }
+  /** Likewise a colour; a null colour restores the file's. */
+  | { type: 'setColor'; id: number | null; color: PartColor | null }
   | { type: 'togglePmi' }
   | { type: 'setHiddenPmi'; hidden: ReadonlySet<number> }
   | { type: 'selectPmi'; index: number | null }
@@ -71,6 +74,7 @@ export const initialState: State = {
   ghost: false,
   explode: 0,
   appearances: new Map(),
+  colors: new Map(),
   pmi: true,
   hiddenPmi: new Set(),
   selectedPmi: null,
@@ -144,7 +148,9 @@ export function reducer(state: State, action: Action): State {
     case 'setExplode':
       return { ...state, explode: action.amount };
     case 'setAppearance':
-      return { ...state, appearances: setAppearance(state, action.id, action.appearance) };
+      return { ...state, appearances: setOverride(state.model, state.appearances, action.id, action.appearance) };
+    case 'setColor':
+      return { ...state, colors: setOverride(state.model, state.colors, action.id, action.color) };
     case 'togglePmi':
       return { ...state, pmi: !state.pmi };
     case 'setHiddenPmi':
@@ -196,20 +202,28 @@ export function searchTree(model: Model, query: string): { shown: Set<number>; e
   return { shown, expand };
 }
 
-/** The appearance a node shows: its own setting, else its nearest ancestor's; undefined for the file's. */
-export function appearanceOf(model: Model, settings: ReadonlyMap<number, AppearanceSetting>, id: number): AppearanceId | undefined {
+// Appearances and colours are overrides of the file's look, set per node for its subtree.
+type Overrides<T extends string> = ReadonlyMap<number, T | 'file'>;
+
+// A node's override: its own setting, else its nearest ancestor's; undefined for the file's.
+function overrideOf<T extends string>(model: Model, settings: Overrides<T>, id: number): T | undefined {
   for (let n = id; n >= 0; n = model.nodes[n].parent) {
     const s = settings.get(n);
-    if (s) return s === 'file' ? undefined : s;
+    if (s) return s === 'file' ? undefined : (s as T);
   }
 }
 
-// The node's subtree takes the appearance; settings below it are dropped.
-function setAppearance(state: State, id: number | null, appearance: AppearanceId | null): ReadonlyMap<number, AppearanceSetting> {
-  const model = state.model;
-  if (!model) return state.appearances;
-  if (id === null) return new Map(appearance ? model.roots.map((r) => [r, appearance]) : []);
-  const next = new Map(state.appearances);
+/** The appearance a node shows; undefined for the file's. */
+export const appearanceOf = (model: Model, settings: Overrides<AppearanceId>, id: number) => overrideOf(model, settings, id);
+
+/** The colour a node shows; undefined for the file's. */
+export const colorOf = (model: Model, settings: Overrides<PartColor>, id: number) => overrideOf(model, settings, id);
+
+// The node's subtree (every root's for a null id) takes the value; settings below it are dropped.
+function setOverride<T extends string>(model: Model | undefined, settings: Overrides<T>, id: number | null, value: T | null): Overrides<T> {
+  if (!model) return settings;
+  if (id === null) return new Map(value ? model.roots.map((r) => [r, value]) : []);
+  const next = new Map(settings);
   const stack = [id];
   while (stack.length) {
     const n = stack.pop()!;
@@ -217,8 +231,8 @@ function setAppearance(state: State, id: number | null, appearance: AppearanceId
     stack.push(...model.nodes[n].children);
   }
   const parent = model.nodes[id].parent;
-  const inherited = parent >= 0 ? appearanceOf(model, next, parent) : undefined;
-  if (appearance) next.set(id, appearance);
+  const inherited = parent >= 0 ? overrideOf(model, next, parent) : undefined;
+  if (value) next.set(id, value);
   else if (inherited) next.set(id, 'file');
   return next;
 }

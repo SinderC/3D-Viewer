@@ -39,3 +39,7 @@ export const APPEARANCES: Record<AppearanceId, Appearance> = PRESETS;
 
 /** What a node is set to: an appearance, or 'file' to show the file's own look under an ancestor's appearance. */
 export type AppearanceSetting = AppearanceId | 'file';
+
+/** A colour users give parts, as #rrggbb (sRGB); finishes take it as the part's colour. */
+export type PartColor = `#${string}`;
+export type ColorSetting = PartColor | 'file';

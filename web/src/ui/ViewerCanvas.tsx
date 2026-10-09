@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type Dispatch } from 'react';
 import { Viewer, type Theme, type UpAxis } from '../viewer/Viewer';
 import { defaultView } from '../core/model';
-import { appearanceOf, displayStyle, measureMode, type Action, type State } from './state';
+import { appearanceOf, colorOf, displayStyle, measureMode, type Action, type State } from './state';
 
 interface Props {
   state: State;
@@ -15,7 +15,8 @@ interface Props {
 export function ViewerCanvas({ state, dispatch, viewerRef, theme, upAxis }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const [viewer, setViewer] = useState<Viewer | null>(null);
-  const { model, hidden, selected, tool, unit, section, ortho, grid, ghost, explode, appearances, pmi, hiddenPmi, selectedPmi, view } = state;
+  const { model, hidden, selected, tool, unit, section, ortho, grid, ghost, explode, appearances, colors, pmi, hiddenPmi, selectedPmi, view } =
+    state;
   const display = displayStyle(state);
   const mode = measureMode(state);
 
@@ -41,8 +42,8 @@ export function ViewerCanvas({ state, dispatch, viewerRef, theme, upAxis }: Prop
   useEffect(() => viewer?.setGhost(ghost), [viewer, ghost]);
   useEffect(() => viewer?.setExplode(explode), [viewer, model, explode]);
   useEffect(() => {
-    if (model) viewer?.setAppearances((id) => appearanceOf(model, appearances, id));
-  }, [viewer, model, appearances]);
+    if (model) viewer?.setLooks((id) => ({ appearance: appearanceOf(model, appearances, id), color: colorOf(model, colors, id) }));
+  }, [viewer, model, appearances, colors]);
   useEffect(() => viewer?.select(selected), [viewer, model, selected]);
   useEffect(() => viewer?.setTool(tool), [viewer, tool]);
   useEffect(() => viewer?.setMeasureMode(mode), [viewer, model, mode]);

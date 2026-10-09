@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from 'three-mesh-bvh';
-import { APPEARANCES, type AppearanceId } from '../core/appearances';
+import { APPEARANCES, type AppearanceId, type PartColor } from '../core/appearances';
 import { EDGE_STRIDE, FACE_STRIDE, faceTriangles, type Model, type Proto } from '../core/model';
 import type { UnitId } from '../core/units';
 import { Measure, type EdgePick, type FacePick, type MeasureMode, type Pick } from './measure';
@@ -26,6 +26,11 @@ export type Tool = 'select' | 'measure' | 'sectionFace'; // sectionFace: the nex
 export type ViewName = 'iso' | 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom';
 export type DisplayStyle = 'shadedEdges' | 'shaded' | 'wireframe' | 'realistic';
 export type Axis = 'x' | 'y' | 'z';
+/** What a part shows over its file material; neither for the file's look. */
+export interface Look {
+  appearance?: AppearanceId;
+  color?: PartColor;
+}
 export interface Section {
   axis: Axis | 'face' | null;
   position: number; // 0..1 across the model bounds
@@ -129,7 +134,7 @@ export class Viewer {
   private meshes: THREE.Mesh[] = [];
   private edgeLines: THREE.LineSegments[] = [];
   private materials: THREE.Material[] = [];
-  private appearanceMaterials = new Map<string, THREE.MeshPhysicalMaterial>();
+  private lookMaterials = new Map<string, THREE.Material>(); // for appearances and colours, by lookMaterial's key
   private defaultMaterial: THREE.Material | null = null; // for parts the file gives no colour
   private explodeItems: ExplodeItem[] = [];
   private bounds = new THREE.Box3();
@@ -324,14 +329,22 @@ export class Viewer {
     return m;
   }
 
-  // An appearance on a part whose file material is `file`: shared by all parts with both alike.
-  private appearanceMaterial(id: AppearanceId, file: THREE.Material): THREE.MeshPhysicalMaterial {
-    const key = `${id}:${file.uuid}`;
-    let m = this.appearanceMaterials.get(key);
-    if (!m) {
+  // A part's look with an appearance and/or a colour over its file material `file`: shared by all parts
+  // with all three alike. A colour alone recolours the file material, keeping its textures.
+  private lookMaterial(file: THREE.Material, { appearance: id, color }: Look): THREE.Material {
+    const key = `${id ?? ''}:${color ?? ''}:${file.uuid}`;
+    let m = this.lookMaterials.get(key);
+    if (m) return m;
+    if (!id) {
+      m = this.surface(file.clone());
+      if ('color' in m && m.color instanceof THREE.Color) m.color.set(color!);
+    } else {
       const a = APPEARANCES[id];
-      const partColor =
-        file !== this.defaultMaterial && 'color' in file && file.color instanceof THREE.Color ? file.color : APPEARANCE_DEFAULT_COLOR;
+      const partColor = color
+        ? new THREE.Color(color)
+        : file !== this.defaultMaterial && 'color' in file && file.color instanceof THREE.Color
+          ? file.color
+          : APPEARANCE_DEFAULT_COLOR;
       const maps = a.finish ? this.finishes.get(a.finish) : undefined;
       m = this.surface(
         new THREE.MeshPhysicalMaterial({
@@ -349,26 +362,35 @@ export class Viewer {
           opacity: file.opacity,
         }),
       );
-      this.appearanceMaterials.set(key, m);
     }
+    this.lookMaterials.set(key, m);
     return m;
   }
 
-  /** Give each part the appearance `appearanceOf` its node, or its file material for undefined. */
-  setAppearances(appearanceOf: (nodeId: number) => AppearanceId | undefined): void {
+  /** Give each part the look `lookOf` its node: an appearance and/or a colour over its file material. */
+  setLooks(lookOf: (nodeId: number) => Look): void {
+    const used = new Set<THREE.Material>();
     for (const mesh of this.meshes) {
       const file = mesh.userData.fileMaterial as THREE.Material | THREE.Material[];
-      const id = appearanceOf(mesh.userData.nodeId);
+      const look = lookOf(mesh.userData.nodeId);
       // Finishes are mapped by box UVs, made once per prototype the first time one needs them.
       const { geometry } = mesh;
-      if (id && APPEARANCES[id].finish && !geometry.hasAttribute(FINISH_UVS)) {
+      if (look.appearance && APPEARANCES[look.appearance].finish && !geometry.hasAttribute(FINISH_UVS)) {
         const uvs = boxUvs(geometry.getAttribute('position').array, geometry.getAttribute('normal').array);
         geometry.setAttribute(FINISH_UVS, new THREE.BufferAttribute(uvs, 2));
       }
-      const base = !id ? file : Array.isArray(file) ? file.map((f) => this.appearanceMaterial(id, f)) : this.appearanceMaterial(id, file);
+      const material = (f: THREE.Material) => (look.appearance || look.color ? this.lookMaterial(f, look) : f);
+      const base = Array.isArray(file) ? file.map(material) : material(file);
+      [base].flat().forEach((m) => used.add(m));
       if (mesh.material !== this.highlight) mesh.material = base;
       mesh.userData.baseMaterial = base;
     }
+    // Drop looks no part shows any more, such as the colours passed while dragging in the colour picker.
+    for (const [key, m] of this.lookMaterials)
+      if (!used.has(m)) {
+        m.dispose();
+        this.lookMaterials.delete(key);
+      }
     this.updateCaps(); // cut faces take the part colours
     this.requestRender();
   }
@@ -392,8 +414,8 @@ export class Viewer {
       for (const v of Object.values(m)) if (v instanceof THREE.Texture && v !== this.environment) v.dispose();
       m.dispose();
     });
-    this.appearanceMaterials.forEach((m) => m.dispose());
-    this.appearanceMaterials.clear();
+    this.lookMaterials.forEach((m) => m.dispose());
+    this.lookMaterials.clear();
     this.removeGrid();
     this.ghosts.clear();
     this.modelRoot.clear();
@@ -459,7 +481,7 @@ export class Viewer {
     this.display = style;
     const faces = style !== 'wireframe';
     // Invisible materials are still raycast, so wireframe parts stay pickable.
-    for (const m of [...this.materials, ...this.appearanceMaterials.values()]) m.visible = faces;
+    for (const m of [...this.materials, ...this.lookMaterials.values()]) m.visible = faces;
     this.edgeLines.forEach((l) => (l.visible = style === 'shadedEdges' || style === 'wireframe'));
     this.edgeMaterial.color.set(faces ? EDGE_COLOR : this.theme.wire);
     this.setRealistic(style === 'realistic');
