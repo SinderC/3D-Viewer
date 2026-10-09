@@ -28,6 +28,7 @@ only allows requests to the app's own origin. After the first visit the app work
 - Assembly tree with name search and show/hide/isolate (hidden parts optionally shown as translucent ghosts), colours from the file, feature edges (B-rep formats and JT
   with XT data)
 - Pick to select, X/Y/Z section plane with solid caps
+- Exploded view: a slider moves the parts away from the model centre
 - Properties: bounding-box size of the model and of the selected part
 - Measure: edge length / radius / diameter, distance between points (vertex snapping), distance and
   angle between planar faces; display in mm, cm, m, in, ft or ft-in (1/16"); measurements stay on screen until removed

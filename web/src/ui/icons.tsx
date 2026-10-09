@@ -127,6 +127,13 @@ export const MeasureIcon = () => (
   </Icon>
 );
 
+export const ExplodeIcon = () => (
+  <Icon>
+    <rect x="6" y="6" width="4" height="4" rx="0.5" />
+    <path d="M2 2l2.5 2.5M14 2l-2.5 2.5M2 14l2.5-2.5M14 14l-2.5-2.5M2 5V2h3M11 2h3v3M14 11v3h-3M5 14H2v-3" />
+  </Icon>
+);
+
 export const GhostIcon = () => (
   <Icon>
     <path d={CUBE} strokeDasharray="2 2" />

@@ -6,6 +6,7 @@ import { EDGE_STRIDE, FACE_STRIDE, faceTriangles, type Model, type Proto } from 
 import type { UnitId } from '../core/units';
 import { Measure, type EdgePick, type FacePick, type MeasureMode, type Pick } from './measure';
 import { isShown } from './objects';
+import { applyExplode, explodeOffsets, type ExplodeItem } from './explode';
 import { PmiLayer } from './pmi';
 import { buildSectionCaps, disposeCaps } from './section';
 import { AxisTriad } from './AxisTriad';
@@ -86,6 +87,7 @@ export class Viewer {
   private meshes: THREE.Mesh[] = [];
   private edgeLines: THREE.LineSegments[] = [];
   private materials: THREE.Material[] = [];
+  private explodeItems: ExplodeItem[] = [];
   private bounds = new THREE.Box3();
   private orthoHalfHeight = 1;
   private selected: number | null = null;
@@ -226,6 +228,7 @@ export class Viewer {
 
     this.modelRoot.updateMatrixWorld(true);
     this.bounds.setFromObject(this.modelRoot);
+    this.explodeItems = explodeOffsets(new Set(this.meshes.map((m) => m.parent!)), this.bounds.getCenter(new THREE.Vector3()));
     this.pmi.build(model, this.nodeObjects, this.modelRoot); // after the bounds: PMI does not count for fitting
     this.addGrid();
     this.setDisplayStyle(this.display);
@@ -272,6 +275,7 @@ export class Viewer {
     this.meshes = [];
     this.edgeLines = [];
     this.materials = [];
+    this.explodeItems = [];
     this.selected = null;
     this.bounds.makeEmpty();
     this.measure.clear();
@@ -286,6 +290,16 @@ export class Viewer {
 
   setHidden(hidden: ReadonlySet<number>): void {
     this.nodeObjects.forEach((o, id) => (o.visible = !hidden.has(id)));
+    this.updateGhosts();
+    this.updateCaps();
+    this.requestRender();
+  }
+
+  /** Move parts apart: 0 assembled, 1 fully exploded. The section keeps the assembled bounds. */
+  setExplode(amount: number): void {
+    applyExplode(this.explodeItems, amount);
+    this.modelRoot.updateMatrixWorld(true);
+    this.measure.clear(); // measured where the parts were
     this.updateGhosts();
     this.updateCaps();
     this.requestRender();

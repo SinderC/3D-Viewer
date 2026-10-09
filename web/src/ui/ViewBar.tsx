@@ -4,6 +4,7 @@ import { MEASURE_MODES, type MeasureMode } from '../viewer/measure';
 import type { Axis, DisplayStyle, ViewName, Viewer } from '../viewer/Viewer';
 import {
   Chevron,
+  ExplodeIcon,
   FitIcon,
   GhostIcon,
   GridIcon,
@@ -21,7 +22,7 @@ import {
 import { Menu } from './Menu';
 import { keyLabel } from './shortcuts';
 import type { BarSize } from './ViewMenu';
-import { displayStyle, hasEdges, measureMode, type Action, type State } from './state';
+import { canExplode, displayStyle, hasEdges, measureMode, type Action, type State } from './state';
 
 interface Props {
   state: State;
@@ -121,6 +122,24 @@ export function ViewBar({ state, dispatch, viewer, size }: Props) {
         </button>
       )}
       <span className="sep" />
+      {canExplode(state.model) && (
+        <Menu up title="Exploded view" className="icon" pressed={state.explode > 0} label={<ExplodeIcon />}>
+          <div className="menu-row">
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.01}
+              value={state.explode}
+              aria-label="Explode"
+              onChange={(e) => dispatch({ type: 'setExplode', amount: Number(e.target.value) })}
+            />
+            <button disabled={state.explode === 0} onClick={() => dispatch({ type: 'setExplode', amount: 0 })}>
+              Reset
+            </button>
+          </div>
+        </Menu>
+      )}
       <Menu up title="Section" className="icon" pressed={section.axis !== null} label={<SectionIcon />}>
         <div className="menu-row">
           {([null, 'x', 'y', 'z'] as const).map((axis) => (

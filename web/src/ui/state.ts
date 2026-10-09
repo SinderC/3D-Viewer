@@ -22,6 +22,7 @@ export interface State {
   ortho: boolean;
   grid: boolean;
   ghost: boolean; // draw hidden parts translucent
+  explode: number; // 0 assembled .. 1 fully exploded
   pmi: boolean; // show PMI
   hiddenPmi: ReadonlySet<number>;
   selectedPmi: number | null;
@@ -44,6 +45,7 @@ export type Action =
   | { type: 'toggleOrtho' }
   | { type: 'toggleGrid' }
   | { type: 'toggleGhost' }
+  | { type: 'setExplode'; amount: number }
   | { type: 'togglePmi' }
   | { type: 'setHiddenPmi'; hidden: ReadonlySet<number> }
   | { type: 'selectPmi'; index: number | null }
@@ -63,6 +65,7 @@ export const initialState: State = {
   ortho: true,
   grid: false,
   ghost: false,
+  explode: 0,
   pmi: true,
   hiddenPmi: new Set(),
   selectedPmi: null,
@@ -81,6 +84,9 @@ const keepPrefs = ({ display, ortho, grid, ghost, pmi, measureMode }: State): St
 });
 
 // Mesh formats (STL, OBJ…) carry no B-rep edges, so only plain shading applies to them.
+// Exploding needs at least two parts to move apart.
+export const canExplode = (model?: Model): boolean => (model?.nodes.filter((n) => n.proto >= 0).length ?? 0) > 1;
+
 export const hasEdges = (model?: Model): boolean => !!model?.protos.some((p) => p.edges.length);
 
 // The chosen style is kept for the next model that has edges.
@@ -122,6 +128,8 @@ export function reducer(state: State, action: Action): State {
       return { ...state, grid: !state.grid };
     case 'toggleGhost':
       return { ...state, ghost: !state.ghost };
+    case 'setExplode':
+      return { ...state, explode: action.amount };
     case 'togglePmi':
       return { ...state, pmi: !state.pmi };
     case 'setHiddenPmi':

@@ -14,7 +14,7 @@ interface Props {
 export function ViewerCanvas({ state, dispatch, viewerRef, theme }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const [viewer, setViewer] = useState<Viewer | null>(null);
-  const { model, hidden, selected, tool, unit, section, ortho, grid, ghost, pmi, hiddenPmi, selectedPmi, view } = state;
+  const { model, hidden, selected, tool, unit, section, ortho, grid, ghost, explode, pmi, hiddenPmi, selectedPmi, view } = state;
   const display = displayStyle(state);
   const mode = measureMode(state);
 
@@ -34,6 +34,7 @@ export function ViewerCanvas({ state, dispatch, viewerRef, theme }: Props) {
   useEffect(() => void (model ? viewer?.load(model) : viewer?.clear()), [viewer, model]);
   useEffect(() => viewer?.setHidden(hidden), [viewer, model, hidden]);
   useEffect(() => viewer?.setGhost(ghost), [viewer, ghost]);
+  useEffect(() => viewer?.setExplode(explode), [viewer, model, explode]);
   useEffect(() => viewer?.select(selected), [viewer, model, selected]);
   useEffect(() => viewer?.setTool(tool), [viewer, tool]);
   useEffect(() => viewer?.setMeasureMode(mode), [viewer, model, mode]);
