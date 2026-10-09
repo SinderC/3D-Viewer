@@ -19,6 +19,7 @@ import {
   WireframeIcon,
   ZoomSelectionIcon,
 } from './icons';
+import { AppearanceMenu } from './AppearanceMenu';
 import { Menu } from './Menu';
 import { keyLabel } from './shortcuts';
 import type { BarSize } from './ViewMenu';
@@ -101,6 +102,7 @@ export function ViewBar({ state, dispatch, viewer, size }: Props) {
           </button>
         ))}
       </Menu>
+      <AppearanceMenu state={state} dispatch={dispatch} />
       <button
         className="icon"
         title="Ground grid (G)"

@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from 'three-mesh-bvh';
+import { APPEARANCES, type Appearance, type AppearanceId } from '../core/appearances';
 import { EDGE_STRIDE, FACE_STRIDE, faceTriangles, type Model, type Proto } from '../core/model';
 import type { UnitId } from '../core/units';
 import { Measure, type EdgePick, type FacePick, type MeasureMode, type Pick } from './measure';
@@ -94,6 +95,7 @@ export class Viewer {
   private meshes: THREE.Mesh[] = [];
   private edgeLines: THREE.LineSegments[] = [];
   private materials: THREE.Material[] = [];
+  private appearanceMaterials = new Map<string, THREE.MeshPhysicalMaterial>();
   private explodeItems: ExplodeItem[] = [];
   private bounds = new THREE.Box3();
   private orthoHalfHeight = 1;
@@ -230,7 +232,7 @@ export class Viewer {
         const proto = model.protos[node.proto];
         const mats = proto.groups.map((g) => material(g.color >= 0 ? g.color : color));
         const mesh = new THREE.Mesh(geometries[node.proto].faces, mats.length === 1 ? mats[0] : mats);
-        mesh.userData = { nodeId: id, baseMaterial: mesh.material, proto };
+        mesh.userData = { nodeId: id, baseMaterial: mesh.material, fileMaterial: mesh.material, proto };
         obj.add(mesh);
         this.meshes.push(mesh);
 
@@ -255,33 +257,69 @@ export class Viewer {
     this.triad.setVisible(true);
   }
 
-  private makeMaterial(color: THREE.Color, alpha: number): THREE.MeshStandardMaterial {
-    return new THREE.MeshStandardMaterial({
-      color,
-      metalness: 0.05,
-      roughness: 0.55,
-      side: THREE.DoubleSide, // open shells and section cuts
-      transparent: alpha < 1,
-      opacity: alpha,
-      // Push faces back so edge lines draw on top without z-fighting.
-      polygonOffset: true,
-      polygonOffsetFactor: 1,
-      polygonOffsetUnits: 1,
-      clippingPlanes: this.clipping,
-    });
-  }
-
-  // A material read from the file (glTF), set up like makeMaterial's: both sides, behind the edges, clipped, reflective.
-  private adoptMaterial(source: THREE.Material): THREE.Material {
-    const m = Object.assign(source.clone(), {
+  // Settings every part material shares: both sides (open shells, section cuts), pushed back so edge
+  // lines draw on top without z-fighting, and clipped by the section.
+  private surface<T extends THREE.Material>(m: T): T {
+    return Object.assign(m, {
       side: THREE.DoubleSide,
       polygonOffset: true,
       polygonOffsetFactor: 1,
       polygonOffsetUnits: 1,
       clippingPlanes: this.clipping,
+      visible: this.display !== 'wireframe',
     });
+  }
+
+  private makeMaterial(color: THREE.Color, alpha: number): THREE.MeshStandardMaterial {
+    return this.surface(
+      new THREE.MeshStandardMaterial({ color, metalness: 0.05, roughness: 0.55, transparent: alpha < 1, opacity: alpha }),
+    );
+  }
+
+  // A material read from the file (glTF), made reflective.
+  private adoptMaterial(source: THREE.Material): THREE.Material {
+    const m = this.surface(source.clone());
     if (m instanceof THREE.MeshStandardMaterial && !m.envMap) m.envMap = this.environment;
     return m;
+  }
+
+  // An appearance on a part whose file material is `file`: shared by all parts with both alike.
+  private appearanceMaterial(id: AppearanceId, file: THREE.Material): THREE.MeshPhysicalMaterial {
+    const key = `${id}:${file.uuid}`;
+    let m = this.appearanceMaterials.get(key);
+    if (!m) {
+      const a: Appearance = APPEARANCES[id];
+      const fileColor = 'color' in file && file.color instanceof THREE.Color ? file.color : DEFAULT_COLOR;
+      m = this.surface(
+        new THREE.MeshPhysicalMaterial({
+          color: a.color ? new THREE.Color().setRGB(...a.color, THREE.SRGBColorSpace) : fileColor,
+          metalness: a.metalness,
+          roughness: a.roughness,
+          clearcoat: a.clearcoat ?? 0,
+          clearcoatRoughness: 0.1,
+          envMap: this.environment,
+          // The scene lights already light diffuse surfaces; the environment is mostly for reflections.
+          envMapIntensity: 0.35 + 0.65 * a.metalness,
+          transparent: file.transparent,
+          opacity: file.opacity,
+        }),
+      );
+      this.appearanceMaterials.set(key, m);
+    }
+    return m;
+  }
+
+  /** Give each part the appearance `appearanceOf` its node, or its file material for undefined. */
+  setAppearances(appearanceOf: (nodeId: number) => AppearanceId | undefined): void {
+    for (const mesh of this.meshes) {
+      const file = mesh.userData.fileMaterial as THREE.Material | THREE.Material[];
+      const id = appearanceOf(mesh.userData.nodeId);
+      const base = !id ? file : Array.isArray(file) ? file.map((f) => this.appearanceMaterial(id, f)) : this.appearanceMaterial(id, file);
+      if (mesh.material !== this.highlight) mesh.material = base;
+      mesh.userData.baseMaterial = base;
+    }
+    this.updateCaps(); // cut faces take the part colours
+    this.requestRender();
   }
 
   /** Remove the model and release its GPU and JS memory. */
@@ -303,6 +341,8 @@ export class Viewer {
       for (const v of Object.values(m)) if (v instanceof THREE.Texture && v !== this.environment) v.dispose();
       m.dispose();
     });
+    this.appearanceMaterials.forEach((m) => m.dispose());
+    this.appearanceMaterials.clear();
     this.removeGrid();
     this.ghosts.clear();
     this.modelRoot.clear();
@@ -365,7 +405,7 @@ export class Viewer {
     this.display = style;
     const faces = style !== 'wireframe';
     // Invisible materials are still raycast, so wireframe parts stay pickable.
-    this.materials.forEach((m) => (m.visible = faces));
+    for (const m of [...this.materials, ...this.appearanceMaterials.values()]) m.visible = faces;
     this.edgeLines.forEach((l) => (l.visible = style !== 'shaded'));
     this.edgeMaterial.color.set(faces ? EDGE_COLOR : this.theme.wire);
     this.updateCaps();

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Model } from '../core/model';
-import { displayStyle, initialState, measureMode, reducer, searchTree, type State } from './state';
+import { appearanceOf, displayStyle, initialState, measureMode, reducer, searchTree, type State } from './state';
 
 describe('reducer', () => {
   it('close drops the model and keeps view preferences', () => {
@@ -86,5 +86,39 @@ describe('searchTree', () => {
 
   it('is null for an empty query', () => {
     expect(searchTree(model, '  ')).toBeNull();
+  });
+});
+
+describe('appearances', () => {
+  // 0 ─ 1 ─ 2
+  //       └ 3
+  const parents = [-1, 0, 1, 1];
+  const model = {
+    roots: [0],
+    nodes: parents.map((parent, id) => ({ id, parent, children: parents.flatMap((p, c) => (p === id ? [c] : [])) })),
+  } as unknown as Model;
+  const loaded: State = { ...initialState, status: 'ready', model };
+  const shown = (s: State) => [0, 1, 2, 3].map((id) => appearanceOf(model, s.appearances, id));
+
+  it('applies to a subtree, the nearest setting winning', () => {
+    let s = reducer(loaded, { type: 'setAppearance', id: null, appearance: 'brass' });
+    s = reducer(s, { type: 'setAppearance', id: 2, appearance: 'rubber' });
+    expect(shown(s)).toEqual(['brass', 'brass', 'rubber', 'brass']);
+  });
+
+  it('restores the file look under an appearance, and replaces settings below', () => {
+    let s = reducer(loaded, { type: 'setAppearance', id: 2, appearance: 'rubber' });
+    s = reducer(s, { type: 'setAppearance', id: null, appearance: 'brass' });
+    expect(shown(s)).toEqual(['brass', 'brass', 'brass', 'brass']);
+    s = reducer(s, { type: 'setAppearance', id: 3, appearance: null });
+    expect(shown(s)).toEqual(['brass', 'brass', 'brass', undefined]);
+    s = reducer(s, { type: 'setAppearance', id: 1, appearance: 'copper' });
+    expect(shown(s)).toEqual(['brass', 'copper', 'copper', 'copper']);
+    expect(reducer(s, { type: 'setAppearance', id: null, appearance: null }).appearances.size).toBe(0);
+  });
+
+  it('resets when another file opens', () => {
+    const s = reducer(loaded, { type: 'setAppearance', id: null, appearance: 'brass' });
+    expect(reducer(s, { type: 'loadStart', fileName: 'b.step', quality: 'normal' }).appearances.size).toBe(0);
   });
 });

@@ -1,3 +1,4 @@
+import type { AppearanceId, AppearanceSetting } from '../core/appearances';
 import type { Model } from '../core/model';
 import type { UnitId } from '../core/units';
 import { MEASURE_MODES, type MeasureMode } from '../viewer/measure';
@@ -23,6 +24,7 @@ export interface State {
   grid: boolean;
   ghost: boolean; // draw hidden parts translucent
   explode: number; // 0 assembled .. 1 fully exploded
+  appearances: ReadonlyMap<number, AppearanceSetting>; // per node, for its subtree (see appearanceOf)
   pmi: boolean; // show PMI
   hiddenPmi: ReadonlySet<number>;
   selectedPmi: number | null;
@@ -46,6 +48,8 @@ export type Action =
   | { type: 'toggleGrid' }
   | { type: 'toggleGhost' }
   | { type: 'setExplode'; amount: number }
+  /** For a node's subtree, or the whole model when `id` is null; a null appearance restores the file's. */
+  | { type: 'setAppearance'; id: number | null; appearance: AppearanceId | null }
   | { type: 'togglePmi' }
   | { type: 'setHiddenPmi'; hidden: ReadonlySet<number> }
   | { type: 'selectPmi'; index: number | null }
@@ -66,6 +70,7 @@ export const initialState: State = {
   grid: false,
   ghost: false,
   explode: 0,
+  appearances: new Map(),
   pmi: true,
   hiddenPmi: new Set(),
   selectedPmi: null,
@@ -135,6 +140,8 @@ export function reducer(state: State, action: Action): State {
       return { ...state, ghost: !state.ghost };
     case 'setExplode':
       return { ...state, explode: action.amount };
+    case 'setAppearance':
+      return { ...state, appearances: setAppearance(state, action.id, action.appearance) };
     case 'togglePmi':
       return { ...state, pmi: !state.pmi };
     case 'setHiddenPmi':
@@ -184,4 +191,31 @@ export function searchTree(model: Model, query: string): { shown: Set<number>; e
   for (const id of expand) shown.add(id);
   for (const id of subtrees) shown.add(id);
   return { shown, expand };
+}
+
+/** The appearance a node shows: its own setting, else its nearest ancestor's; undefined for the file's. */
+export function appearanceOf(model: Model, settings: ReadonlyMap<number, AppearanceSetting>, id: number): AppearanceId | undefined {
+  for (let n = id; n >= 0; n = model.nodes[n].parent) {
+    const s = settings.get(n);
+    if (s) return s === 'file' ? undefined : s;
+  }
+}
+
+// The node's subtree takes the appearance; settings below it are dropped.
+function setAppearance(state: State, id: number | null, appearance: AppearanceId | null): ReadonlyMap<number, AppearanceSetting> {
+  const model = state.model;
+  if (!model) return state.appearances;
+  if (id === null) return new Map(appearance ? model.roots.map((r) => [r, appearance]) : []);
+  const next = new Map(state.appearances);
+  const stack = [id];
+  while (stack.length) {
+    const n = stack.pop()!;
+    next.delete(n);
+    stack.push(...model.nodes[n].children);
+  }
+  const parent = model.nodes[id].parent;
+  const inherited = parent >= 0 ? appearanceOf(model, next, parent) : undefined;
+  if (appearance) next.set(id, appearance);
+  else if (inherited) next.set(id, 'file');
+  return next;
 }
