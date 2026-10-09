@@ -360,6 +360,11 @@ input[type='checkbox'] { accent-color: var(--accent); margin: 0; }
 .swatch { flex: none; width: 14px; height: 14px; margin-right: 8px; border-radius: 50%; box-shadow: inset 0 0 0 0.5px rgb(0 0 0 / 0.35); }
 .menu-sep { margin: 5px 10px; border: 0; border-top: 1px solid var(--hairline); }
 .menu-item kbd { margin-left: auto; color: var(--text-3); font: inherit; }
+/* Submenu rows: the current value, then an arrow; highlighted while their submenu is open. */
+.menu-item .menu-value { margin-left: auto; padding-left: 16px; color: var(--text-3); }
+.menu-item.submenu > svg { color: var(--text-3); }
+.menu-item.submenu:has(+ .menu:popover-open):not(:disabled) { background: var(--menu-hover); color: #fff; }
+.menu-item.submenu:is(:hover, :has(+ .menu:popover-open)):not(:disabled) :is(.menu-value, svg) { color: inherit; }
 .menu-row { display: flex; align-items: center; gap: 6px; padding: 4px 6px; }
 .menu-row button { flex: 1; }
 

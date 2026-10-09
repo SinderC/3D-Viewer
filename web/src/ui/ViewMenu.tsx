@@ -1,6 +1,6 @@
 import { useEffect, useState, type Dispatch, type RefObject } from 'react';
 import type { UpAxis, Viewer } from '../viewer/Viewer';
-import { Menu, MenuItem, MenuChoices } from './Menu';
+import { Menu, MenuItem, MenuSubChoices } from './Menu';
 import type { Action, State } from './state';
 import { MAC } from './Toolbar';
 
@@ -98,11 +98,9 @@ export function ViewMenu({ state, dispatch, viewer, prefs, narrow, onHelp }: Pro
         </>
       )}
       <hr className="menu-sep" />
-      <MenuChoices label="Up axis" options={UP_AXES} value={prefs.upAxis} onChange={prefs.setUpAxis} />
-      <hr className="menu-sep" />
-      <MenuChoices label="Theme" options={THEMES} value={prefs.theme} onChange={prefs.setTheme} />
-      <hr className="menu-sep" />
-      <MenuChoices label="Toolbar size" options={BAR_SIZES} value={prefs.barSize} onChange={prefs.setBarSize} />
+      <MenuSubChoices label="Up axis" options={UP_AXES} value={prefs.upAxis} onChange={prefs.setUpAxis} />
+      <MenuSubChoices label="Theme" options={THEMES} value={prefs.theme} onChange={prefs.setTheme} />
+      <MenuSubChoices label="Toolbar size" options={BAR_SIZES} value={prefs.barSize} onChange={prefs.setBarSize} />
       <hr className="menu-sep" />
       <MenuItem label="Keyboard shortcuts" kbd="?" onClick={onHelp} />
     </Menu>

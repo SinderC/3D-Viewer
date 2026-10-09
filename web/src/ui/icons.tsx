@@ -29,6 +29,12 @@ export const Chevron = () => (
   </Icon>
 );
 
+export const ChevronRight = () => (
+  <Icon>
+    <path d="M6.5 5l3 3-3 3" />
+  </Icon>
+);
+
 export const CheckIcon = () => (
   <Icon>
     <path d="M3.5 8.5l3 3 6-7" />
