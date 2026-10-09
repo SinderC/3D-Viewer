@@ -77,6 +77,8 @@ export class Viewer {
   private readonly cube: ViewCube;
   private readonly triad: AxisTriad;
   private readonly pmi = new PmiLayer();
+  private readonly ghosts = new THREE.Group(); // translucent stand-ins for hidden parts
+  private ghost = false;
   private grid: THREE.GridHelper | null = null;
   private gridVisible = false;
 
@@ -97,6 +99,13 @@ export class Viewer {
   private rotateFrom: { x: number; y: number } | null = null;
 
   private readonly edgeMaterial = new THREE.LineBasicMaterial({ color: EDGE_COLOR });
+  private readonly ghostMaterial = new THREE.MeshStandardMaterial({
+    color: DEFAULT_COLOR,
+    transparent: true,
+    opacity: 0.15,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
   private readonly highlight = new THREE.MeshStandardMaterial({
     color: 0xff7d2d,
     emissive: 0x4a240d,
@@ -113,6 +122,7 @@ export class Viewer {
     this.renderer.localClippingEnabled = true;
     this.edgeMaterial.clippingPlanes = this.clipping;
     this.highlight.clippingPlanes = this.clipping;
+    this.ghostMaterial.clippingPlanes = this.clipping;
     container.appendChild(this.renderer.domElement);
 
     this.scene.background = new THREE.Color(this.theme.background);
@@ -125,6 +135,7 @@ export class Viewer {
     this.light.position.set(0.5, 1, 1);
     this.scene.add(this.modelRoot);
     this.scene.add(this.caps);
+    this.scene.add(this.ghosts);
 
     this.controls = this.createControls();
 
@@ -157,6 +168,7 @@ export class Viewer {
     this.triad.dispose();
     this.pmi.dispose();
     this.capOutline.dispose();
+    this.ghostMaterial.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }
@@ -254,6 +266,7 @@ export class Viewer {
     });
     this.materials.forEach((m) => m.dispose());
     this.removeGrid();
+    this.ghosts.clear();
     this.modelRoot.clear();
     this.nodeObjects = [];
     this.meshes = [];
@@ -273,8 +286,30 @@ export class Viewer {
 
   setHidden(hidden: ReadonlySet<number>): void {
     this.nodeObjects.forEach((o, id) => (o.visible = !hidden.has(id)));
+    this.updateGhosts();
     this.updateCaps();
     this.requestRender();
+  }
+
+  /** Draw hidden parts as translucent ghosts, for context; they cannot be picked or measured. */
+  setGhost(on: boolean): void {
+    this.ghost = on;
+    this.updateGhosts();
+    this.requestRender();
+  }
+
+  // Ghosts share the parts' geometry and copy their placement; hidden parts themselves stay invisible.
+  private updateGhosts(): void {
+    this.ghosts.clear();
+    if (!this.ghost) return;
+    for (const m of this.meshes) {
+      if (isShown(m)) continue;
+      const g = new THREE.Mesh(m.geometry, this.ghostMaterial);
+      g.matrixAutoUpdate = false;
+      g.matrix.copy(m.matrixWorld);
+      g.raycast = () => {};
+      this.ghosts.add(g);
+    }
   }
 
   setDisplayStyle(style: DisplayStyle): void {

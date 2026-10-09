@@ -73,6 +73,7 @@ export const SHORTCUTS: Shortcut[] = [
       if (state.model && state.selected !== null) dispatch({ type: 'setHidden', hidden: isolate(state.model, state.selected) });
     },
   },
+  { key: 'x', label: 'Ghost hidden parts', group: 'Parts', run: (c) => c.dispatch({ type: 'toggleGhost' }) },
   { key: 'H', label: 'Show all', group: 'Parts', run: (c) => c.dispatch({ type: 'setHidden', hidden: new Set() }) },
   {
     key: 'm',

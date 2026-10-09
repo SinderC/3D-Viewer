@@ -60,6 +60,7 @@ export function ViewMenu({ state, dispatch, viewer, prefs, narrow, onHelp }: Pro
       <MenuItem label="View cube" checked={prefs.cube} onClick={prefs.toggleCube} />
       <MenuItem label="Axes" checked={prefs.axes} onClick={prefs.toggleAxes} />
       <MenuItem label="Ground grid" kbd="G" checked={state.grid} onClick={() => dispatch({ type: 'toggleGrid' })} />
+      <MenuItem label="Ghost hidden parts" kbd="X" checked={state.ghost} onClick={() => dispatch({ type: 'toggleGhost' })} />
       <MenuItem label="Orthographic" kbd="O" checked={state.ortho} onClick={() => dispatch({ type: 'toggleOrtho' })} />
       <MenuItem
         label="PMI"

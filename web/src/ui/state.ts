@@ -21,6 +21,7 @@ export interface State {
   display: DisplayStyle;
   ortho: boolean;
   grid: boolean;
+  ghost: boolean; // draw hidden parts translucent
   pmi: boolean; // show PMI
   hiddenPmi: ReadonlySet<number>;
   selectedPmi: number | null;
@@ -42,6 +43,7 @@ export type Action =
   | { type: 'setDisplay'; display: DisplayStyle }
   | { type: 'toggleOrtho' }
   | { type: 'toggleGrid' }
+  | { type: 'toggleGhost' }
   | { type: 'togglePmi' }
   | { type: 'setHiddenPmi'; hidden: ReadonlySet<number> }
   | { type: 'selectPmi'; index: number | null }
@@ -60,6 +62,7 @@ export const initialState: State = {
   display: 'shadedEdges',
   ortho: true,
   grid: false,
+  ghost: false,
   pmi: true,
   hiddenPmi: new Set(),
   selectedPmi: null,
@@ -67,11 +70,12 @@ export const initialState: State = {
 };
 
 // View preferences survive opening and closing files.
-const keepPrefs = ({ display, ortho, grid, pmi, measureMode }: State): State => ({
+const keepPrefs = ({ display, ortho, grid, ghost, pmi, measureMode }: State): State => ({
   ...initialState,
   display,
   ortho,
   grid,
+  ghost,
   pmi,
   measureMode,
 });
@@ -116,6 +120,8 @@ export function reducer(state: State, action: Action): State {
       return { ...state, ortho: !state.ortho };
     case 'toggleGrid':
       return { ...state, grid: !state.grid };
+    case 'toggleGhost':
+      return { ...state, ghost: !state.ghost };
     case 'togglePmi':
       return { ...state, pmi: !state.pmi };
     case 'setHiddenPmi':

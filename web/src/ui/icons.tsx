@@ -127,6 +127,13 @@ export const MeasureIcon = () => (
   </Icon>
 );
 
+export const GhostIcon = () => (
+  <Icon>
+    <path d={CUBE} strokeDasharray="2 2" />
+    <path d={CUBE_FRONT_EDGES} strokeDasharray="2 2" />
+  </Icon>
+);
+
 export const ShowAllIcon = () => (
   <Icon>
     <path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z" />
