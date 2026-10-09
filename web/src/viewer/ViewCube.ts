@@ -10,7 +10,7 @@ export interface Face {
   up: THREE.Vector3; // world direction shown as "up" on the label
 }
 
-// Models are Z-up.
+// In the viewer's upright frame, which is Z-up.
 export const FACES: Face[] = [
   { label: 'Front', normal: new THREE.Vector3(0, -1, 0), up: new THREE.Vector3(0, 0, 1) },
   { label: 'Back', normal: new THREE.Vector3(0, 1, 0), up: new THREE.Vector3(0, 0, 1) },
@@ -89,10 +89,10 @@ export class ViewCube {
     container.append(this.root);
   }
 
-  /** Rotate the cube to match the camera. */
-  update(camera: THREE.Camera): void {
-    // World → camera rotation, then flip Y because CSS y points down.
-    this.view.makeRotationFromQuaternion(camera.quaternion).transpose().premultiply(this.flipY);
+  /** Rotate the cube to match the camera, given its orientation in the upright frame. */
+  update(orientation: THREE.Quaternion): void {
+    // Upright → camera rotation, then flip Y because CSS y points down.
+    this.view.makeRotationFromQuaternion(orientation).transpose().premultiply(this.flipY);
     this.cube.style.transform = css(this.view);
   }
 

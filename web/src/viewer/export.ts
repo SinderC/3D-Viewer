@@ -35,12 +35,13 @@ export function toStl(meshes: THREE.Mesh[]): Blob {
   return new Blob([view.buffer], { type: 'model/stl' });
 }
 
-/** GLB of the meshes with their colours and placement; instances share geometry. */
-export async function toGlb(meshes: THREE.Mesh[]): Promise<Blob> {
+/** GLB of the meshes with their colours and placement; instances share geometry. `upright` turns Z to the model's up axis. */
+export async function toGlb(meshes: THREE.Mesh[], upright: THREE.Quaternion): Promise<Blob> {
   const { GLTFExporter } = await import('three/examples/jsm/exporters/GLTFExporter.js');
   const root = new THREE.Group();
   root.scale.setScalar(0.001); // glTF is in metres
-  root.rotation.x = -Math.PI / 2; // and Y-up; models are Z-up
+  // and Y-up: the model's up axis to Z, then Z to Y.
+  root.quaternion.setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2).multiply(upright.clone().invert());
   for (const mesh of meshes) {
     const copy = new THREE.Mesh(mesh.geometry, mesh.userData.baseMaterial ?? mesh.material);
     copy.name = mesh.parent?.name ?? '';

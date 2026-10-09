@@ -33,10 +33,24 @@ export interface Section {
   normal?: [number, number, number]; // for 'face': the picked face's outward normal
 }
 
-// Models are Z-up (the bridge converts Y-up mesh formats).
-const Z_UP = new THREE.Vector3(0, 0, 1); // models are Z-up
+export type UpAxis = 'x' | '-x' | 'y' | '-y' | 'z' | '-z';
+const UP_AXES: Record<UpAxis, THREE.Vector3> = {
+  x: new THREE.Vector3(1, 0, 0),
+  '-x': new THREE.Vector3(-1, 0, 0),
+  y: new THREE.Vector3(0, 1, 0),
+  '-y': new THREE.Vector3(0, -1, 0),
+  z: new THREE.Vector3(0, 0, 1),
+  '-z': new THREE.Vector3(0, 0, -1),
+};
 
-// Directions from the target towards the camera.
+// The standard views, the ViewCube, the grid, the shadow and the lights are laid out Z-up, in the
+// "upright" frame, which is turned so its Z is the chosen up axis (Z by default; the bridge converts
+// Y-up mesh formats). Model coordinates are never changed.
+const Z_UP = new THREE.Vector3(0, 0, 1);
+const Y_AXIS = new THREE.Vector3(0, 1, 0);
+const SUN = new THREE.Vector3(-1, -1.5, 3); // from above, front left; a directional light only needs the direction
+
+// Directions from the target towards the camera, in the upright frame.
 const VIEW_DIRS: Record<ViewName, THREE.Vector3> = {
   iso: new THREE.Vector3(1, -1, 0.8),
   front: new THREE.Vector3(0, -1, 0),
@@ -94,6 +108,7 @@ export class Viewer {
   private readonly environment: THREE.Texture;
   private readonly finishes: Finishes;
   private readonly modelRoot = new THREE.Group();
+  private readonly upright = new THREE.Quaternion(); // upright frame → world
   private readonly measure: Measure;
   private readonly clipPlane = new THREE.Plane();
   // Shared by all clipped materials; empty when the section is off. Caps are not clipped.
@@ -167,7 +182,6 @@ export class Viewer {
     this.perspective.up.copy(Z_UP);
     this.ortho.up.copy(Z_UP);
     this.scene.add(this.hemisphere);
-    this.sun.position.set(-1, -1.5, 3); // from above, front left; a directional light only needs the direction
     this.scene.add(this.sun);
     this.scene.add(this.camera);
     this.camera.add(this.light);
@@ -180,8 +194,9 @@ export class Viewer {
 
     this.measure = new Measure(this.scene, container);
     this.measure.onChange = this.requestRender;
-    this.cube = new ViewCube(container, VIEW_DIRS.iso, (dir) => this.frame(dir, this.visibleBounds(), true, Z_UP));
+    this.cube = new ViewCube(container, VIEW_DIRS.iso, (dir) => this.standardView(dir, this.visibleBounds(), true));
     this.triad = new AxisTriad(container);
+    this.setUpAxis('z');
 
     const canvas = this.renderer.domElement;
     canvas.addEventListener('pointerdown', (e) => (this.pointerDown = { x: e.clientX, y: e.clientY }));
@@ -278,7 +293,7 @@ export class Viewer {
     this.pmi.build(model, this.nodeObjects, this.modelRoot); // after the bounds: PMI does not count for fitting
     this.addGrid();
     this.setDisplayStyle(this.display);
-    this.frame(VIEW_DIRS.iso, this.bounds, false, Z_UP);
+    this.standardView(VIEW_DIRS.iso, this.bounds, false);
     this.cube.setVisible(true);
     this.triad.setVisible(true);
   }
@@ -484,7 +499,7 @@ export class Viewer {
   private updateRealistic(): void {
     if (this.display !== 'realistic' || !this.effects || !this.contactShadow) return;
     const bounds = this.visibleBounds();
-    this.contactShadow.update(this.renderer, this.modelRoot, bounds, this.pmi.all);
+    this.contactShadow.update(this.renderer, this.modelRoot, this.toUpright(bounds), this.upright, this.pmi.all);
     this.effects.setOcclusionRadius(0.04 * bounds.getSize(new THREE.Vector3()).length());
     this.requestRender();
   }
@@ -522,8 +537,28 @@ export class Viewer {
     this.requestRender();
   }
 
+  /** Which model axis points up in the standard views, the ViewCube, the grid and the shadow. */
+  setUpAxis(axis: UpAxis): void {
+    this.upright.setFromUnitVectors(Z_UP, UP_AXES[axis]);
+    this.sun.position.copy(SUN).applyQuaternion(this.upright);
+    // The sky side, which three.js puts at +Y (the back) by default; kept relative to the upright frame.
+    this.hemisphere.position.copy(Y_AXIS).applyQuaternion(this.upright);
+    if (this.grid) {
+      this.removeGrid();
+      this.addGrid();
+    }
+    this.updateRealistic();
+    if (!this.bounds.isEmpty()) this.setView('iso');
+    this.requestRender();
+  }
+
+  /** A world box in the upright frame; exact, as the frame turns in quarter turns. */
+  private toUpright(box: THREE.Box3): THREE.Box3 {
+    return box.clone().applyMatrix4(new THREE.Matrix4().makeRotationFromQuaternion(this.upright.clone().invert()));
+  }
+
   private addGrid(): void {
-    this.grid = makeGrid(this.bounds, this.theme.grid);
+    this.grid = makeGrid(this.toUpright(this.bounds), this.upright, this.theme.grid);
     this.grid.visible = this.gridVisible;
     this.scene.add(this.grid);
   }
@@ -627,7 +662,12 @@ export class Viewer {
   // Camera
 
   setView(view: ViewName): void {
-    this.frame(VIEW_DIRS[view], this.visibleBounds(), true, Z_UP);
+    this.standardView(VIEW_DIRS[view], this.visibleBounds(), true);
+  }
+
+  // Look from `dir` in the upright frame with its Z up on screen.
+  private standardView(dir: THREE.Vector3, box: THREE.Box3, animate: boolean): void {
+    this.frame(dir.clone().applyQuaternion(this.upright), box, animate, Z_UP.clone().applyQuaternion(this.upright));
   }
 
   /** Fit the visible geometry while keeping the current viewing direction. */
@@ -686,13 +726,14 @@ export class Viewer {
   };
 
   // Look at the box from `dir` (target towards camera), optionally turning and zooming there smoothly.
-  // `up` is the world direction to show up on screen (Z for the standard views); omitted keeps the current one.
+  // `up` is the world direction to show up on screen (the up axis for the standard views); omitted keeps the current one.
   private frame(direction: THREE.Vector3, box: THREE.Box3, animate = false, up?: THREE.Vector3): void {
     cancelAnimationFrame(this.animation);
     const dir = direction.clone().normalize();
     const upDir = up?.clone() ?? this.camera.up.clone();
-    // Looking along the up axis: show +Y up from above and -Y from below, as the ViewCube labels.
-    if (Math.abs(upDir.clone().normalize().dot(dir)) > 0.9999) upDir.set(0, Math.sign(upDir.dot(dir)), 0);
+    // Looking along the up axis: show the upright +Y up from above and -Y from below, as the ViewCube labels.
+    if (Math.abs(upDir.clone().normalize().dot(dir)) > 0.9999)
+      upDir.copy(Y_AXIS).applyQuaternion(this.upright).multiplyScalar(Math.sign(upDir.dot(dir)));
 
     const sphere = box.getBoundingSphere(new THREE.Sphere());
     const r = Math.max(sphere.radius, 1e-3);
@@ -931,7 +972,7 @@ export class Viewer {
   /** The shown parts, as placed now (exploded too), without PMI. */
   exportModel(format: 'stl' | 'glb'): Promise<Blob> {
     const shown = this.meshes.filter(isShown);
-    return format === 'stl' ? Promise.resolve(toStl(shown)) : toGlb(shown);
+    return format === 'stl' ? Promise.resolve(toStl(shown)) : toGlb(shown, this.upright);
   }
 
   /** The current view as a PNG: the canvas only, without the HTML overlays (ViewCube, axes, labels). */
@@ -957,7 +998,7 @@ export class Viewer {
     requestAnimationFrame(() => {
       this.renderQueued = false;
       this.draw();
-      this.cube.update(this.camera);
+      this.cube.update(this.upright.clone().invert().multiply(this.camera.quaternion));
       this.triad.update(this.camera);
       this.measure.updateLabel(this.camera, this.renderer.domElement);
     });
@@ -977,15 +1018,17 @@ function lastAtOrBelow(sorted: Uint32Array, value: number): number {
 }
 
 // Ground grid just below the model, 10–100 cells across with a round cell size (1, 10, 100… model units).
-function makeGrid(bounds: THREE.Box3, [centerColor, lineColor]: [number, number]): THREE.GridHelper {
+// `bounds` are in the upright frame, which `upright` turns to world.
+function makeGrid(bounds: THREE.Box3, upright: THREE.Quaternion, [centerColor, lineColor]: [number, number]): THREE.GridHelper {
   const size = bounds.getSize(new THREE.Vector3());
   const extent = 2 * Math.max(size.x, size.y, 1e-3);
   const cell = 10 ** Math.floor(Math.log10(extent / 10));
   const divisions = 2 * Math.ceil(extent / cell / 2); // even, so a grid line runs through the centre
   const grid = new THREE.GridHelper(divisions * cell, divisions, centerColor, lineColor);
-  grid.rotation.x = Math.PI / 2; // GridHelper lies in XZ; models are Z-up
+  grid.rotation.x = Math.PI / 2; // GridHelper lies in XZ; the upright frame is Z-up
+  grid.quaternion.premultiply(upright);
   const center = bounds.getCenter(new THREE.Vector3());
-  grid.position.set(center.x, center.y, bounds.min.z - extent * 1e-4); // below the bottom faces, no z-fighting
+  grid.position.set(center.x, center.y, bounds.min.z - extent * 1e-4).applyQuaternion(upright); // below the bottom faces, no z-fighting
   grid.raycast = () => {};
   return grid;
 }

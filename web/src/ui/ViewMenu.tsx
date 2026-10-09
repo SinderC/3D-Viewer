@@ -1,5 +1,5 @@
 import { useEffect, useState, type Dispatch, type RefObject } from 'react';
-import type { Viewer } from '../viewer/Viewer';
+import type { UpAxis, Viewer } from '../viewer/Viewer';
 import { Menu, MenuItem, MenuChoices } from './Menu';
 import type { Action, State } from './state';
 import { MAC } from './Toolbar';
@@ -8,6 +8,7 @@ export const THEMES = { system: 'System', light: 'Light', dark: 'Dark' };
 export type ThemeChoice = keyof typeof THEMES;
 export const BAR_SIZES = { small: 'Small', regular: 'Regular', large: 'Large' };
 export type BarSize = keyof typeof BAR_SIZES;
+export const UP_AXES: Record<UpAxis, string> = { z: '+Z', y: '+Y', x: '+X', '-z': '−Z', '-y': '−Y', '-x': '−X' };
 
 /** View settings kept across sessions (App.tsx). */
 export interface ViewPrefs {
@@ -23,6 +24,8 @@ export interface ViewPrefs {
   setTheme: (theme: ThemeChoice) => void;
   barSize: BarSize;
   setBarSize: (size: BarSize) => void;
+  upAxis: UpAxis;
+  setUpAxis: (axis: UpAxis) => void;
 }
 
 interface Props {
@@ -94,6 +97,8 @@ export function ViewMenu({ state, dispatch, viewer, prefs, narrow, onHelp }: Pro
           />
         </>
       )}
+      <hr className="menu-sep" />
+      <MenuChoices label="Up axis" options={UP_AXES} value={prefs.upAxis} onChange={prefs.setUpAxis} />
       <hr className="menu-sep" />
       <MenuChoices label="Theme" options={THEMES} value={prefs.theme} onChange={prefs.setTheme} />
       <hr className="menu-sep" />

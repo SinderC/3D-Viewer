@@ -15,7 +15,7 @@ import { useStored, useStoredFlag } from './storage';
 import { Toolbar } from './Toolbar';
 import { ViewBar } from './ViewBar';
 import { ViewerCanvas } from './ViewerCanvas';
-import { BAR_SIZES, THEMES, ViewMenu, type ViewPrefs } from './ViewMenu';
+import { BAR_SIZES, THEMES, UP_AXES, ViewMenu, type ViewPrefs } from './ViewMenu';
 
 // Minimal typing for the File Handling API (installed PWA "Open with").
 interface LaunchParams {
@@ -54,6 +54,7 @@ export function App() {
   const [quality, setQuality] = useStored<Quality>('quality', QUALITY, 'normal');
   const [themeChoice, setTheme] = useStored('theme', THEMES, 'system');
   const [barSize, setBarSize] = useStored('viewbar-size', BAR_SIZES, 'regular');
+  const [upAxis, setUpAxis] = useStored('up-axis', UP_AXES, 'z');
   const [showSidebar, toggleSidebar] = useStoredFlag('sidebar');
   const [showProps, toggleProps] = useStoredFlag('properties');
   const [showCube, toggleCube] = useStoredFlag('viewcube');
@@ -74,6 +75,8 @@ export function App() {
     setTheme,
     barSize,
     setBarSize,
+    upAxis,
+    setUpAxis,
   };
   const propsPanel = showProps && !narrow;
   const lastFile = useRef<File | null>(null);
@@ -216,7 +219,7 @@ export function App() {
       />
       {showSidebar && <Sidebar state={state} dispatch={dispatch} info={narrow} onCollapse={toggleSidebar} />}
       <main className="stage">
-        <ViewerCanvas state={state} dispatch={dispatch} viewerRef={viewer} theme={theme} />
+        <ViewerCanvas state={state} dispatch={dispatch} viewerRef={viewer} theme={theme} upAxis={upAxis} />
         {status === 'ready' && <ViewBar state={state} dispatch={dispatch} viewer={viewer} size={barSize} />}
         {status === 'idle' && (
           <div className="overlay">

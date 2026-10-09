@@ -149,10 +149,17 @@ export class ContactShadow {
   }
 
   /**
-   * Redraw for `root` within `bounds` (world, Z-up), with the ground at the bounds' bottom. `exclude` lists
-   * objects under `root` that must not cast (annotations floating around the model).
+   * Redraw for `root` within `bounds`, with the ground at the bounds' bottom. `bounds` are in a Z-up frame
+   * that `upright` turns to world. `exclude` lists objects under `root` that must not cast (annotations
+   * floating around the model).
    */
-  update(renderer: THREE.WebGLRenderer, root: THREE.Object3D, bounds: THREE.Box3, exclude: THREE.Object3D[]): void {
+  update(
+    renderer: THREE.WebGLRenderer,
+    root: THREE.Object3D,
+    bounds: THREE.Box3,
+    upright: THREE.Quaternion,
+    exclude: THREE.Object3D[],
+  ): void {
     if (bounds.isEmpty()) return;
     const size = bounds.getSize(new THREE.Vector3());
     const center = bounds.getCenter(new THREE.Vector3());
@@ -161,11 +168,12 @@ export class ContactShadow {
     const ground = bounds.min.z - extent * 1e-4; // just below the bottom faces, like the grid
 
     Object.assign(this.camera, { left: -extent / 2, right: extent / 2, top: extent / 2, bottom: -extent / 2, near: 0, far: reach });
-    this.camera.position.set(center.x, center.y, ground);
-    this.camera.up.set(0, 1, 0);
-    this.camera.lookAt(center.x, center.y, ground + 1);
+    this.camera.position.set(center.x, center.y, ground).applyQuaternion(upright);
+    this.camera.up.set(0, 1, 0).applyQuaternion(upright);
+    this.camera.lookAt(new THREE.Vector3(center.x, center.y, ground + 1).applyQuaternion(upright));
     this.camera.updateProjectionMatrix();
-    this.mesh.position.set(center.x, center.y, ground);
+    this.mesh.position.set(center.x, center.y, ground).applyQuaternion(upright);
+    this.mesh.quaternion.copy(upright);
     this.mesh.scale.set(-extent, extent, 1);
 
     // Render the model alone: borrow it into the shadow scene for the draw.
