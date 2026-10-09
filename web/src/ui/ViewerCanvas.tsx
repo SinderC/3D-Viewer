@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type Dispatch } from 'react';
-import { Viewer } from '../viewer/Viewer';
+import { Viewer, type Theme } from '../viewer/Viewer';
 import { defaultView } from '../core/model';
 import { displayStyle, measureMode, type Action, type State } from './state';
 
@@ -7,10 +7,11 @@ interface Props {
   state: State;
   dispatch: Dispatch<Action>;
   viewerRef: React.RefObject<Viewer | null>;
+  theme: Theme;
 }
 
 // Mounts the Three.js viewer and keeps it in sync with React state.
-export function ViewerCanvas({ state, dispatch, viewerRef }: Props) {
+export function ViewerCanvas({ state, dispatch, viewerRef, theme }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const [viewer, setViewer] = useState<Viewer | null>(null);
   const { model, hidden, selected, tool, unit, section, ortho, grid, pmi, hiddenPmi, selectedPmi, view } = state;
@@ -37,6 +38,7 @@ export function ViewerCanvas({ state, dispatch, viewerRef }: Props) {
   useEffect(() => viewer?.setMeasureMode(mode), [viewer, model, mode]);
   useEffect(() => viewer?.setUnit(unit), [viewer, unit]);
   useEffect(() => viewer?.setSection(section), [viewer, model, section]);
+  useEffect(() => viewer?.setTheme(theme), [viewer, theme]);
   useEffect(() => viewer?.setDisplayStyle(display), [viewer, display]);
   useEffect(() => viewer?.setOrthographic(ortho), [viewer, ortho]);
   useEffect(() => viewer?.setGridVisible(grid), [viewer, grid]);

@@ -45,7 +45,12 @@ const AXES: Record<Axis, THREE.Vector3> = {
 };
 const DEFAULT_COLOR = new THREE.Color(0xb8bcc4);
 const EDGE_COLOR = 0x1e2026;
-const WIRE_COLOR = 0xc8ccd4; // edges alone must stand out against the background
+export type Theme = 'dark' | 'light';
+// Canvas colours per UI theme; wireframe edges alone must stand out against the background.
+const THEMES: Record<Theme, { background: number; grid: [number, number]; wire: number; pmi: number }> = {
+  dark: { background: 0x2a2d34, grid: [0x565b66, 0x3a3e46], wire: 0xc8ccd4, pmi: 0x4fb4ff },
+  light: { background: 0xeef0f3, grid: [0xb4b9c2, 0xd4d8de], wire: 0x3a3e46, pmi: 0x1f78d1 },
+};
 const ANIMATION_MS = 300;
 const CLICK_TOLERANCE_PX = 4;
 const EDGE_PICK_PX = 6;
@@ -84,6 +89,7 @@ export class Viewer {
   private selected: number | null = null;
   private tool: Tool = 'select';
   private display: DisplayStyle = 'shadedEdges';
+  private theme = THEMES.dark;
   private animation = 0;
   private renderQueued = false;
   private pointerDown: { x: number; y: number } | null = null;
@@ -109,7 +115,8 @@ export class Viewer {
     this.highlight.clippingPlanes = this.clipping;
     container.appendChild(this.renderer.domElement);
 
-    this.scene.background = new THREE.Color(0x2a2d34);
+    this.scene.background = new THREE.Color(this.theme.background);
+    this.pmi.setColor(this.theme.pmi);
     this.perspective.up.copy(Z_UP);
     this.ortho.up.copy(Z_UP);
     this.scene.add(new THREE.HemisphereLight(0xffffff, 0x50545c, 1.4));
@@ -207,9 +214,7 @@ export class Viewer {
     this.modelRoot.updateMatrixWorld(true);
     this.bounds.setFromObject(this.modelRoot);
     this.pmi.build(model, this.nodeObjects, this.modelRoot); // after the bounds: PMI does not count for fitting
-    this.grid = makeGrid(this.bounds);
-    this.grid.visible = this.gridVisible;
-    this.scene.add(this.grid);
+    this.addGrid();
     this.setDisplayStyle(this.display);
     this.frame(VIEW_DIRS.iso, this.bounds, false, Z_UP);
     this.cube.setVisible(true);
@@ -247,11 +252,7 @@ export class Viewer {
       g.dispose();
     });
     this.materials.forEach((m) => m.dispose());
-    if (this.grid) {
-      this.scene.remove(this.grid);
-      this.grid.dispose();
-      this.grid = null;
-    }
+    this.removeGrid();
     this.modelRoot.clear();
     this.nodeObjects = [];
     this.meshes = [];
@@ -281,7 +282,7 @@ export class Viewer {
     // Invisible materials are still raycast, so wireframe parts stay pickable.
     this.materials.forEach((m) => (m.visible = faces));
     this.edgeLines.forEach((l) => (l.visible = style !== 'shaded'));
-    this.edgeMaterial.color.set(faces ? EDGE_COLOR : WIRE_COLOR);
+    this.edgeMaterial.color.set(faces ? EDGE_COLOR : this.theme.wire);
     this.updateCaps();
     this.requestRender();
   }
@@ -303,6 +304,32 @@ export class Viewer {
   lookAlong(direction: readonly [number, number, number], up: readonly [number, number, number], animate = true): void {
     const box = this.visibleBounds().union(this.pmi.visibleBounds());
     this.frame(new THREE.Vector3(...direction).negate(), box, animate, new THREE.Vector3(...up));
+  }
+
+  setTheme(theme: Theme): void {
+    this.theme = THEMES[theme];
+    (this.scene.background as THREE.Color).set(this.theme.background);
+    if (this.display === 'wireframe') this.edgeMaterial.color.set(this.theme.wire);
+    this.pmi.setColor(this.theme.pmi);
+    // GridHelper bakes its colours into the geometry: rebuild it.
+    if (this.grid) {
+      this.removeGrid();
+      this.addGrid();
+    }
+    this.requestRender();
+  }
+
+  private addGrid(): void {
+    this.grid = makeGrid(this.bounds, this.theme.grid);
+    this.grid.visible = this.gridVisible;
+    this.scene.add(this.grid);
+  }
+
+  private removeGrid(): void {
+    if (!this.grid) return;
+    this.scene.remove(this.grid);
+    this.grid.dispose();
+    this.grid = null;
   }
 
   setGridVisible(visible: boolean): void {
@@ -711,12 +738,12 @@ function lastAtOrBelow(sorted: Uint32Array, value: number): number {
 }
 
 // Ground grid just below the model, 10–100 cells across with a round cell size (1, 10, 100… model units).
-function makeGrid(bounds: THREE.Box3): THREE.GridHelper {
+function makeGrid(bounds: THREE.Box3, [centerColor, lineColor]: [number, number]): THREE.GridHelper {
   const size = bounds.getSize(new THREE.Vector3());
   const extent = 2 * Math.max(size.x, size.y, 1e-3);
   const cell = 10 ** Math.floor(Math.log10(extent / 10));
   const divisions = 2 * Math.ceil(extent / cell / 2); // even, so a grid line runs through the centre
-  const grid = new THREE.GridHelper(divisions * cell, divisions, 0x565b66, 0x3a3e46);
+  const grid = new THREE.GridHelper(divisions * cell, divisions, centerColor, lineColor);
   grid.rotation.x = Math.PI / 2; // GridHelper lies in XZ; models are Z-up
   const center = bounds.getCenter(new THREE.Vector3());
   grid.position.set(center.x, center.y, bounds.min.z - extent * 1e-4); // below the bottom faces, no z-fighting

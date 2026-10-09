@@ -4,13 +4,12 @@ import * as THREE from 'three';
 import { faceTriangles, type Model } from '../core/model';
 import { isShown } from './objects';
 
-const PMI_COLOR = 0x4fb4ff;
 const SELECTED_COLOR = 0xff7d2d;
 
 export class PmiLayer {
-  private readonly line = new THREE.LineBasicMaterial({ color: PMI_COLOR });
+  private readonly line = new THREE.LineBasicMaterial();
   private readonly selectedLine = new THREE.LineBasicMaterial({ color: SELECTED_COLOR });
-  private readonly fill = new THREE.MeshBasicMaterial({ color: PMI_COLOR, side: THREE.DoubleSide });
+  private readonly fill = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
   private readonly selectedFill = new THREE.MeshBasicMaterial({ color: SELECTED_COLOR, side: THREE.DoubleSide });
   private readonly faceMaterial = new THREE.MeshBasicMaterial({
     color: SELECTED_COLOR,
@@ -87,6 +86,11 @@ export class PmiLayer {
     const box = new THREE.Box3();
     for (const objects of this.objects) for (const o of objects) if (isShown(o)) box.expandByObject(o);
     return box;
+  }
+
+  setColor(color: number): void {
+    this.line.color.set(color);
+    this.fill.color.set(color);
   }
 
   clear(): void {

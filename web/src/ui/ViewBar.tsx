@@ -18,12 +18,14 @@ import {
   ZoomSelectionIcon,
 } from './icons';
 import { Menu } from './Menu';
+import type { BarSize } from './ViewMenu';
 import { displayStyle, hasEdges, measureMode, type Action, type State } from './state';
 
 interface Props {
   state: State;
   dispatch: Dispatch<Action>;
   viewer: RefObject<Viewer | null>;
+  size: BarSize;
 }
 
 const VIEWS: Record<ViewName, string> = {
@@ -43,7 +45,7 @@ const DISPLAY: Record<DisplayStyle, { label: string; icon: ReactNode }> = {
 };
 
 // Camera and display controls floating over the bottom of the viewport.
-export function ViewBar({ state, dispatch, viewer }: Props) {
+export function ViewBar({ state, dispatch, viewer, size }: Props) {
   const { section } = state;
   const display = displayStyle(state);
   const edges = hasEdges(state.model);
@@ -51,7 +53,7 @@ export function ViewBar({ state, dispatch, viewer }: Props) {
   const noEdges = 'This model has no edges';
   const measuring = state.tool === 'measure';
   return (
-    <div className="viewbar">
+    <div className={`viewbar ${size}`}>
       <button className="icon" title="Fit all (F)" aria-label="Fit all" onClick={() => viewer.current?.fit()}>
         <FitIcon />
       </button>

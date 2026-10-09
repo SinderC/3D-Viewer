@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState } from 'react';
 import type { Viewer } from '../viewer/Viewer';
 import { EXTENSIONS, FORMATS, isSupported } from '../core/formats';
 import { loadModel } from '../worker/loadModel';
@@ -8,10 +8,11 @@ import { Properties } from './Properties';
 import { Sidebar } from './Sidebar';
 import { Splitter } from './Splitter';
 import { initialState, reducer, type State } from './state';
-import { load, save } from './storage';
+import { useStored, useStoredFlag } from './storage';
 import { Toolbar } from './Toolbar';
 import { ViewBar } from './ViewBar';
 import { ViewerCanvas } from './ViewerCanvas';
+import { BAR_SIZES, THEMES, ViewMenu, type ViewPrefs } from './ViewMenu';
 
 // Minimal typing for the File Handling API (installed PWA "Open with").
 interface LaunchParams {
@@ -23,13 +24,8 @@ declare global {
   }
 }
 
-const QUALITY_KEY = 'quality';
-const PROPS_KEY = 'properties';
 
-function storedQuality(): Quality {
-  const q = load(QUALITY_KEY);
-  return q && q in QUALITY ? (q as Quality) : 'normal';
-}
+const LIGHT = '(prefers-color-scheme: light)';
 
 // Windows this narrow stack the sidebar under the viewer (see styles.css) and show properties as a tab.
 const NARROW = '(max-width: 700px)';
@@ -52,9 +48,30 @@ export function App() {
   const viewer = useRef<Viewer | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
-  const [quality, setQuality] = useState<Quality>(storedQuality);
-  const [showProps, setShowProps] = useState(() => load(PROPS_KEY) !== 'hidden');
+  const [quality, setQuality] = useStored<Quality>('quality', QUALITY, 'normal');
+  const [themeChoice, setTheme] = useStored('theme', THEMES, 'system');
+  const [barSize, setBarSize] = useStored('viewbar-size', BAR_SIZES, 'regular');
+  const [showSidebar, toggleSidebar] = useStoredFlag('sidebar');
+  const [showProps, toggleProps] = useStoredFlag('properties');
+  const [showCube, toggleCube] = useStoredFlag('viewcube');
+  const [showAxes, toggleAxes] = useStoredFlag('axes');
   const narrow = useMediaQuery(NARROW);
+  const systemTheme = useMediaQuery(LIGHT) ? 'light' : 'dark';
+  const theme = themeChoice === 'system' ? systemTheme : themeChoice;
+  const prefs: ViewPrefs = {
+    sidebar: showSidebar,
+    toggleSidebar,
+    props: showProps,
+    toggleProps,
+    cube: showCube,
+    toggleCube,
+    axes: showAxes,
+    toggleAxes,
+    theme: themeChoice,
+    setTheme,
+    barSize,
+    setBarSize,
+  };
   const propsPanel = showProps && !narrow;
   const lastFile = useRef<File | null>(null);
   const loading = useRef<AbortController | null>(null);
@@ -65,7 +82,7 @@ export function App() {
       loading.current?.abort();
       const { signal } = (loading.current = new AbortController());
       lastFile.current = file;
-      dispatch({ type: 'loadStart', fileName: file.name });
+      dispatch({ type: 'loadStart', fileName: file.name, quality: q });
       if (!isSupported(file.name)) {
         dispatch({ type: 'failed', error: `Unsupported file type. Supported: ${EXTENSIONS.join(' ')}` });
         return;
@@ -96,14 +113,16 @@ export function App() {
   // Quality is applied at load time, so reload the open model with the new setting.
   const changeQuality = (q: Quality) => {
     setQuality(q);
-    save(QUALITY_KEY, q);
     if (lastFile.current) open(lastFile.current, q);
   };
 
-  const toggleProps = () => {
-    setShowProps(!showProps);
-    save(PROPS_KEY, showProps ? 'hidden' : null);
-  };
+  // Theme tokens in styles.css key off this; the browser chrome follows the background.
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    root.dataset.theme = theme;
+    const bg = getComputedStyle(root).getPropertyValue('--bg').trim();
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', bg);
+  }, [theme]);
 
   // Files opened via the OS when installed as a PWA.
   useEffect(() => {
@@ -137,7 +156,15 @@ export function App() {
   const { status } = state;
   return (
     <div
-      className={`app${propsPanel ? '' : ' no-props'}`}
+      className={[
+        'app',
+        !propsPanel && 'no-props',
+        !showSidebar && 'no-side',
+        !showCube && 'no-cube',
+        !showAxes && 'no-axes',
+      ]
+        .filter(Boolean)
+        .join(' ')}
       onDragOver={(e) => {
         e.preventDefault();
         setDragging(true);
@@ -158,7 +185,9 @@ export function App() {
         onQuality={changeQuality}
         showProps={showProps}
         onToggleProps={toggleProps}
-      />
+      >
+        <ViewMenu state={state} dispatch={dispatch} viewer={viewer} prefs={prefs} narrow={narrow} />
+      </Toolbar>
       <input
         ref={fileInput}
         type="file"
@@ -170,10 +199,10 @@ export function App() {
           e.target.value = '';
         }}
       />
-      <Sidebar state={state} dispatch={dispatch} info={narrow} />
+      {showSidebar && <Sidebar state={state} dispatch={dispatch} info={narrow} onCollapse={toggleSidebar} />}
       <main className="stage">
-        <ViewerCanvas state={state} dispatch={dispatch} viewerRef={viewer} />
-        {status === 'ready' && <ViewBar state={state} dispatch={dispatch} viewer={viewer} />}
+        <ViewerCanvas state={state} dispatch={dispatch} viewerRef={viewer} theme={theme} />
+        {status === 'ready' && <ViewBar state={state} dispatch={dispatch} viewer={viewer} size={barSize} />}
         {status === 'idle' && (
           <div className="overlay">
             <div className="welcome">
@@ -210,7 +239,7 @@ export function App() {
       </main>
       {propsPanel && (
         <aside className="props">
-          <Splitter variable="--props-w" edge="left" />
+          <Splitter variable="--props-w" edge="left" onCollapse={toggleProps} />
           <div className="tree">
             <Properties state={state} />
           </div>
@@ -230,11 +259,16 @@ function LoadProgress({ progress }: { progress: State['progress'] }) {
   }, []);
   const seconds = Math.floor((performance.now() - t0) / 1000);
   const stage = progress ? (STAGES[progress.stage] ?? progress.stage) : 'Starting';
-  const percent = progress && progress.percent >= 0 ? ` ${progress.percent}%` : '…';
+  const known = progress !== undefined && progress.percent >= 0;
   return (
-    <p className="muted">
-      {stage}
-      {percent} · {seconds} s
-    </p>
+    <>
+      <div className={`progress${known ? '' : ' indeterminate'}`}>
+        <div style={known ? { transform: `scaleX(${progress.percent / 100})` } : undefined} />
+      </div>
+      <p className="muted progress-text">
+        {stage}
+        {known ? ` ${progress.percent}%` : '…'} · {seconds} s
+      </p>
+    </>
   );
 }

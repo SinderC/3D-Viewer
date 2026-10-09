@@ -1,6 +1,7 @@
+import type { ReactNode } from 'react';
 import { QUALITY, type Quality } from '../worker/protocol';
 import { Chevron, GitHubIcon, PropertiesIcon } from './icons';
-import { Menu } from './Menu';
+import { Menu, MenuChoices, MenuItem } from './Menu';
 import type { State } from './state';
 
 interface Props {
@@ -11,31 +12,33 @@ interface Props {
   onQuality: (q: Quality) => void;
   showProps: boolean;
   onToggleProps: () => void;
+  /** Menus after File (View). */
+  children: ReactNode;
 }
 
-const MOD = /Mac|iPhone|iPad/.test(navigator.userAgent) ? '⌘' : 'Ctrl+';
+export const MAC = /Mac|iPhone|iPad/.test(navigator.userAgent);
+const MOD = MAC ? '⌘' : 'Ctrl+';
+const QUALITY_LABELS = Object.fromEntries(Object.entries(QUALITY).map(([id, q]) => [id, q.label])) as Record<Quality, string>;
 
-export function Toolbar({ status, onOpen, onClose, quality, onQuality, showProps, onToggleProps }: Props) {
+export function Toolbar({ status, onOpen, onClose, quality, onQuality, showProps, onToggleProps, children }: Props) {
   return (
     <header className="toolbar">
+      <span className="app-name">Open CAD Viewer</span>
       <Menu title="File" label={<>File <Chevron /></>} className="menu-trigger">
-        <button className="menu-item" onClick={onOpen}>
-          Open… <kbd>{MOD}O</kbd>
-        </button>
-        <button className="menu-item" onClick={onClose} disabled={status === 'idle'}>
-          Close
-        </button>
+        <MenuItem label="Open…" kbd={`${MOD}O`} onClick={onOpen} />
+        <MenuItem label="Close" disabled={status === 'idle'} onClick={onClose} />
+        <hr className="menu-sep" />
+        {/* Applied when a file is read: changing it reloads the open model. */}
+        <MenuChoices
+          label="Mesh quality"
+          options={QUALITY_LABELS}
+          value={quality}
+          disabled={status === 'loading'}
+          onChange={onQuality}
+        />
+        <p className="menu-note">Changing it reloads the open model.</p>
       </Menu>
-      <label title="Mesh quality (reloads the model)">
-        Quality{' '}
-        <select value={quality} disabled={status === 'loading'} onChange={(e) => onQuality(e.target.value as Quality)}>
-          {Object.entries(QUALITY).map(([id, { label }]) => (
-            <option key={id} value={id}>
-              {label}
-            </option>
-          ))}
-        </select>
-      </label>
+      {children}
       <button
         className="icon props-toggle"
         aria-pressed={showProps}

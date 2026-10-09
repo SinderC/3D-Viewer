@@ -29,6 +29,19 @@ export const Chevron = () => (
   </Icon>
 );
 
+export const CheckIcon = () => (
+  <Icon>
+    <path d="M3.5 8.5l3 3 6-7" />
+  </Icon>
+);
+
+export const IsolateIcon = () => (
+  <Icon>
+    <circle cx="8" cy="8" r="5.5" />
+    <circle cx="8" cy="8" r="2" />
+  </Icon>
+);
+
 export const PropertiesIcon = () => (
   <Icon>
     <rect x="1.75" y="2.5" width="12.5" height="11" rx="1.5" />

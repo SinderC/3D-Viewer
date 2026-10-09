@@ -2,10 +2,12 @@ import type { Model } from '../core/model';
 import type { UnitId } from '../core/units';
 import { MEASURE_MODES, type MeasureMode } from '../viewer/measure';
 import type { DisplayStyle, Section, Tool } from '../viewer/Viewer';
+import type { Quality } from '../worker/protocol';
 
 export interface State {
   status: 'idle' | 'loading' | 'ready' | 'error';
   fileName?: string;
+  quality?: Quality; // mesh quality the file is loaded with
   progress?: { stage: string; percent: number };
   error?: string;
   loadMs?: number;
@@ -26,7 +28,7 @@ export interface State {
 }
 
 export type Action =
-  | { type: 'loadStart'; fileName: string }
+  | { type: 'loadStart'; fileName: string; quality: Quality }
   | { type: 'progress'; stage: string; percent: number }
   | { type: 'loaded'; model: Model; ms: number }
   | { type: 'failed'; error: string }
@@ -87,7 +89,7 @@ export const measureMode = (state: State): MeasureMode =>
 export function reducer(state: State, action: Action): State {
   switch (action.type) {
     case 'loadStart':
-      return { ...keepPrefs(state), status: 'loading', fileName: action.fileName };
+      return { ...keepPrefs(state), status: 'loading', fileName: action.fileName, quality: action.quality };
     case 'progress':
       return { ...state, progress: { stage: action.stage, percent: action.percent } };
     case 'loaded':

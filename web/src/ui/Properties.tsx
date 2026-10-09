@@ -1,6 +1,8 @@
 import { Fragment, useState } from 'react';
 import { pmiInfo } from '../core/pmi';
 import { countInfo, failures, validationInfo, type Row } from '../core/product';
+import { QUALITY } from '../worker/protocol';
+import { Chevron } from './icons';
 import type { State } from './state';
 
 // Details of the selected PMI item or part, and of the file, in sections that stay open or
@@ -21,6 +23,7 @@ export function Properties({ state }: { state: State }) {
     ['Parts', `${model.protos.length} (${model.nodes.filter((n) => n.proto >= 0).length} instances)`],
     ['Triangles', model.triangles.toLocaleString()],
   ];
+  if (state.quality) file.push(['Mesh quality', QUALITY[state.quality].label]);
   if (model.counts.annotations !== undefined) file.push(['PMI', ...countInfo(model.pmi.length, model.counts.annotations)]);
   if (model.counts.views !== undefined) file.push(['Views', ...countInfo(model.views.length, model.counts.views)]);
   file.push(['Load time', `${((state.loadMs ?? 0) / 1000).toFixed(2)} s`]);
@@ -40,6 +43,7 @@ export function Properties({ state }: { state: State }) {
     return (
       <details key={name} className="section" open={!closed.has(name)} onToggle={(e) => toggle(name, e.currentTarget.open)}>
         <summary>
+          <Chevron />
           {name} {count && <span className="muted">{rows.length}</span>}
           {failed !== undefined && (failed ? <span className="fail">✗ {failed}</span> : <span className="pass">✓</span>)}
         </summary>

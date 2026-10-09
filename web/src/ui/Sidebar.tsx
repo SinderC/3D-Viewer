@@ -12,10 +12,12 @@ interface Props {
   dispatch: Dispatch<Action>;
   /** Show the properties as a tab, for narrow windows that have no properties panel. */
   info: boolean;
+  /** Dragging the edge well past the minimum width hides the sidebar. */
+  onCollapse: () => void;
 }
 
 // Model tree, and PMI and saved views when the file has them.
-export function Sidebar({ state, dispatch, info }: Props) {
+export function Sidebar({ state, dispatch, info, onCollapse }: Props) {
   const { model, unit } = state;
   const [tab, setTab] = useState<Tab>('model');
   useEffect(() => setTab('model'), [model]);
@@ -23,7 +25,7 @@ export function Sidebar({ state, dispatch, info }: Props) {
   if (!model) {
     return (
       <aside className="sidebar">
-        <Splitter variable="--side-w" edge="right" />
+        <Splitter variable="--side-w" edge="right" onCollapse={onCollapse} />
         <p className="hint">No model loaded.</p>
       </aside>
     );
@@ -38,7 +40,7 @@ export function Sidebar({ state, dispatch, info }: Props) {
 
   return (
     <aside className="sidebar">
-      <Splitter variable="--side-w" edge="right" />
+      <Splitter variable="--side-w" edge="right" onCollapse={onCollapse} />
       {tabs.length > 1 && (
         <div className="tabs" role="tablist">
           {tabs.map(([id, label]) => (

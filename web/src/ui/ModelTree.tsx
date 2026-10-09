@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type Dispatch } from 'react';
 import type { Model } from '../core/model';
+import { Chevron, IsolateIcon } from './icons';
 import { isolate, type Action } from './state';
 
 interface Props {
@@ -74,7 +75,7 @@ function Row({ id, depth, ctx }: { id: number; depth: number; ctx: RowContext })
         onClick={() => dispatch({ type: 'select', id: isSelected ? null : id })}
       >
         <button
-          className="caret"
+          className={`caret${open ? ' open' : ''}`}
           aria-label={open ? 'Collapse' : 'Expand'}
           style={{ visibility: node.children.length ? 'visible' : 'hidden' }}
           onClick={(e) => {
@@ -82,7 +83,7 @@ function Row({ id, depth, ctx }: { id: number; depth: number; ctx: RowContext })
             toggleExpand(id);
           }}
         >
-          {open ? '▾' : '▸'}
+          <Chevron />
         </button>
         <input
           type="checkbox"
@@ -97,12 +98,13 @@ function Row({ id, depth, ctx }: { id: number; depth: number; ctx: RowContext })
         <button
           className="isolate"
           title="Show only this"
+          aria-label="Show only this"
           onClick={(e) => {
             e.stopPropagation();
             dispatch({ type: 'setHidden', hidden: isolate(model, id) });
           }}
         >
-          ◎
+          <IsolateIcon />
         </button>
       </div>
       {open && node.children.map((c) => <Row key={c} id={c} depth={depth + 1} ctx={ctx} />)}
