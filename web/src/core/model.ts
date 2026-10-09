@@ -1,4 +1,5 @@
 // Model produced by the WASM bridge (see wasm/src/bridge.cpp) and decoded into typed arrays.
+import type { Material } from 'three';
 import { fileUnit, type UnitId } from './units';
 
 type Range = [offset: number, count: number];
@@ -92,6 +93,9 @@ export interface Proto {
   /** Per edge, EDGE_STRIDE values: kind (0 other, 1 line, 2 circle), length, radius, centre xyz, axis xyz. */
   edgeData: Float64Array;
   groups: { start: number; count: number; color: number }[];
+  /** Texture coordinates and per-vertex colours, from glTF only. */
+  uvs?: Float32Array;
+  vertexColors?: { array: Float32Array; itemSize: 3 | 4 };
 }
 
 export const FACE_STRIDE = 7;
@@ -123,6 +127,8 @@ export interface Model {
   views: SavedView[];
   products: Product[];
   counts: Counts;
+  /** Parallel to `colors`: the file's material where it says more than a colour (glTF textures, PBR). */
+  materials?: Material[];
 }
 
 /** The saved view a file opens in: its default camera, else an isometric view, else the first. */

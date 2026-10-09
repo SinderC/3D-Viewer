@@ -1,4 +1,4 @@
-// STEP / IGES / BREP / JT / glTF / OBJ / STL / VRML → mesh bridge for the browser.
+// STEP / IGES / BREP / JT / OBJ / STL / VRML → mesh bridge for the browser (glTF is read in the browser).
 //
 // readModel(bytes, fileName, options) returns { json, geometry, memory }:
 //   json     — model description (format, schema, units, node tree, prototypes, colors)
@@ -36,7 +36,6 @@
 #include <NCollection_Sequence.hxx>
 #include <Poly_PolygonOnTriangulation.hxx>
 #include <Poly_Triangulation.hxx>
-#include <RWGltf_CafReader.hxx>
 #include <RWObj_CafReader.hxx>
 #include <RWStl.hxx>
 #include <STEPCAFControl_Reader.hxx>
@@ -717,7 +716,7 @@ private:
     std::vector<std::pair<TopoDS_Shape, int>> entries;
     for (ShapeStyleMap::Iterator it(styles); it.More(); it.Next())
     {
-      // glTF (and the other mesh readers) give a visual material only, no surface colour.
+      // Mesh readers may give a visual material only, no surface colour.
       const XCAFPrs_Style& st = it.Value();
       if (st.IsSetColorSurf())
         entries.emplace_back(it.Key(), colorIndex(toRGBA(st.GetColorSurfRGBA())));
@@ -1171,7 +1170,7 @@ struct Source
   int annotations = -1, views = -1;
 };
 
-// OCCT's IGES reader, TKJT (and glTF buffers, read lazily by file name) need a real file: MEMFS.
+// OCCT's IGES and mesh readers and TKJT need a real file: MEMFS.
 class TempFile
 {
 public:
@@ -1567,21 +1566,6 @@ Source readMeshDoc(RWMesh_CafReader&              reader,
   return src;
 }
 
-Source readGltfDoc(const std::string& ext, const std::string& bytes, const Handle(TDocStd_Document)& doc, Progress& progress)
-{
-  RWGltf_CafReader reader; // glTF is defined in metres, Y-up
-  if (ext == ".glb")
-    return readMeshDoc(reader, {"glTF", {}, "METRE"}, ext, bytes, doc, progress);
-
-  // OCCT only decodes octet-stream data URIs; the spec also allows gltf-buffer.
-  static const std::string kSpecUri = "data:application/gltf-buffer;base64,";
-  static const std::string kOcctUri = "data:application/octet-stream;base64,";
-  std::string json = bytes;
-  for (size_t at = json.find(kSpecUri); at != std::string::npos; at = json.find(kSpecUri, at))
-    json.replace(at, kSpecUri.size(), kOcctUri);
-  return readMeshDoc(reader, {"glTF", {}, "METRE"}, ext, json, doc, progress);
-}
-
 Source readObjDoc(const std::string& bytes, const Handle(TDocStd_Document)& doc, Progress& progress)
 {
   RWObj_CafReader reader; // OBJ has no units; OCCT assumes Y-up
@@ -1719,8 +1703,6 @@ Source readDoc(std::string&                    bytes,
     return readStepDoc(bytes, doc, progress);
   if (ext == ".igs" || ext == ".iges")
     return readIgesDoc(bytes, doc, progress);
-  if (ext == ".gltf" || ext == ".glb")
-    return readGltfDoc(ext, bytes, doc, progress);
   if (ext == ".obj")
     return readObjDoc(bytes, doc, progress);
   if (ext == ".wrl" || ext == ".vrml")

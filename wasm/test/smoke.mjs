@@ -3,7 +3,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import createOcctViewer from '../build/occt-viewer.js';
-import { isSupported } from '../../web/src/core/formats.ts';
+import { isSupported, readerOf } from '../../web/src/core/formats.ts';
 
 const root = new URL('../../samples', import.meta.url).pathname;
 const targets = process.argv.length > 2 ? process.argv.slice(2) : [root];
@@ -11,7 +11,7 @@ const targets = process.argv.length > 2 ? process.argv.slice(2) : [root];
 function* modelFiles(p) {
   if (statSync(p).isDirectory()) {
     for (const e of readdirSync(p).sort()) yield* modelFiles(join(p, e));
-  } else if (isSupported(p)) {
+  } else if (isSupported(p) && readerOf(p) === 'occt') { // glTF is read by three.js in the browser
     yield p;
   }
 }

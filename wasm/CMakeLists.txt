@@ -28,7 +28,7 @@ target_compile_options(tkjt PRIVATE -fwasm-exceptions -UOCC_CONVERT_SIGNALS -sUS
 add_executable(occt-viewer src/bridge.cpp src/jt_pmi.cpp src/jt_reader.cpp src/xt_reader.cpp)
 target_link_libraries(occt-viewer PRIVATE
   tkjt "${XZ_INSTALL}/lib/liblzma.a"
-  TKDESTEP TKDEIGES TKDEGLTF TKDEOBJ TKDESTL TKDEVRML TKRWMesh TKXCAF TKMesh)
+  TKDESTEP TKDEIGES TKDEOBJ TKDESTL TKDEVRML TKRWMesh TKXCAF TKMesh)
 # Must match the OCCT build (see scripts/build-occt.sh).
 target_compile_options(occt-viewer PRIVATE -fwasm-exceptions -UOCC_CONVERT_SIGNALS)
 target_link_options(occt-viewer PRIVATE
@@ -41,7 +41,7 @@ target_link_options(occt-viewer PRIVATE
   -sALLOW_MEMORY_GROWTH=1
   -sMAXIMUM_MEMORY=4GB
   -sSTACK_SIZE=4MB
-  -sFILESYSTEM=1 # MEMFS: the IGES and JT readers and glTF buffers read by file name
+  -sFILESYSTEM=1 # MEMFS: the IGES, mesh and JT readers read by file name
   -sUSE_ZLIB=1
   -sDYNAMIC_EXECUTION=0)
 set_target_properties(occt-viewer PROPERTIES SUFFIX ".js")

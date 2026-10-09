@@ -1,8 +1,11 @@
+import { readerOf } from '../core/formats';
 import { decodeModel, type Model } from '../core/model';
+import { readGltf } from '../viewer/gltf';
 import type { LoadOptions, WorkerRequest, WorkerResponse } from './protocol';
 
 export type Progress = (stage: string, percent: number) => void;
 
+// glTF is read by three.js on this thread; everything else by the WASM bridge in a worker.
 // One worker per load: OCCT's heap only grows, so a fresh worker returns memory to the OS.
 // Aborting terminates the worker and rejects with the signal's reason.
 export function loadModel(
@@ -13,6 +16,10 @@ export function loadModel(
   signal?: AbortSignal,
 ): Promise<Model> {
   if (signal?.aborted) return Promise.reject(signal.reason);
+  if (readerOf(fileName) === 'three') {
+    onProgress('read', -1);
+    return readGltf(bytes, fileName).then((model) => (signal?.aborted ? Promise.reject(signal.reason) : model));
+  }
   const worker = new Worker(new URL('./modelWorker.ts', import.meta.url), { type: 'module' });
   return new Promise<Model>((resolve, reject) => {
     const abort = () => {

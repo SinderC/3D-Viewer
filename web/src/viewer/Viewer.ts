@@ -1,6 +1,7 @@
 // Imperative Three.js scene for a decoded model. React owns one instance via a ref.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from 'three-mesh-bvh';
 import { EDGE_STRIDE, FACE_STRIDE, faceTriangles, type Model, type Proto } from '../core/model';
 import type { UnitId } from '../core/units';
@@ -70,6 +71,8 @@ export class Viewer {
   private camera: THREE.PerspectiveCamera | THREE.OrthographicCamera = this.perspective;
   private controls: OrbitControls;
   private readonly light = new THREE.DirectionalLight(0xffffff, 2.2);
+  // Reflections for PBR materials (glTF, appearances); plain CAD colours do without, as before.
+  private readonly environment: THREE.Texture;
   private readonly modelRoot = new THREE.Group();
   private readonly measure: Measure;
   private readonly clipPlane = new THREE.Plane();
@@ -126,6 +129,11 @@ export class Viewer {
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setPixelRatio(window.devicePixelRatio);
     this.renderer.localClippingEnabled = true;
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    const room = new RoomEnvironment();
+    this.environment = pmrem.fromScene(room, 0.04).texture;
+    room.dispose();
+    pmrem.dispose();
     this.edgeMaterial.clippingPlanes = this.clipping;
     this.highlight.clippingPlanes = this.clipping;
     this.ghostMaterial.clippingPlanes = this.clipping;
@@ -175,6 +183,7 @@ export class Viewer {
     this.pmi.dispose();
     this.capOutline.dispose();
     this.ghostMaterial.dispose();
+    this.environment.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }
@@ -185,7 +194,10 @@ export class Viewer {
   load(model: Model): void {
     this.clear();
 
-    this.materials = model.colors.map(([r, g, b, a]) => this.makeMaterial(new THREE.Color().setRGB(r, g, b, THREE.SRGBColorSpace), a));
+    this.materials = model.colors.map(([r, g, b, a], i) => {
+      const fromFile = model.materials?.[i];
+      return fromFile ? this.adoptMaterial(fromFile) : this.makeMaterial(new THREE.Color().setRGB(r, g, b, THREE.SRGBColorSpace), a);
+    });
     const defaultMaterial = this.makeMaterial(DEFAULT_COLOR, 1);
     this.materials.push(defaultMaterial);
     const material = (color: number) => (color >= 0 ? this.materials[color] : defaultMaterial);
@@ -195,6 +207,8 @@ export class Viewer {
       g.setAttribute('position', new THREE.BufferAttribute(p.positions, 3));
       g.setAttribute('normal', new THREE.BufferAttribute(p.normals, 3));
       g.setIndex(new THREE.BufferAttribute(p.indices, 1));
+      if (p.uvs) g.setAttribute('uv', new THREE.BufferAttribute(p.uvs, 2));
+      if (p.vertexColors) g.setAttribute('color', new THREE.BufferAttribute(p.vertexColors.array, p.vertexColors.itemSize));
       p.groups.forEach((grp, i) => g.addGroup(grp.start, grp.count, i));
       // Indirect: keep the index order, which faceStarts refers to.
       g.computeBoundsTree({ indirect: true });
@@ -257,6 +271,19 @@ export class Viewer {
     });
   }
 
+  // A material read from the file (glTF), set up like makeMaterial's: both sides, behind the edges, clipped, reflective.
+  private adoptMaterial(source: THREE.Material): THREE.Material {
+    const m = Object.assign(source.clone(), {
+      side: THREE.DoubleSide,
+      polygonOffset: true,
+      polygonOffsetFactor: 1,
+      polygonOffsetUnits: 1,
+      clippingPlanes: this.clipping,
+    });
+    if (m instanceof THREE.MeshStandardMaterial && !m.envMap) m.envMap = this.environment;
+    return m;
+  }
+
   /** Remove the model and release its GPU and JS memory. */
   clear(): void {
     cancelAnimationFrame(this.animation);
@@ -271,7 +298,11 @@ export class Viewer {
       g.disposeBoundsTree?.();
       g.dispose();
     });
-    this.materials.forEach((m) => m.dispose());
+    this.materials.forEach((m) => {
+      // Textures of file materials (the environment is the viewer's own).
+      for (const v of Object.values(m)) if (v instanceof THREE.Texture && v !== this.environment) v.dispose();
+      m.dispose();
+    });
     this.removeGrid();
     this.ghosts.clear();
     this.modelRoot.clear();

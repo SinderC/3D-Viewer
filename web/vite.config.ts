@@ -10,7 +10,7 @@ const CSP = [
   "script-src 'self' 'wasm-unsafe-eval'",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
-  "connect-src 'self'",
+  "connect-src 'self' blob: data:", // GLTFLoader fetches embedded glTF buffers and images; both stay local
   "worker-src 'self' blob:",
   "object-src 'none'",
   "base-uri 'self'",

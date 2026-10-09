@@ -3,9 +3,9 @@
 Browser-based 3D viewer for CAD and mesh files: STEP, IGES, BREP, JT, glTF/GLB, OBJ, STL and VRML.
 Geometry is read and tessellated by
 [Open CASCADE Technology](https://dev.opencascade.org/) compiled to WebAssembly; JT is read by TKJT
-(from [PyOpenJt](https://github.com/jriegel/PyOpenJt)). Files are processed
+(from [PyOpenJt](https://github.com/jriegel/PyOpenJt)); glTF by three.js. Files are processed
 entirely in the browser and never uploaded: the production build ships a Content-Security-Policy that
-only allows requests to the app's own origin. After the first visit the app works offline (PWA).
+only allows requests to the app's own origin (and local `blob:`/`data:` URLs). After the first visit the app works offline (PWA).
 
 ## Features
 
@@ -23,8 +23,9 @@ only allows requests to the app's own origin. After the first visit the app work
   with their saved views; JT 8 and 9 files get their saved views only. No semantic values and no
   referenced faces for JT PMI
 - glTF/GLB, OBJ, STL, VRML (meshes: point-to-point distance only, no feature edges). glTF is read
-  in metres; OBJ, STL and VRML carry no reliable unit and are read as mm. A `.gltf` must embed its
-  buffers (or use `.glb`); external `.bin`/`.mtl` files are not loaded
+  in metres with its materials, textures and vertex colours; OBJ, STL and VRML carry no reliable unit
+  and are read as mm. A `.gltf` must embed its buffers and images (or use `.glb`); external
+  `.bin`/`.mtl` files and Draco, meshopt or KTX2 compression are not supported
 - Assembly tree with name search and show/hide/isolate (hidden parts optionally shown as translucent ghosts), colours from the file, feature edges (B-rep formats and JT
   with XT data)
 - Pick to select, section plane along X/Y/Z or a picked planar face, with solid caps
