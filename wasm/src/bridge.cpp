@@ -1,9 +1,10 @@
 // STEP / IGES / BREP / JT / glTF / OBJ / STL / VRML → mesh bridge for the browser.
 //
-// readModel(bytes, fileName, options) returns { json, geometry }:
+// readModel(bytes, fileName, options) returns { json, geometry, memory }:
 //   json     — model description (format, schema, units, node tree, prototypes, colors)
 //   geometry — Uint8Array view over one packed buffer; JSON offsets point into it.
 //              The view aliases WASM memory and is valid until the next call: copy it.
+//   memory   — allocated bytes and heap size as each stage started, for diagnostics.
 //
 // Every format is read into an XCAF document; the Builder turns that into the output.
 // Geometry is meshed once per prototype (part definition) and shared by all instances.
@@ -117,7 +118,9 @@
 #include "jt_reader.h"
 
 #include <emscripten/bind.h>
+#include <emscripten/heap.h>
 #include <emscripten/val.h>
+#include <malloc.h>
 
 #include <algorithm>
 #include <array>
@@ -166,6 +169,8 @@ struct Group
 // Measurement data, parallel to the B-rep faces / edges that produced triangles / segments.
 constexpr int kFaceStride = 7; // kind (0 other, 1 plane), origin xyz, outward normal xyz
 constexpr int kEdgeStride = 9; // kind (0 other, 1 line, 2 circle), length, radius, centre xyz, axis xyz
+
+constexpr int kMeshBatch = 2000; // faces per BRepMesh run, see meshPart; smaller batches open cracks at their seams
 
 struct Proto
 {
@@ -256,6 +261,7 @@ Range append(const std::vector<T>& data)
 // Progress → JS callback
 
 // percent is -1 when the stage has no measurable progress.
+// Also records the heap as each stage starts, for memory diagnostics.
 class Progress
 {
 public:
@@ -263,17 +269,33 @@ public:
 
   void operator()(const std::string& stage, int pct)
   {
-    if (myCb.isUndefined() || (stage == myStage && pct == myLast))
+    if (stage == myStage && pct == myLast)
       return;
+    if (stage != myStage)
+      mark(stage);
     myStage = stage;
     myLast  = pct;
-    myCb(stage, pct);
+    if (!myCb.isUndefined())
+      myCb(stage, pct);
   }
+
+  // Bytes allocated and WASM heap size (its high-water mark: the heap never shrinks), in MB.
+  void mark(const std::string& point)
+  {
+    val m = val::object();
+    m.set("at", point);
+    m.set("allocatedMB", double(mallinfo().uordblks) / (1 << 20));
+    m.set("heapMB", double(emscripten_get_heap_size()) / (1 << 20));
+    myMemory.call<void>("push", m);
+  }
+
+  const val& memory() const { return myMemory; }
 
 private:
   val         myCb;
   std::string myStage;
-  int         myLast = -1;
+  int         myLast   = -1;
+  val         myMemory = val::array();
 };
 
 // ---------------------------------------------------------------------------
@@ -573,22 +595,32 @@ private:
   Proto meshPart(const TDF_Label& def, const TopoDS_Shape& shape)
   {
     // B-rep faces need meshing; AP242 tessellated faces already carry a triangulation.
+    // Meshed in batches: BRepMesh keeps working data for every face it is given until it is done,
+    // which is ~1 GB on a part with 14k faces. Shared edges keep the polygon the first batch made.
     bool hasSurfaces = false;
     {
-      TopoDS_Compound toMesh;
+      const double    linear = deflection(shape);
+      TopoDS_Compound batch;
       BRep_Builder    bb;
-      bb.MakeCompound(toMesh);
+      int             inBatch = 0;
+      auto            flush   = [&] {
+        if (inBatch)
+          BRepMesh_IncrementalMesh(batch, linear, false, myOpts.angularDeflection, false);
+        bb.MakeCompound(batch);
+        inBatch = 0;
+      };
+      flush();
       for (TopExp_Explorer ex(shape, TopAbs_FACE); ex.More(); ex.Next())
       {
         const TopoDS_Face& f = TopoDS::Face(ex.Current());
-        if (!BRep_Tool::Surface(f).IsNull())
-        {
-          bb.Add(toMesh, f);
-          hasSurfaces = true;
-        }
+        if (BRep_Tool::Surface(f).IsNull())
+          continue;
+        bb.Add(batch, f);
+        hasSurfaces = true;
+        if (++inBatch == kMeshBatch)
+          flush();
       }
-      if (hasSurfaces)
-        BRepMesh_IncrementalMesh(toMesh, deflection(shape), false, myOpts.angularDeflection, false);
+      flush();
     }
 
     int        partColor = -1;
@@ -1436,7 +1468,8 @@ void readValidationCounts(const Handle(Interface_InterfaceModel)& model, Source&
   }
 }
 
-Source readStepDoc(const std::string& bytes, const Handle(TDocStd_Document)& doc, Progress& progress)
+// Frees bytes once parsed: the file is not needed for the transfer.
+Source readStepDoc(std::string& bytes, const Handle(TDocStd_Document)& doc, Progress& progress)
 {
   STEPCAFControl_Reader reader;
   reader.SetNameMode(true);
@@ -1451,6 +1484,7 @@ Source readStepDoc(const std::string& bytes, const Handle(TDocStd_Document)& doc
   std::istream stream(&buf);
   if (reader.ReadStream("model.stp", stream) != IFSelect_RetDone)
     throw std::runtime_error("Not a readable STEP file");
+  std::string().swap(bytes);
 
   Source src{"STEP", fileSchema(reader.ChangeReader().StepModel()), fileLengthUnit(reader.ChangeReader())};
 
@@ -1469,6 +1503,7 @@ Source readStepDoc(const std::string& bytes, const Handle(TDocStd_Document)& doc
   progress("transfer", -1);
   if (!reader.Transfer(doc))
     throw std::runtime_error("STEP transfer failed");
+  progress.mark("transferred");
   src.products   = readProductProps(reader);
   src.validation = readValidationProps(reader);
   readValidationCounts(reader.ChangeReader().Model(), src);
@@ -1670,7 +1705,7 @@ std::string lowerExtension(const std::string& fileName)
   return ext;
 }
 
-Source readDoc(const std::string&              bytes,
+Source readDoc(std::string&                    bytes,
                const std::string&              fileName,
                const Handle(TDocStd_Document)& doc,
                Progress&                       progress)
@@ -1847,7 +1882,8 @@ std::string toJson(const Source& src, const Builder& b)
 // ---------------------------------------------------------------------------
 // Entry point
 
-val readModel(const std::string& bytes, const std::string& fileName, val jsOptions, val onProgress)
+// jsBytes: Uint8Array. Copied into the heap once, not via std::string (embind keeps two copies for the call).
+val readModel(val jsBytes, const std::string& fileName, val jsOptions, val onProgress)
 {
   Options opts;
   if (!jsOptions.isUndefined() && !jsOptions.isNull())
@@ -1874,15 +1910,23 @@ val readModel(const std::string& bytes, const std::string& fileName, val jsOptio
     Handle(TDocStd_Document) doc;
     XCAFApp_Application::GetApplication()->NewDocument("BinXCAF", doc);
 
+    std::string bytes(jsBytes["length"].as<size_t>(), '\0');
+    val(emscripten::typed_memory_view(bytes.size(), bytes.data())).call<void>("set", jsBytes);
+    progress.mark("start");
     const Source src = readDoc(bytes, fileName, doc, progress);
+    std::string().swap(bytes); // the other readers are done with it too
 
     Builder builder(doc, opts, progress);
     builder.build(src.jtPmi, src.products, src.validation);
+    progress.mark("built");
 
     result.set("json", toJson(src, builder));
+    progress.mark("json");
     result.set("geometry", val(emscripten::typed_memory_view(gGeometry.size(), gGeometry.data())));
 
     XCAFApp_Application::GetApplication()->Close(doc);
+    progress.mark("closed");
+    result.set("memory", progress.memory());
   }
   catch (const Standard_Failure& e)
   {
