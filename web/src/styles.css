@@ -461,7 +461,7 @@ button.icon[aria-pressed='true'] { color: var(--accent); background: var(--accen
 
 /* Keyboard shortcuts dialog (ShortcutHelp.tsx); the padding is inside, so a click on the dialog itself is on the backdrop. */
 .help {
-  max-width: min(640px, calc(100vw - 32px));
+  width: min(640px, calc(100vw - 32px));
   max-height: calc(100vh - 64px);
   padding: 0;
   border: 0;

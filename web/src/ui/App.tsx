@@ -154,7 +154,10 @@ export function App() {
       if (!shortcut) return;
       // Typing in a field, or a dialog open: only Cmd/Ctrl shortcuts apply.
       const t = e.target;
-      const typing = t instanceof HTMLInputElement || t instanceof HTMLSelectElement || (t instanceof Element && t.closest('dialog'));
+      const typing =
+        (t instanceof HTMLInputElement && !['checkbox', 'radio', 'range', 'button'].includes(t.type)) ||
+        t instanceof HTMLSelectElement ||
+        (t instanceof Element && t.closest('dialog'));
       if (typing && !shortcut.mod) return;
       e.preventDefault();
       shortcut.run({ ...shortcutCtx.current, viewer: viewer.current });

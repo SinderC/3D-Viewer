@@ -129,8 +129,9 @@ export const MeasureIcon = () => (
 
 export const ExplodeIcon = () => (
   <Icon>
-    <rect x="6" y="6" width="4" height="4" rx="0.5" />
-    <path d="M2 2l2.5 2.5M14 2l-2.5 2.5M2 14l2.5-2.5M14 14l-2.5-2.5M2 5V2h3M11 2h3v3M14 11v3h-3M5 14H2v-3" />
+    <rect x="1.5" y="1.5" width="5" height="5" rx="0.5" />
+    <rect x="9.5" y="1.5" width="5" height="5" rx="0.5" />
+    <rect x="5.5" y="9.5" width="5" height="5" rx="0.5" />
   </Icon>
 );
 
