@@ -15,6 +15,8 @@
   --accent-fill: #2b4a6e;
   --accent-tint: rgb(90 169 255 / 0.15);
   --on-accent: #0e1a28;
+  --menu-hover: #2f6fd6; /* menu item highlight, white text on it */
+  --menu-edge: inset 0 0 0 0.5px rgb(255 255 255 / 0.08); /* light catching the raised menu's rim */
   --success: #5cc87a;
   --danger: #ff8080;
   --danger-fill: #e05252;
@@ -53,6 +55,8 @@
   --accent-fill: #d6e7fb;
   --accent-tint: rgb(10 111 216 / 0.12);
   --on-accent: #ffffff;
+  --menu-hover: #0a6fd8;
+  --menu-edge: inset 0 0 0 0.5px rgb(0 0 0 / 0.04);
   --success: #23884a;
   --danger: #d23c3c;
   --danger-fill: #d23c3c;
@@ -115,7 +119,11 @@ button:hover:not(:disabled), select:hover:not(:disabled) { background: var(--sur
 button:active:not(:disabled) { transform: scale(0.97); }
 button:disabled, select:disabled { opacity: 0.4; cursor: default; }
 button svg { display: block; flex: none; }
-.menu-trigger { display: inline-flex; align-items: center; gap: 2px; padding-right: 4px; }
+/* Menu bar titles (File, View): plain text, lit while hovered or open. They don't shrink on press. */
+.menu-trigger { padding: 3px 8px; border-color: transparent; background: none; font-weight: 500; }
+.menu-trigger:hover:not(:disabled) { background: var(--surface-2); }
+.menu-trigger:active:not(:disabled) { transform: none; }
+.menu-trigger:has(+ .menu:popover-open) { background: var(--surface-3); }
 button[aria-pressed='true'] { background: var(--accent-fill); border-color: transparent; color: var(--accent); }
 input[type='range'] { width: 140px; accent-color: var(--accent); }
 input[type='checkbox'] { accent-color: var(--accent); margin: 0; }
@@ -283,13 +291,13 @@ input[type='checkbox'] { accent-color: var(--accent); margin: 0; }
 .menu {
   inset: auto;
   margin: 0;
-  min-width: 180px;
-  padding: 4px;
+  min-width: 200px;
+  padding: 5px;
   color: var(--text);
   background: var(--raised);
   border: 1px solid var(--hairline);
-  border-radius: var(--radius-m);
-  box-shadow: var(--shadow-2);
+  border-radius: 10px;
+  box-shadow: var(--menu-edge), var(--shadow-2);
   transition:
     opacity 150ms var(--ease-out),
     transform 150ms var(--ease-out),
@@ -298,27 +306,31 @@ input[type='checkbox'] { accent-color: var(--accent); margin: 0; }
 }
 .menu:not(:popover-open) { opacity: 0; transform: scale(0.96); }
 @starting-style { .menu:popover-open { opacity: 0; transform: scale(0.96); } }
+/* Bar menus drop from the title rather than zooming out of it. */
+.menu.bar:not(:popover-open) { transform: translateY(-2px); }
+@starting-style { .menu.bar:popover-open { transform: translateY(-2px); } }
 .menu-item {
   display: flex;
   align-items: center;
   gap: 8px;
   width: 100%;
-  min-height: 26px;
+  min-height: 22px;
   padding: 0 10px;
   text-align: left;
   background: none;
   border: 0;
-  border-radius: var(--radius-s);
+  border-radius: 5px;
 }
-.menu-item:hover:not(:disabled) { background: var(--accent-fill); }
+.menu-item:hover:not(:disabled) { background: var(--menu-hover); color: #fff; }
+.menu-item:hover:not(:disabled) :is(.check, kbd) { color: inherit; }
 .menu-item:active:not(:disabled) { transform: none; }
 .menu-item[aria-pressed='true'] { color: var(--accent); background: none; }
 .menu-item.choice { padding-left: 4px; gap: 4px; }
-.menu-item.choice[aria-pressed='true'] { color: var(--text); }
+.menu-item.choice[aria-pressed='true']:not(:hover) { color: var(--text); }
 .menu-item .check { display: inline-flex; width: 16px; color: var(--accent); }
-.menu-label { padding: 6px 10px 2px; font-size: 11px; font-weight: 600; letter-spacing: 0.01em; color: var(--text-2); }
+.menu-label { padding: 6px 10px 2px; font-size: 11px; font-weight: 600; letter-spacing: 0.01em; color: var(--text-3); }
 .menu-note { margin: 2px 0 4px; padding: 0 10px 0 24px; font-size: 11px; color: var(--text-3); }
-.menu-sep { margin: 4px 6px; border: 0; border-top: 1px solid var(--hairline); }
+.menu-sep { margin: 5px 10px; border: 0; border-top: 1px solid var(--hairline); }
 .menu-item kbd { margin-left: auto; color: var(--text-3); font: inherit; }
 .menu-row { display: flex; align-items: center; gap: 6px; padding: 4px 6px; }
 .menu-row button { flex: 1; }
@@ -406,8 +418,8 @@ button.icon[aria-pressed='true'] { color: var(--accent); background: var(--accen
 /* Gentler equivalents: fades stay, scaling and sliding go. */
 @media (prefers-reduced-motion: reduce) {
   button:active:not(:disabled) { transform: none; }
-  .menu, .menu:not(:popover-open) { transform: none; }
-  @starting-style { .menu:popover-open { transform: none; } }
+  .menu, .menu:not(:popover-open), .menu.bar:not(:popover-open) { transform: none; }
+  @starting-style { .menu:popover-open, .menu.bar:popover-open { transform: none; } }
   .caret svg, .section > summary svg, .progress > div { transition: none; }
   .progress.indeterminate > div { width: 100%; animation: none; opacity: 0.4; }
 }

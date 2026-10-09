@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { QUALITY, type Quality } from '../worker/protocol';
-import { Chevron, GitHubIcon, PropertiesIcon } from './icons';
+import { GitHubIcon, PropertiesIcon } from './icons';
 import { Menu, MenuChoices, MenuItem } from './Menu';
 import type { State } from './state';
 
@@ -24,7 +24,7 @@ export function Toolbar({ status, onOpen, onClose, quality, onQuality, showProps
   return (
     <header className="toolbar">
       <span className="app-name">Open CAD Viewer</span>
-      <Menu title="File" label={<>File <Chevron /></>} className="menu-trigger">
+      <Menu title="File" label="File" className="menu-trigger" bar>
         <MenuItem label="Open…" kbd={`${MOD}O`} onClick={onOpen} />
         <MenuItem label="Close" disabled={status === 'idle'} onClick={onClose} />
         <hr className="menu-sep" />

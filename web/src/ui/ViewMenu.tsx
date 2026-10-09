@@ -1,6 +1,5 @@
 import { useEffect, useState, type Dispatch, type RefObject } from 'react';
 import type { Viewer } from '../viewer/Viewer';
-import { Chevron } from './icons';
 import { Menu, MenuItem, MenuChoices } from './Menu';
 import type { Action, State } from './state';
 import { MAC } from './Toolbar';
@@ -53,7 +52,7 @@ export function ViewMenu({ state, dispatch, viewer, prefs, narrow }: Props) {
   const loaded = state.status === 'ready';
   const measuring = state.tool === 'measure';
   return (
-    <Menu title="View" label={<>View <Chevron /></>} className="menu-trigger">
+    <Menu title="View" label="View" className="menu-trigger" bar>
       <MenuItem label="Sidebar" checked={prefs.sidebar} onClick={prefs.toggleSidebar} />
       {!narrow && <MenuItem label="Properties" checked={prefs.props} onClick={prefs.toggleProps} />}
       <hr className="menu-sep" />

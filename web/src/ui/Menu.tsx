@@ -5,6 +5,7 @@ interface Props {
   label: ReactNode;
   title: string;
   up?: boolean; // open above the trigger
+  bar?: boolean; // a title in the top menu bar
   pressed?: boolean;
   disabled?: boolean;
   className?: string;
@@ -13,7 +14,7 @@ interface Props {
 
 // Dropdown on the Popover API: the browser handles outside clicks and Esc.
 // Clicking a .menu-item closes it; other controls inside (sliders, selects) keep it open.
-export function Menu({ label, title, up, pressed, disabled, className, children }: Props) {
+export function Menu({ label, title, up, bar, pressed, disabled, className, children }: Props) {
   const id = useId();
   const trigger = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
@@ -32,6 +33,13 @@ export function Menu({ label, title, up, pressed, disabled, className, children 
     p.style.transformOrigin = `${r.left + r.width / 2 - left}px ${up ? '100%' : '0'}`;
   };
 
+  // Like the macOS menu bar: while one bar menu is open, pointing at another title switches to it.
+  // Showing an auto popover closes the open one.
+  const switchTo = () => {
+    const p = panel.current!;
+    if (!p.matches(':popover-open') && document.querySelector('.menu.bar:popover-open')) p.showPopover();
+  };
+
   return (
     <>
       <button
@@ -42,6 +50,7 @@ export function Menu({ label, title, up, pressed, disabled, className, children 
         aria-label={title}
         aria-pressed={pressed}
         disabled={disabled}
+        onPointerEnter={bar ? switchTo : undefined}
       >
         {label}
       </button>
@@ -49,7 +58,7 @@ export function Menu({ label, title, up, pressed, disabled, className, children 
         ref={panel}
         id={id}
         popover="auto"
-        className="menu"
+        className={bar ? 'menu bar' : 'menu'}
         onBeforeToggle={place}
         onToggle={place}
         onClick={(e) => (e.target as Element).closest('.menu-item') && panel.current?.hidePopover()}
