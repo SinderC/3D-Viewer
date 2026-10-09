@@ -282,6 +282,20 @@ input[type='checkbox'] { accent-color: var(--accent); margin: 0; }
   white-space: nowrap;
 }
 
+.measure-label button {
+  margin: 0 -4px 0 6px;
+  padding: 0 3px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  line-height: 1;
+  opacity: 0.6;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.measure-label button:hover { opacity: 1; }
+
 .measure-label.warn {
   background: var(--danger-fill);
   color: #fff;

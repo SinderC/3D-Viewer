@@ -105,14 +105,25 @@ function radialDirection(e: EdgePick): THREE.Vector3 {
 
 const COLOR = 0xffb020;
 
+// A completed measurement and its screen-space label.
+interface Done {
+  mode: MeasureMode;
+  picks: Pick[];
+  result: Result;
+  label: HTMLDivElement;
+}
+
+// Completed measurements stay until removed; picks for the next one collect alongside them.
 export class Measure {
+  /** Called after a change the scene must be redrawn for, e.g. a label's remove button. */
+  onChange: () => void = () => {};
+
   private readonly group = new THREE.Group();
   private readonly hoverGroup = new THREE.Group();
-  private readonly label = document.createElement('div');
   private mode: MeasureMode = 'pointDistance';
   private unit: UnitId = 'mm';
   private picks: Pick[] = [];
-  private result: Result | null = null;
+  private done: Done[] = [];
 
   private readonly markerMaterial = new THREE.PointsMaterial({ color: COLOR, size: 9, sizeAttenuation: false, depthTest: false });
   private readonly lineMaterial = new THREE.LineBasicMaterial({ color: COLOR, depthTest: false });
@@ -128,38 +139,61 @@ export class Measure {
   });
   private readonly hoverFaceMaterial = Object.assign(this.faceMaterial.clone(), { opacity: 0.2 });
 
-  constructor(scene: THREE.Scene, container: HTMLElement) {
+  constructor(
+    scene: THREE.Scene,
+    private readonly container: HTMLElement,
+  ) {
     scene.add(this.group, this.hoverGroup);
-    this.label.className = 'measure-label';
-    this.label.hidden = true;
-    container.appendChild(this.label);
   }
 
   get pickKind(): Pick['kind'] {
     return MEASURE_MODES[this.mode].pick;
   }
 
+  /** Number of completed measurements. */
+  get count(): number {
+    return this.done.length;
+  }
+
   setMode(mode: MeasureMode): void {
     this.mode = mode;
-    this.clear();
+    this.picks = [];
+    this.rebuild();
   }
 
   setUnit(unit: UnitId): void {
     this.unit = unit;
-    this.update();
+    for (const d of this.done) this.setResult(d, evaluate(d.mode, d.picks, unit));
   }
 
   add(pick: Pick): void {
-    const { count } = MEASURE_MODES[this.mode];
-    if (this.picks.length >= count) this.picks = [];
     this.picks.push(pick);
-    this.update();
+    if (this.picks.length === MEASURE_MODES[this.mode].count) {
+      const d: Done = { mode: this.mode, picks: this.picks, result: evaluate(this.mode, this.picks, this.unit), label: this.makeLabel() };
+      d.label.querySelector('button')!.onclick = () => this.remove(d);
+      this.setResult(d, d.result);
+      this.done.push(d);
+      this.picks = [];
+    }
+    this.rebuild();
+  }
+
+  /** Drop the picks of an unfinished measurement, else the last completed one. */
+  undo(): void {
+    if (this.picks.length) {
+      this.picks = [];
+      this.rebuild();
+    } else if (this.done.length) {
+      this.remove(this.done[this.done.length - 1]);
+    }
   }
 
   clear(): void {
     this.picks = [];
+    this.done.forEach((d) => d.label.remove());
+    this.done = [];
     this.setHover(null);
-    this.update();
+    this.rebuild();
   }
 
   // Preview of the edge or face under the cursor. Returns whether anything changed.
@@ -172,10 +206,11 @@ export class Measure {
   }
 
   updateLabel(camera: THREE.Camera, canvas: HTMLCanvasElement): void {
-    if (!this.result) return;
-    const p = this.result.anchor.clone().project(camera);
-    this.label.style.left = `${((p.x + 1) / 2) * canvas.clientWidth}px`;
-    this.label.style.top = `${((1 - p.y) / 2) * canvas.clientHeight}px`;
+    for (const { result, label } of this.done) {
+      const p = result.anchor.clone().project(camera);
+      label.style.left = `${((p.x + 1) / 2) * canvas.clientWidth}px`;
+      label.style.top = `${((1 - p.y) / 2) * canvas.clientHeight}px`;
+    }
   }
 
   dispose(): void {
@@ -184,16 +219,32 @@ export class Measure {
     this.lineMaterial.dispose();
     this.faceMaterial.dispose();
     this.hoverFaceMaterial.dispose();
-    this.label.remove();
   }
 
-  private update(): void {
-    const complete = this.picks.length === MEASURE_MODES[this.mode].count;
-    this.result = complete ? evaluate(this.mode, this.picks, this.unit) : null;
-    this.label.hidden = !this.result;
-    this.label.textContent = this.result?.text ?? '';
-    this.label.classList.toggle('warn', !!this.result?.warn);
+  private makeLabel(): HTMLDivElement {
+    const label = document.createElement('div');
+    label.className = 'measure-label';
+    label.append(document.createElement('span'));
+    const remove = document.createElement('button');
+    remove.title = 'Remove';
+    remove.ariaLabel = 'Remove measurement';
+    remove.textContent = '×';
+    label.append(remove);
+    this.container.appendChild(label);
+    return label;
+  }
+
+  private setResult(d: Done, result: Result): void {
+    d.result = result;
+    d.label.firstElementChild!.textContent = result.text;
+    d.label.classList.toggle('warn', !!result.warn);
+  }
+
+  private remove(d: Done): void {
+    d.label.remove();
+    this.done = this.done.filter((x) => x !== d);
     this.rebuild();
+    this.onChange();
   }
 
   private rebuild(): void {
@@ -204,14 +255,16 @@ export class Measure {
       this.group.add(o);
     };
 
-    for (const p of this.picks) {
+    const picks = [...this.done.flatMap((d) => d.picks), ...this.picks];
+    for (const p of picks) {
       const o = this.highlight(p, this.faceMaterial);
       if (o) add(o);
     }
-    const markers = this.picks.filter((p) => p.kind === 'point').map((p) => p.point);
-    if (this.result?.lines.length) {
-      add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(this.result.lines), this.lineMaterial));
-      markers.push(...this.result.lines);
+    const markers = picks.filter((p) => p.kind === 'point').map((p) => p.point);
+    const lines = this.done.flatMap((d) => d.result.lines);
+    if (lines.length) {
+      add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(lines), this.lineMaterial));
+      markers.push(...lines);
     }
     if (markers.length) add(new THREE.Points(new THREE.BufferGeometry().setFromPoints(markers), this.markerMaterial));
   }

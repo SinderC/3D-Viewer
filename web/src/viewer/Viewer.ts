@@ -129,6 +129,7 @@ export class Viewer {
     this.controls = this.createControls();
 
     this.measure = new Measure(this.scene, container);
+    this.measure.onChange = this.requestRender;
     this.cube = new ViewCube(container, VIEW_DIRS.iso, (dir) => this.frame(dir, this.visibleBounds(), true, Z_UP));
     this.triad = new AxisTriad(container);
 
@@ -355,6 +356,17 @@ export class Viewer {
   setTool(tool: Tool): void {
     this.tool = tool;
     if (tool !== 'measure') this.measure.clear();
+    this.requestRender();
+  }
+
+  clearMeasurements(): void {
+    this.measure.clear();
+    this.requestRender();
+  }
+
+  /** Remove the measurement being picked, else the last one. */
+  undoMeasurement(): void {
+    this.measure.undo();
     this.requestRender();
   }
 

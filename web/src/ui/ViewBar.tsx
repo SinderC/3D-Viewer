@@ -175,6 +175,10 @@ export function ViewBar({ state, dispatch, viewer, size }: Props) {
             {label}
           </button>
         ))}
+        <hr className="menu-sep" />
+        <button className="menu-item" disabled={!measuring} onClick={() => viewer.current?.clearMeasurements()}>
+          Clear measurements
+        </button>
         <label className="menu-row">
           Units
           <select value={state.unit} onChange={(e) => dispatch({ type: 'setUnit', unit: e.target.value as UnitId })}>
