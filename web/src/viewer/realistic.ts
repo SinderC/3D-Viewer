@@ -148,8 +148,11 @@ export class ContactShadow {
     this.mesh.renderOrder = -1;
   }
 
-  /** Redraw for `root` within `bounds` (world, Z-up), with the ground at the bounds' bottom. */
-  update(renderer: THREE.WebGLRenderer, root: THREE.Object3D, bounds: THREE.Box3): void {
+  /**
+   * Redraw for `root` within `bounds` (world, Z-up), with the ground at the bounds' bottom. `exclude` lists
+   * objects under `root` that must not cast (annotations floating around the model).
+   */
+  update(renderer: THREE.WebGLRenderer, root: THREE.Object3D, bounds: THREE.Box3, exclude: THREE.Object3D[]): void {
     if (bounds.isEmpty()) return;
     const size = bounds.getSize(new THREE.Vector3());
     const center = bounds.getCenter(new THREE.Vector3());
@@ -169,12 +172,15 @@ export class ContactShadow {
     const parent = root.parent;
     const background = renderer.getClearColor(new THREE.Color());
     const alpha = renderer.getClearAlpha();
+    const hidden = exclude.filter((o) => o.visible);
+    hidden.forEach((o) => (o.visible = false));
     this.scene.add(root);
     renderer.setClearColor(0x000000, 0);
     renderer.setRenderTarget(this.target);
     renderer.clear();
     renderer.render(this.scene, this.camera);
     parent?.add(root);
+    hidden.forEach((o) => (o.visible = true));
 
     for (let i = 0; i < 3; i++) this.blur((1 + i) / SHADOW_SIZE, renderer);
 

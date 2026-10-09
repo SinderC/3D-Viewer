@@ -458,6 +458,7 @@ export class Viewer {
       this.effects = new Effects(this.renderer, this.scene, this.camera, this.clipping, () => [
         this.ghosts,
         this.caps,
+        ...this.pmi.all,
         ...this.measure.objects,
         ...(this.grid ? [this.grid] : []),
         ...(this.contactShadow ? [this.contactShadow.mesh] : []),
@@ -483,7 +484,7 @@ export class Viewer {
   private updateRealistic(): void {
     if (this.display !== 'realistic' || !this.effects || !this.contactShadow) return;
     const bounds = this.visibleBounds();
-    this.contactShadow.update(this.renderer, this.modelRoot, bounds);
+    this.contactShadow.update(this.renderer, this.modelRoot, bounds, this.pmi.all);
     this.effects.setOcclusionRadius(0.04 * bounds.getSize(new THREE.Vector3()).length());
     this.requestRender();
   }

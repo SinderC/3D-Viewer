@@ -81,6 +81,11 @@ export class PmiLayer {
     }
   }
 
+  /** Every PMI object in the scene: presentations and face overlays. */
+  get all(): THREE.Object3D[] {
+    return [...this.objects.flat(), ...this.faces];
+  }
+
   /** Bounds of the shown PMI, in world coordinates. */
   visibleBounds(): THREE.Box3 {
     const box = new THREE.Box3();
