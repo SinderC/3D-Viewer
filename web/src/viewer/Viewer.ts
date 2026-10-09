@@ -52,6 +52,8 @@ const AXES: Record<Axis, THREE.Vector3> = {
   z: new THREE.Vector3(0, 0, 1),
 };
 const DEFAULT_COLOR = new THREE.Color(0xb8bcc4);
+// What an appearance shows on a part the file gives no colour.
+const APPEARANCE_DEFAULT_COLOR = new THREE.Color(0xd2d5da);
 const EDGE_COLOR = 0x1e2026;
 export type Theme = 'dark' | 'light';
 // Canvas colours per UI theme; wireframe edges alone must stand out against the background.
@@ -113,6 +115,7 @@ export class Viewer {
   private edgeLines: THREE.LineSegments[] = [];
   private materials: THREE.Material[] = [];
   private appearanceMaterials = new Map<string, THREE.MeshPhysicalMaterial>();
+  private defaultMaterial: THREE.Material | null = null; // for parts the file gives no colour
   private explodeItems: ExplodeItem[] = [];
   private bounds = new THREE.Box3();
   private orthoHalfHeight = 1;
@@ -223,7 +226,7 @@ export class Viewer {
       const fromFile = model.materials?.[i];
       return fromFile ? this.adoptMaterial(fromFile) : this.makeMaterial(new THREE.Color().setRGB(r, g, b, THREE.SRGBColorSpace), a);
     });
-    const defaultMaterial = this.makeMaterial(DEFAULT_COLOR, 1);
+    const defaultMaterial = (this.defaultMaterial = this.makeMaterial(DEFAULT_COLOR, 1));
     this.materials.push(defaultMaterial);
     const material = (color: number) => (color >= 0 ? this.materials[color] : defaultMaterial);
 
@@ -312,13 +315,14 @@ export class Viewer {
     let m = this.appearanceMaterials.get(key);
     if (!m) {
       const a = APPEARANCES[id];
-      const fileColor = 'color' in file && file.color instanceof THREE.Color ? file.color : DEFAULT_COLOR;
+      const partColor =
+        file !== this.defaultMaterial && 'color' in file && file.color instanceof THREE.Color ? file.color : APPEARANCE_DEFAULT_COLOR;
       const maps = a.finish ? this.finishes.get(a.finish) : undefined;
       m = this.surface(
         new THREE.MeshPhysicalMaterial({
           ...maps,
-          // A colour texture carries the colour itself.
-          color: maps?.map ? 0xffffff : a.color ? new THREE.Color().setRGB(...a.color, THREE.SRGBColorSpace) : fileColor,
+          // Tints a colour texture (carbon, wood) too.
+          color: a.color ? new THREE.Color().setRGB(...a.color, THREE.SRGBColorSpace) : partColor,
           metalness: a.metalness,
           roughness: a.roughness,
           clearcoat: a.clearcoat ?? 0,
@@ -330,7 +334,6 @@ export class Viewer {
           opacity: file.opacity,
         }),
       );
-      if (maps?.map && a.color) m.userData.capColor = new THREE.Color().setRGB(...a.color, THREE.SRGBColorSpace);
       this.appearanceMaterials.set(key, m);
     }
     return m;
@@ -383,6 +386,7 @@ export class Viewer {
     this.meshes = [];
     this.edgeLines = [];
     this.materials = [];
+    this.defaultMaterial = null;
     this.explodeItems = [];
     this.selected = null;
     this.bounds.makeEmpty();
@@ -608,9 +612,7 @@ export class Viewer {
 
   private capMaterial(mesh: THREE.Mesh): THREE.MeshStandardMaterial {
     const base = mesh.userData.baseMaterial as THREE.MeshStandardMaterial | THREE.MeshStandardMaterial[];
-    const first = Array.isArray(base) ? base[0] : base;
-    // A textured finish is white under its texture; its cut shows the finish's own colour.
-    const color: THREE.Color = first.userData.capColor ?? first.color;
+    const color = (Array.isArray(base) ? base[0] : base).color;
     const key = color.getHex();
     let m = this.capMaterials.get(key);
     if (!m) {

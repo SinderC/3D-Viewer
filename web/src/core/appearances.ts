@@ -3,7 +3,7 @@
 export interface Appearance {
   label: string;
   group: 'Metal' | 'Plastic & other';
-  /** sRGB; without it the part keeps its own colour (e.g. plastics). */
+  /** sRGB, for finishes defined by their colour (brass); others take the part's colour, or light grey. */
   color?: [number, number, number];
   metalness: number;
   roughness: number;
@@ -16,20 +16,21 @@ export interface Appearance {
 export type FinishId = 'brushed' | 'blasted' | 'grain' | 'carbon' | 'wood';
 
 const PRESETS = {
-  polishedSteel: { label: 'Polished steel', group: 'Metal', color: [0.8, 0.8, 0.82], metalness: 1, roughness: 0.08 },
-  brushedSteel: { label: 'Brushed steel', group: 'Metal', color: [0.72, 0.72, 0.74], metalness: 1, roughness: 0.32, finish: 'brushed' },
-  brushedAluminium: { label: 'Brushed aluminium', group: 'Metal', color: [0.86, 0.87, 0.89], metalness: 1, roughness: 0.3, finish: 'brushed' },
-  sandBlasted: { label: 'Sand-blasted', group: 'Metal', color: [0.7, 0.7, 0.72], metalness: 1, roughness: 0.6, finish: 'blasted' },
-  castIron: { label: 'Cast iron', group: 'Metal', color: [0.33, 0.33, 0.34], metalness: 0.85, roughness: 0.75, finish: 'blasted' },
+  polishedSteel: { label: 'Polished steel', group: 'Metal', metalness: 1, roughness: 0.08 },
+  brushedSteel: { label: 'Brushed steel', group: 'Metal', metalness: 1, roughness: 0.32, finish: 'brushed' },
+  brushedAluminium: { label: 'Brushed aluminium', group: 'Metal', metalness: 1, roughness: 0.28, finish: 'brushed' },
+  sandBlasted: { label: 'Sand-blasted', group: 'Metal', metalness: 1, roughness: 0.6, finish: 'blasted' },
+  castIron: { label: 'Cast iron', group: 'Metal', metalness: 0.85, roughness: 0.75, finish: 'blasted' },
+  anodised: { label: 'Anodised', group: 'Metal', metalness: 1, roughness: 0.38 },
+  // The colour is what makes these two; every other finish takes the part's colour.
   brass: { label: 'Brass', group: 'Metal', color: [0.89, 0.73, 0.4], metalness: 1, roughness: 0.22 },
   copper: { label: 'Copper', group: 'Metal', color: [0.95, 0.62, 0.48], metalness: 1, roughness: 0.25 },
-  blackAnodised: { label: 'Black anodised', group: 'Metal', color: [0.09, 0.09, 0.1], metalness: 0.8, roughness: 0.4 },
   glossyPlastic: { label: 'Glossy plastic', group: 'Plastic & other', metalness: 0, roughness: 0.25, clearcoat: 1 },
   mattePlastic: { label: 'Matte plastic', group: 'Plastic & other', metalness: 0, roughness: 0.7 },
   texturedPlastic: { label: 'Textured plastic', group: 'Plastic & other', metalness: 0, roughness: 0.85, finish: 'grain' },
-  rubber: { label: 'Rubber', group: 'Plastic & other', color: [0.07, 0.07, 0.07], metalness: 0, roughness: 0.95 },
-  carbonFibre: { label: 'Carbon fibre', group: 'Plastic & other', color: [0.12, 0.12, 0.13], metalness: 0, roughness: 0.35, clearcoat: 1, finish: 'carbon' },
-  wood: { label: 'Wood', group: 'Plastic & other', color: [0.72, 0.53, 0.32], metalness: 0, roughness: 0.6, clearcoat: 0.3, finish: 'wood' },
+  rubber: { label: 'Rubber', group: 'Plastic & other', metalness: 0, roughness: 0.95 },
+  carbonFibre: { label: 'Carbon fibre', group: 'Plastic & other', metalness: 0, roughness: 0.35, clearcoat: 1, finish: 'carbon' },
+  wood: { label: 'Wood', group: 'Plastic & other', metalness: 0, roughness: 0.6, clearcoat: 0.3, finish: 'wood' },
 } satisfies Record<string, Appearance>;
 
 export type AppearanceId = keyof typeof PRESETS;

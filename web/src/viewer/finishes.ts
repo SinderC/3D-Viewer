@@ -9,7 +9,7 @@ const SIZE = 512;
 export const FINISH_UVS = 'uv3';
 
 export interface FinishMaps {
-  /** Colour; the material's own colour is then white. */
+  /** Colour pattern, tinted by the part's colour. */
   map?: THREE.Texture;
   bumpMap?: THREE.Texture;
   roughnessMap?: THREE.Texture;
