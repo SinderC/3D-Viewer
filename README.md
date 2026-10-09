@@ -32,7 +32,7 @@ only allows requests to the app's own origin. After the first visit the app work
 - Measure: edge length / radius / diameter, distance between points (vertex snapping), distance and
   angle between planar faces; display in mm, cm, m, in, ft or ft-in (1/16"); measurements stay on screen until removed
 - Fit all / zoom to selection, six standard views and iso, ViewCube, perspective or orthographic,
-  shaded / shaded with edges / wireframe, ground grid
+  shaded / shaded with edges / wireframe, ground grid; save the view as a PNG
 - Installable PWA; when installed (Chromium) it can be the OS handler for the supported extensions
 
 Not yet: section caps, 3MF, PLY, FBX.

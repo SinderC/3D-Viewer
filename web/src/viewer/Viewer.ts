@@ -721,6 +721,15 @@ export class Viewer {
     return best.clone();
   }
 
+  /** The current view as a PNG: the canvas only, without the HTML overlays (ViewCube, axes, labels). */
+  screenshot(): Promise<Blob> {
+    // The drawing buffer is readable until the browser composites it, so render and capture in one task.
+    this.renderer.render(this.scene, this.camera);
+    return new Promise((resolve, reject) =>
+      this.renderer.domElement.toBlob((b) => (b ? resolve(b) : reject(new Error('Could not capture the view'))), 'image/png'),
+    );
+  }
+
   // ---------------------------------------------------------------------------
   // Rendering (on demand)
 

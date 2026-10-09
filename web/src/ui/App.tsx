@@ -3,6 +3,7 @@ import type { Viewer } from '../viewer/Viewer';
 import { EXTENSIONS, FORMATS, isSupported } from '../core/formats';
 import { loadModel } from '../worker/loadModel';
 import { QUALITY, type Quality } from '../worker/protocol';
+import { baseName, download } from './download';
 import { LockIcon, OpenFileIcon } from './icons';
 import { Properties } from './Properties';
 import { Sidebar } from './Sidebar';
@@ -110,6 +111,11 @@ export function App() {
     dispatch({ type: 'close' });
   };
 
+  const saveImage = async () => {
+    const png = await viewer.current?.screenshot();
+    if (png) download(png, `${baseName(state.fileName)}.png`);
+  };
+
   // Quality is applied at load time, so reload the open model with the new setting.
   const changeQuality = (q: Quality) => {
     setQuality(q);
@@ -181,6 +187,7 @@ export function App() {
         status={status}
         onOpen={() => fileInput.current?.click()}
         onClose={close}
+        onSaveImage={saveImage}
         quality={quality}
         onQuality={changeQuality}
         showProps={showProps}
