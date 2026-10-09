@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Model } from '../core/model';
-import { displayStyle, initialState, measureMode, reducer, type State } from './state';
+import { displayStyle, initialState, measureMode, reducer, searchTree, type State } from './state';
 
 describe('reducer', () => {
   it('close drops the model and keeps view preferences', () => {
@@ -66,5 +66,25 @@ describe('PMI state', () => {
     const s = reducer({ ...ready, selectedPmi: 1 }, { type: 'select', id: 4 });
     expect(s.selectedPmi).toBeNull();
     expect(reducer(s, { type: 'selectPmi', index: 2 }).selected).toBeNull();
+  });
+});
+
+describe('searchTree', () => {
+  // asm ─ sub ─ Bolt M8
+  //     │     └ Nut
+  //     └ bolt cover ─ cap
+  const names = ['asm', 'sub', 'Bolt M8', 'Nut', 'bolt cover', 'cap'];
+  const parents = [-1, 0, 1, 1, 0, 4];
+  const children = names.map((_, i) => parents.flatMap((p, c) => (p === i ? [c] : [])));
+  const model = { nodes: names.map((name, id) => ({ id, name, parent: parents[id], children: children[id] })) } as unknown as Model;
+
+  it('shows matches, their ancestors expanded and their subtrees, ignoring case', () => {
+    const r = searchTree(model, ' BOLT ')!;
+    expect([...r.shown].sort()).toEqual([0, 1, 2, 4, 5]);
+    expect([...r.expand].sort()).toEqual([0, 1]);
+  });
+
+  it('is null for an empty query', () => {
+    expect(searchTree(model, '  ')).toBeNull();
   });
 });

@@ -144,6 +144,17 @@ input[type='checkbox'] { accent-color: var(--accent); margin: 0; }
 .splitter.left { left: -4px; }
 .splitter:hover, .splitter:active, .splitter:focus-visible { background: linear-gradient(var(--accent), var(--accent)) center / 2px 100% no-repeat; outline: none; }
 .tree { flex: 1; overflow: auto; padding: 4px 0; }
+.search {
+  margin: 4px 8px;
+  padding: 4px 8px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-s);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+}
+.search:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.row mark { background: var(--accent-tint); color: inherit; border-radius: 2px; }
 
 /* Segmented control */
 .tabs { display: flex; gap: 2px; margin: 8px 8px 4px; padding: 2px; background: var(--surface-2); border-radius: var(--radius-m); }

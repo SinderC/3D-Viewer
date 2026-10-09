@@ -143,3 +143,26 @@ export function isolate(model: Model, id: number): Set<number> {
   }
   return new Set(model.nodes.filter((n) => !keep.has(n.id)).map((n) => n.id));
 }
+
+/** Nodes to list for a name search: the matches with their subtrees, and their ancestors (expanded). Null without a query. */
+export function searchTree(model: Model, query: string): { shown: Set<number>; expand: Set<number> } | null {
+  const q = query.trim().toLowerCase();
+  if (!q) return null;
+  const shown = new Set<number>();
+  const expand = new Set<number>();
+  const subtrees = new Set<number>(); // shown with everything below them
+  for (const n of model.nodes) {
+    if (!n.name.toLowerCase().includes(q)) continue;
+    for (let p = n.parent; p >= 0 && !expand.has(p); p = model.nodes[p].parent) expand.add(p);
+    const stack = [n.id];
+    while (stack.length) {
+      const c = stack.pop()!;
+      if (subtrees.has(c)) continue;
+      subtrees.add(c);
+      stack.push(...model.nodes[c].children);
+    }
+  }
+  for (const id of expand) shown.add(id);
+  for (const id of subtrees) shown.add(id);
+  return { shown, expand };
+}

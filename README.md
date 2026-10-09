@@ -25,7 +25,7 @@ only allows requests to the app's own origin. After the first visit the app work
 - glTF/GLB, OBJ, STL, VRML (meshes: point-to-point distance only, no feature edges). glTF is read
   in metres; OBJ, STL and VRML carry no reliable unit and are read as mm. A `.gltf` must embed its
   buffers (or use `.glb`); external `.bin`/`.mtl` files are not loaded
-- Assembly tree with show/hide/isolate, colours from the file, feature edges (B-rep formats and JT
+- Assembly tree with name search and show/hide/isolate, colours from the file, feature edges (B-rep formats and JT
   with XT data)
 - Pick to select, X/Y/Z section plane with solid caps
 - Properties: bounding-box size of the model and of the selected part
