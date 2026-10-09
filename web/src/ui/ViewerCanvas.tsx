@@ -21,6 +21,10 @@ export function ViewerCanvas({ state, dispatch, viewerRef, theme }: Props) {
   useEffect(() => {
     const viewer = new Viewer(host.current!);
     viewer.onPick = (id) => dispatch({ type: 'select', id });
+    viewer.onSectionFace = (normal, position) => {
+      dispatch({ type: 'setSection', section: { axis: 'face', normal, position } });
+      dispatch({ type: 'setTool', tool: 'select' });
+    };
     viewerRef.current = viewer;
     setViewer(viewer);
     return () => {

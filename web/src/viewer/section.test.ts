@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { computeBoundsTree } from 'three-mesh-bvh';
 import { describe, expect, it } from 'vitest';
-import { buildSectionCaps } from './section';
+import { buildSectionCaps, sectionPlane, sectionPosition } from './section';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 
@@ -74,5 +74,24 @@ describe('buildSectionCaps', () => {
   it('skips open surfaces', () => {
     const sheet = new THREE.PlaneGeometry(2, 2).rotateX(Math.PI / 2); // vertical sheet, no inside
     expect(capArea(buildSectionCaps([mesh(sheet)], zPlane(0), style))).toBe(0);
+  });
+});
+
+describe('sectionPlane', () => {
+  const box = new THREE.Box3(new THREE.Vector3(0, 0, 0), new THREE.Vector3(10, 20, 30));
+
+  it('cuts along an axis, keeping the low side unless flipped', () => {
+    const plane = sectionPlane(box, new THREE.Vector3(1, 0, 0), 0.25, false);
+    expect(plane.distanceToPoint(new THREE.Vector3(2.5, 5, 5))).toBeCloseTo(0);
+    expect(plane.distanceToPoint(new THREE.Vector3(1, 0, 0))).toBeGreaterThan(0); // kept
+    expect(sectionPlane(box, new THREE.Vector3(1, 0, 0), 0.25, true).distanceToPoint(new THREE.Vector3(1, 0, 0))).toBeLessThan(0);
+  });
+
+  it('maps a point on a slanted face to its position and back', () => {
+    const dir = new THREE.Vector3(1, 1, 0).normalize();
+    const point = new THREE.Vector3(5, 5, 0);
+    const position = sectionPosition(box, dir, point);
+    expect(position).toBeCloseTo(10 / 30); // n·p over corners spans 0..30/√2; the point is at 10/√2
+    expect(sectionPlane(box, dir, position, false).distanceToPoint(point)).toBeCloseTo(0);
   });
 });

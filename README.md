@@ -27,7 +27,7 @@ only allows requests to the app's own origin. After the first visit the app work
   buffers (or use `.glb`); external `.bin`/`.mtl` files are not loaded
 - Assembly tree with name search and show/hide/isolate (hidden parts optionally shown as translucent ghosts), colours from the file, feature edges (B-rep formats and JT
   with XT data)
-- Pick to select, X/Y/Z section plane with solid caps
+- Pick to select, section plane along X/Y/Z or a picked planar face, with solid caps
 - Exploded view: a slider moves the parts away from the model centre
 - Properties: bounding-box size of the model and of the selected part
 - Measure: edge length / radius / diameter, distance between points (vertex snapping), distance and

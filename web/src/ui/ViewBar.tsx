@@ -22,7 +22,7 @@ import {
 import { Menu } from './Menu';
 import { keyLabel } from './shortcuts';
 import type { BarSize } from './ViewMenu';
-import { canExplode, displayStyle, hasEdges, measureMode, type Action, type State } from './state';
+import { canExplode, displayStyle, hasEdges, hasFaces, measureMode, type Action, type State } from './state';
 
 interface Props {
   state: State;
@@ -151,6 +151,17 @@ export function ViewBar({ state, dispatch, viewer, size }: Props) {
               {axis?.toUpperCase() ?? 'Off'}
             </button>
           ))}
+          <button
+            aria-pressed={section.axis === 'face' || state.tool === 'sectionFace'}
+            disabled={!hasFaces(state.model)}
+            title={hasFaces(state.model) ? 'Click a planar face to cut along it' : 'This model has no B-rep faces'}
+            onClick={(e) => {
+              e.currentTarget.closest<HTMLElement>('[popover]')?.hidePopover();
+              dispatch({ type: 'setTool', tool: 'sectionFace' });
+            }}
+          >
+            Face
+          </button>
         </div>
         {section.axis && (
           <div className="menu-row">

@@ -9,6 +9,34 @@ export interface CapStyle {
   outline: THREE.LineBasicMaterial;
 }
 
+// Range of n·p over the box's corners: where a plane with normal `n` can cut it.
+function projectedRange(box: THREE.Box3, n: THREE.Vector3): [number, number] {
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (let i = 0; i < 8; i++) {
+    const d = n.x * (i & 1 ? box.max.x : box.min.x) + n.y * (i & 2 ? box.max.y : box.min.y) + n.z * (i & 4 ? box.max.z : box.min.z);
+    lo = Math.min(lo, d);
+    hi = Math.max(hi, d);
+  }
+  return [lo, hi];
+}
+
+/**
+ * Cut across `box` perpendicular to the unit vector `dir`, at `position` (0..1) along it. Keeps the side
+ * towards -dir (the material behind a face whose outward normal is `dir`), or towards +dir when flipped.
+ */
+export function sectionPlane(box: THREE.Box3, dir: THREE.Vector3, position: number, flip: boolean): THREE.Plane {
+  const [lo, hi] = projectedRange(box, dir);
+  const at = dir.clone().multiplyScalar(THREE.MathUtils.lerp(lo, hi, position));
+  return new THREE.Plane().setFromNormalAndCoplanarPoint(dir.clone().multiplyScalar(flip ? 1 : -1), at);
+}
+
+/** The sectionPlane position (0..1) of the plane through `point`. */
+export function sectionPosition(box: THREE.Box3, dir: THREE.Vector3, point: THREE.Vector3): number {
+  const [lo, hi] = projectedRange(box, dir);
+  return hi > lo ? THREE.MathUtils.clamp((dir.dot(point) - lo) / (hi - lo), 0, 1) : 0.5;
+}
+
 /** Builds caps for all meshes, in world space. Meshes must have a bounds tree. */
 export function buildSectionCaps(meshes: THREE.Mesh[], plane: THREE.Plane, style: CapStyle): THREE.Group {
   const group = new THREE.Group();

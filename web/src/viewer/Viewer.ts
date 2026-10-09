@@ -8,7 +8,7 @@ import { Measure, type EdgePick, type FacePick, type MeasureMode, type Pick } fr
 import { isShown } from './objects';
 import { applyExplode, explodeOffsets, type ExplodeItem } from './explode';
 import { PmiLayer } from './pmi';
-import { buildSectionCaps, disposeCaps } from './section';
+import { buildSectionCaps, disposeCaps, sectionPlane, sectionPosition } from './section';
 import { AxisTriad } from './AxisTriad';
 import { ViewCube } from './ViewCube';
 
@@ -16,14 +16,15 @@ THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
-export type Tool = 'select' | 'measure';
+export type Tool = 'select' | 'measure' | 'sectionFace'; // sectionFace: the next click picks the face to cut along
 export type ViewName = 'iso' | 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom';
 export type DisplayStyle = 'shadedEdges' | 'shaded' | 'wireframe';
 export type Axis = 'x' | 'y' | 'z';
 export interface Section {
-  axis: Axis | null;
+  axis: Axis | 'face' | null;
   position: number; // 0..1 across the model bounds
   flip: boolean;
+  normal?: [number, number, number]; // for 'face': the picked face's outward normal
 }
 
 // Models are Z-up (the bridge converts Y-up mesh formats).
@@ -58,6 +59,8 @@ const EDGE_PICK_PX = 6;
 
 export class Viewer {
   onPick: (nodeId: number | null) => void = () => {};
+  /** A planar face picked with the sectionFace tool: its outward normal and the section position through it. */
+  onSectionFace: (normal: [number, number, number], position: number) => void = () => {};
 
   private readonly renderer: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
@@ -405,6 +408,7 @@ export class Viewer {
   setTool(tool: Tool): void {
     this.tool = tool;
     if (tool !== 'measure') this.measure.clear();
+    this.setHover(null);
     this.requestRender();
   }
 
@@ -429,12 +433,11 @@ export class Viewer {
     this.requestRender();
   }
 
-  setSection({ axis, position, flip }: Section): void {
+  setSection({ axis, position, flip, normal }: Section): void {
     this.clipping.length = 0;
-    if (axis && !this.bounds.isEmpty()) {
-      const n = AXES[axis].clone().multiplyScalar(flip ? 1 : -1);
-      const at = this.bounds.min.clone().lerp(this.bounds.max, position);
-      this.clipPlane.setFromNormalAndCoplanarPoint(n, at);
+    const dir = axis === 'face' ? normal && new THREE.Vector3(...normal) : axis && AXES[axis];
+    if (dir && !this.bounds.isEmpty()) {
+      this.clipPlane.copy(sectionPlane(this.bounds, dir, position, flip));
       this.clipping.push(this.clipPlane);
     }
     this.updateCaps();
@@ -629,7 +632,10 @@ export class Viewer {
     if (e.button !== 0 || !down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > CLICK_TOLERANCE_PX) return;
 
     const hit = this.raycast(e.clientX, e.clientY);
-    if (this.tool === 'measure') {
+    if (this.tool === 'sectionFace') {
+      const plane = hit && this.pickFace(hit)?.plane;
+      if (plane) this.onSectionFace(plane.normal.toArray(), sectionPosition(this.bounds, plane.normal, hit.point));
+    } else if (this.tool === 'measure') {
       const pick = this.pick(this.measure.pickKind, hit, e);
       if (pick) this.measure.add(pick);
     } else {
@@ -640,8 +646,8 @@ export class Viewer {
 
   // Highlight the edge or face a click would pick; points get no preview.
   private handleHover = (e: PointerEvent): void => {
-    const kind = this.measure.pickKind;
-    if (this.tool !== 'measure' || kind === 'point' || e.buttons) return this.setHover(null);
+    const kind = this.tool === 'sectionFace' ? 'face' : this.tool === 'measure' ? this.measure.pickKind : null;
+    if (!kind || kind === 'point' || e.buttons) return this.setHover(null);
     this.setHover(this.pick(kind, this.raycast(e.clientX, e.clientY), e));
   };
 

@@ -225,7 +225,7 @@ input[type='checkbox'] { accent-color: var(--accent); margin: 0; }
 .stage { grid-area: stage; position: relative; min-width: 0; min-height: 0; }
 .viewport { position: absolute; inset: 0; overflow: hidden; }
 .viewport canvas { display: block; }
-.viewport[data-tool='measure'] canvas { cursor: crosshair; }
+.viewport:is([data-tool='measure'], [data-tool='sectionFace']) canvas { cursor: crosshair; }
 
 .overlay {
   position: absolute;

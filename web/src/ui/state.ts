@@ -89,6 +89,9 @@ export const canExplode = (model?: Model): boolean => (model?.nodes.filter((n) =
 
 export const hasEdges = (model?: Model): boolean => !!model?.protos.some((p) => p.edges.length);
 
+// Likewise B-rep faces, which face picks (section on a face, face measurements) need.
+export const hasFaces = (model?: Model): boolean => !!model?.protos.some((p) => p.faceStarts.length);
+
 // The chosen style is kept for the next model that has edges.
 export const displayStyle = (state: State): DisplayStyle => (hasEdges(state.model) ? state.display : 'shaded');
 
