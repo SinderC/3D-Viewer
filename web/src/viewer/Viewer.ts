@@ -315,7 +315,8 @@ export class Viewer {
     const apply = (id: number | null, on: boolean) => {
       if (id === null) return;
       this.nodeObjects[id]?.traverse((o) => {
-        if (o instanceof THREE.Mesh) o.material = on ? this.highlight : o.userData.baseMaterial;
+        // Part meshes only: PMI meshes hang under the same nodes with their own materials.
+        if (o instanceof THREE.Mesh && o.userData.baseMaterial) o.material = on ? this.highlight : o.userData.baseMaterial;
       });
     };
     apply(this.selected, false);
