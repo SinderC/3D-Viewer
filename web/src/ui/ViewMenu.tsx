@@ -1,11 +1,12 @@
 import { useEffect, useState, type Dispatch, type RefObject } from 'react';
-import type { UpAxis, Viewer } from '../viewer/Viewer';
+import type { PmiColor, UpAxis, Viewer } from '../viewer/Viewer';
 import { Menu, MenuItem, MenuSubChoices } from './Menu';
 import type { Action, State } from './state';
 import { MAC } from './Toolbar';
 
 export const THEMES = { system: 'System', light: 'Light', dark: 'Dark' };
 export type ThemeChoice = keyof typeof THEMES;
+export const PMI_COLORS: Record<PmiColor, string> = { blue: 'Blue', green: 'Green', magenta: 'Magenta', yellow: 'Yellow', contrast: 'Black/White' };
 export const BAR_SIZES = { small: 'Small', regular: 'Regular', large: 'Large' };
 export type BarSize = keyof typeof BAR_SIZES;
 export const UP_AXES: Record<UpAxis, string> = { z: '+Z', y: '+Y', x: '+X', '-z': '−Z', '-y': '−Y', '-x': '−X' };
@@ -22,6 +23,8 @@ export interface ViewPrefs {
   toggleAxes: () => void;
   theme: ThemeChoice;
   setTheme: (theme: ThemeChoice) => void;
+  pmiColor: PmiColor;
+  setPmiColor: (color: PmiColor) => void;
   barSize: BarSize;
   setBarSize: (size: BarSize) => void;
   upAxis: UpAxis;

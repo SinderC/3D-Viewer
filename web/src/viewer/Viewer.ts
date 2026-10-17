@@ -82,9 +82,19 @@ const APPEARANCE_DEFAULT_COLOR = new THREE.Color(0xd2d5da);
 const EDGE_COLOR = 0x1e2026;
 export type Theme = 'dark' | 'light';
 // Canvas colours per UI theme; wireframe edges alone must stand out against the background.
-const THEMES: Record<Theme, { background: number; grid: [number, number]; wire: number; pmi: number }> = {
-  dark: { background: 0x2a2d34, grid: [0x565b66, 0x3a3e46], wire: 0xc8ccd4, pmi: 0x4fb4ff },
-  light: { background: 0xeef0f3, grid: [0xb4b9c2, 0xd4d8de], wire: 0x3a3e46, pmi: 0x1f78d1 },
+const THEMES: Record<Theme, { background: number; grid: [number, number]; wire: number }> = {
+  dark: { background: 0x2a2d34, grid: [0x565b66, 0x3a3e46], wire: 0xc8ccd4 },
+  light: { background: 0xeef0f3, grid: [0xb4b9c2, 0xd4d8de], wire: 0x3a3e46 },
+};
+
+// PMI colours, each in a shade for either canvas. None near orange: selected PMI is drawn in orange.
+export type PmiColor = 'blue' | 'green' | 'magenta' | 'yellow' | 'contrast';
+const PMI_COLORS: Record<PmiColor, Record<Theme, number>> = {
+  blue: { dark: 0x4fb4ff, light: 0x1f78d1 },
+  green: { dark: 0x5ad17a, light: 0x1e8a3c },
+  magenta: { dark: 0xe07ae0, light: 0xa8269e },
+  yellow: { dark: 0xf2d24b, light: 0x8a6d00 },
+  contrast: { dark: 0xffffff, light: 0x000000 },
 };
 // Light intensities and colours; in the photographic styles the environment adds light, so the lamps dim.
 // The plain styles light from the camera, so every face towards you is lit; the photographic ones light
@@ -172,7 +182,9 @@ export class Viewer {
   private selected: number | null = null;
   private tool: Tool = 'select';
   private display: DisplayStyle = 'shadedEdges';
+  private themeId: Theme = 'dark';
   private theme = THEMES.dark;
+  private pmiColor: PmiColor = 'blue';
   private animation = 0;
   private renderQueued = false;
   // Derived scene parts to rebuild before the next frame, so several changes in one frame build them once.
@@ -238,7 +250,7 @@ export class Viewer {
     container.appendChild(this.renderer.domElement);
 
     this.scene.background = this.background.set(this.theme.background);
-    this.pmi.setColor(this.theme.pmi);
+    this.pmi.setColor(PMI_COLORS[this.pmiColor][this.themeId]);
     this.perspective.up.copy(Z_UP);
     this.ortho.up.copy(Z_UP);
     this.scene.add(this.hemisphere);
@@ -628,16 +640,23 @@ export class Viewer {
   }
 
   setTheme(theme: Theme): void {
+    this.themeId = theme;
     this.theme = THEMES[theme];
     this.background.set(this.theme.background);
     this.effects?.setBackground(this.theme.background);
     if (this.display === 'wireframe') this.edgeMaterial.color.set(this.theme.wire);
-    this.pmi.setColor(this.theme.pmi);
+    this.pmi.setColor(PMI_COLORS[this.pmiColor][theme]);
     // GridHelper bakes its colours into the geometry: rebuild it.
     if (this.grid) {
       this.removeGrid();
       this.addGrid();
     }
+    this.requestRender();
+  }
+
+  setPmiColor(color: PmiColor): void {
+    this.pmiColor = color;
+    this.pmi.setColor(PMI_COLORS[color][this.themeId]);
     this.requestRender();
   }
 

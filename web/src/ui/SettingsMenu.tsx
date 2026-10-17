@@ -1,7 +1,7 @@
 import { QUALITY, type Quality } from '../worker/protocol';
 import { Menu, MenuChoices, MenuSubChoices } from './Menu';
 import type { State } from './state';
-import { BAR_SIZES, THEMES, type ViewPrefs } from './ViewMenu';
+import { BAR_SIZES, PMI_COLORS, THEMES, type ViewPrefs } from './ViewMenu';
 
 interface Props {
   status: State['status'];
@@ -12,7 +12,7 @@ interface Props {
 
 const QUALITY_LABELS = Object.fromEntries(Object.entries(QUALITY).map(([id, q]) => [id, q.label])) as Record<Quality, string>;
 
-// App preferences: mesh quality, theme and toolbar size.
+// App preferences: mesh quality, theme, PMI colour and toolbar size.
 export function SettingsMenu({ status, quality, onQuality, prefs }: Props) {
   return (
     <Menu title="Settings" label="Settings" className="menu-trigger" bar>
@@ -27,6 +27,7 @@ export function SettingsMenu({ status, quality, onQuality, prefs }: Props) {
       <p className="menu-note">Changing it reloads the open model.</p>
       <hr className="menu-sep" />
       <MenuSubChoices label="Theme" options={THEMES} value={prefs.theme} onChange={prefs.setTheme} />
+      <MenuSubChoices label="PMI color" options={PMI_COLORS} value={prefs.pmiColor} onChange={prefs.setPmiColor} />
       <MenuSubChoices label="Toolbar size" options={BAR_SIZES} value={prefs.barSize} onChange={prefs.setBarSize} />
     </Menu>
   );
