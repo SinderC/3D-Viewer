@@ -6,6 +6,7 @@ import { loadModel } from '../worker/loadModel';
 import { QUALITY, type Quality } from '../worker/protocol';
 import { baseName, download } from './download';
 import { LockIcon, OpenFileIcon } from './icons';
+import { MissingFiles } from './MissingFiles';
 import { Properties } from './Properties';
 import { findShortcut, type ShortcutContext } from './shortcuts';
 import { ShortcutHelp } from './ShortcutHelp';
@@ -52,6 +53,7 @@ export function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
   const viewer = useRef<Viewer | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const addInput = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [quality, setQuality] = useStored<Quality>('quality', QUALITY, 'normal');
   const [themeChoice, setTheme] = useStored('theme', THEMES, 'system');
@@ -131,6 +133,12 @@ export function App() {
   const exportModel = async (format: 'stl' | 'glb') => {
     const blob = await viewer.current?.exportModel(format);
     if (blob) download(blob, `${baseName(state.fileName)}.${format}`);
+  };
+
+  // Files an assembly references, added to the ones it was opened with; a file of the same name replaces one.
+  const addFiles = (added: File[]) => {
+    const names = new Set(added.map((f) => f.name.toLowerCase()));
+    open([...lastFiles.current.filter((f) => !names.has(f.name.toLowerCase())), ...added]);
   };
 
   // Quality is applied at load time, so reload the open model with the new setting.
@@ -223,10 +231,21 @@ export function App() {
           e.target.value = '';
         }}
       />
+      <input
+        ref={addInput}
+        type="file"
+        multiple
+        hidden
+        onChange={(e) => {
+          if (e.target.files?.length) addFiles([...e.target.files]);
+          e.target.value = '';
+        }}
+      />
       {showSidebar && <Sidebar state={state} dispatch={dispatch} info={narrow} onCollapse={toggleSidebar} />}
       <main className="stage">
         <ViewerCanvas state={state} dispatch={dispatch} viewerRef={viewer} theme={theme} upAxis={upAxis} />
         {status === 'ready' && <ViewBar state={state} dispatch={dispatch} viewer={viewer} size={barSize} />}
+        {status === 'ready' && state.model && <MissingFiles model={state.model} onAdd={() => addInput.current?.click()} />}
         {status === 'idle' && (
           <div className="overlay">
             <div className="welcome">
