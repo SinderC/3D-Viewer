@@ -34,8 +34,9 @@ export function cellDirection(face: Face, i: number, j: number): THREE.Vector3 {
     .addScaledVector(down, j - 1);
 }
 
+// house, Font Awesome Free 7.3.1, CC BY 4.0: https://fontawesome.com/license/free
 const HOME_ICON =
-  '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7.5 8 2l6 5.5M3.5 6.5V14h9V6.5"/></svg>';
+  '<svg viewBox="0 0 512 512" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M277.8 8.6c-12.3-11.4-31.3-11.4-43.5 0l-224 208c-9.6 9-12.8 22.9-8 35.1S18.8 272 32 272l16 0 0 176c0 35.3 28.7 64 64 64l288 0c35.3 0 64-28.7 64-64l0-176 16 0c13.2 0 25-8.1 29.8-20.3s1.6-26.2-8-35.1l-224-208zM240 320l32 0c26.5 0 48 21.5 48 48l0 96-128 0 0-96c0-26.5 21.5-48 48-48z"/></svg>';
 
 const css = (m: THREE.Matrix4) => `matrix3d(${m.elements.join(',')})`;
 

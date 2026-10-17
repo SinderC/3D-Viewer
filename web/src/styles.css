@@ -252,7 +252,7 @@ input[type='checkbox'] { accent-color: var(--accent); margin: 0; }
   box-shadow: var(--shadow-2);
   pointer-events: auto;
 }
-.welcome > svg { width: 44px; height: 44px; color: var(--accent); stroke-width: 1; margin-bottom: 4px; }
+.welcome > svg { width: 44px; height: 44px; color: var(--accent); margin-bottom: 4px; }
 .welcome h1 { margin: 0; font-size: 20px; font-weight: 600; line-height: 1.2; letter-spacing: -0.01em; }
 .welcome button.primary { margin: 8px 0 14px; padding: 7px 18px; background: var(--accent); border-color: transparent; border-radius: var(--radius-m); color: var(--on-accent); font-weight: 600; }
 .welcome button.primary:hover { background: var(--accent); filter: brightness(1.1); }
