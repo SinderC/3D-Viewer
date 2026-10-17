@@ -1,5 +1,6 @@
 // STEP features beyond plain B-rep parts, checked on small files written here: visibility, layers,
-// materials, approvals and organisations, occurrence colours (SHUO).
+// materials, approvals and organisations, occurrence colours (SHUO), shape representations OCCT
+// does not read as it comes (see wasm/patches).
 // Usage: node wasm/test/step-coverage.mjs   (DUMP=dir also writes the files there)
 import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
@@ -29,6 +30,7 @@ class Step {
 }
 
 const AP214 = 'AUTOMOTIVE_DESIGN { 1 0 10303 214 3 1 1 }';
+const AP203 = 'AP203_CONFIGURATION_CONTROLLED_3D_DESIGN_OF_MECHANICAL_PARTS_AND_ASSEMBLIES_MIM_LF { 1 0 10303 403 3 1 4 }';
 const list = (items) => `(${items.join(',')})`;
 const pt = (s, [x, y, z]) => s.add(`CARTESIAN_POINT('',(${x.toFixed(1)},${y.toFixed(1)},${z.toFixed(1)}))`);
 const dir = (s, [x, y, z]) => s.add(`DIRECTION('',(${x.toFixed(1)},${y.toFixed(1)},${z.toFixed(1)}))`);
@@ -200,6 +202,14 @@ const tests = {
     assert.deepEqual(p.filter(([k]) => k === 'Material'), [['Material', 'Steel S235']]);
     for (const expected of [['Approval', 'approved'], ['Approver', 'Jane Doe, ACME'], ['Approval date', '2024-03-15 09:30'], ['Design supplier', 'ACME']])
       assert.ok(p.some(([k, v]) => k === expected[0] && v === expected[1]), `${expected} in ${JSON.stringify(p)}`);
+  },
+
+  'elementary B-rep (AP203 co28)'() {
+    const s = new Step();
+    const ctx = context(s);
+    product(s, ctx, 'block', [box(s, [0, 0, 0], 10, 'FACE_SURFACE')], 'ELEMENTARY_BREP_SHAPE_REPRESENTATION');
+    const m = read(s.text(AP203));
+    assert.equal(m.protos[nodeNamed(m, 'block')?.proto]?.indices[1] / 3, 12);
   },
 
   'a colour on one occurrence of a nested component (SHUO)'() {
