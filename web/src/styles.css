@@ -502,7 +502,7 @@ button.icon[aria-pressed='true'] { color: var(--accent); background: var(--accen
 .help-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px 24px; }
 .help dl { margin: 0; }
 .help dl div { display: flex; gap: 10px; padding: 2px 0; }
-.help dt { min-width: 64px; }
+.help dt { min-width: 80px; }
 .help dd { margin: 0; color: var(--text-2); }
 .help kbd {
   display: inline-block;
