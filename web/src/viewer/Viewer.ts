@@ -76,7 +76,7 @@ const AXES: Record<Axis, THREE.Vector3> = {
   y: new THREE.Vector3(0, 1, 0),
   z: new THREE.Vector3(0, 0, 1),
 };
-const DEFAULT_COLOR = new THREE.Color(0xb8bcc4);
+export const DEFAULT_COLOR = new THREE.Color(0xb8bcc4);
 // What an appearance shows on a part the file gives no colour.
 const APPEARANCE_DEFAULT_COLOR = new THREE.Color(0xd2d5da);
 const EDGE_COLOR = 0x1e2026;

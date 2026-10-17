@@ -1,5 +1,5 @@
 // Supported file types and what reads them: the WASM bridge (readDoc in wasm/src/bridge.cpp) or
-// three.js in the browser (viewer/gltf.ts, viewer/fbx.ts), which keeps textures and vertex colours.
+// three.js in the browser (viewer/gltf.ts and the readers built on it), which keeps textures and vertex colours.
 export const FORMATS = [
   { name: 'STEP', extensions: ['.stp', '.step'], mime: 'model/step' },
   { name: 'JT', extensions: ['.jt'], mime: 'model/jt' },
@@ -8,6 +8,9 @@ export const FORMATS = [
   { name: 'glTF', extensions: ['.gltf'], mime: 'model/gltf+json', reader: 'three' },
   { name: 'GLB', extensions: ['.glb'], mime: 'model/gltf-binary', reader: 'three' },
   { name: 'FBX', extensions: ['.fbx'], mime: 'application/octet-stream', reader: 'three' },
+  { name: '3MF', extensions: ['.3mf'], mime: 'model/3mf', reader: 'three' },
+  { name: 'PLY', extensions: ['.ply'], mime: 'application/octet-stream', reader: 'three' },
+  { name: 'Collada', extensions: ['.dae'], mime: 'model/vnd.collada+xml', reader: 'three' },
   { name: 'OBJ', extensions: ['.obj'], mime: 'model/obj' },
   { name: 'VRML', extensions: ['.wrl', '.vrml'], mime: 'model/vrml' },
   { name: 'BREP', extensions: ['.brep', '.brp'], mime: 'application/octet-stream' },
