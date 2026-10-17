@@ -286,6 +286,11 @@ const tests = {
     const m = read('swept-solids.stp', s.text(AP203));
     const expected = 10 * 5 * 20 + (Math.PI / 2) * (30 * 30 - 20 * 20) * 5 + 10 * 5 * 4;
     near(volume(m, nodeNamed(m, 'swept')), expected, 0.002, 'volume');
+    // Polyline outlines sweep to a face per segment (6 faces a solid), not one creased face that
+    // the mesher refines without end at its creases.
+    const proto = m.protos[nodeNamed(m, 'swept').proto];
+    assert.equal(proto.faceStarts[1], 18, 'faces');
+    assert.ok(proto.indices[1] / 3 < 2000, `${proto.indices[1] / 3} triangles`);
   },
 
   'parts in other files (external references), opened together or not'() {

@@ -7,6 +7,9 @@ Changes to OCCT (V8_0_1) for the Open CAD Viewer. Applied by wasm/scripts/build-
   faces; solid replicas. Done in STEPControl_ActorRead with BRepPrimAPI and BRepAlgoAPI, so
   TKDESTEP now links TKPrim and TKBO. A half-space without a box is made as a box covering the
   other operands of its boolean on the material side.
+  Polyline outlines are split at their corners before sweeping (OCCT reads a polyline as one
+  degree-1 B-spline), so each segment sweeps to its own face instead of one creased face that
+  meshed to tens of thousands of triangles.
 - STEP: boolean_result operands were read as solid models only, and csg_solid roots as boolean
   results only. Any other operand (a primitive, a half-space, a nested boolean) was dropped, so
   CSG trees came out empty even before conversion. Now read as whichever type they are.
@@ -222,7 +225,7 @@ diff --git a/src/DataExchange/TKDESTEP/RWStepShape/RWStepShape_RWCsgSolid.cxx b/
 diff --git a/src/DataExchange/TKDESTEP/STEPControl/STEPControl_ActorRead.cxx b/src/DataExchange/TKDESTEP/STEPControl/STEPControl_ActorRead.cxx
 --- a/src/DataExchange/TKDESTEP/STEPControl/STEPControl_ActorRead.cxx
 +++ b/src/DataExchange/TKDESTEP/STEPControl/STEPControl_ActorRead.cxx
-@@ -126,6 +126,48 @@
+@@ -126,6 +126,49 @@
  #include <StepRepr_ConstructiveGeometryRepresentation.hxx>
  #include <StepRepr_MechanicalDesignAndDraughtingRelationship.hxx>
  #include <Geom_Plane.hxx>
@@ -244,6 +247,7 @@ diff --git a/src/DataExchange/TKDESTEP/STEPControl/STEPControl_ActorRead.cxx b/s
 +#include <Geom_CartesianPoint.hxx>
 +#include <Geom_Direction.hxx>
 +#include <ShapeFix_Face.hxx>
++#include <ShapeUpgrade_ShapeDivideContinuity.hxx>
 +#include <StepGeom_Axis1Placement.hxx>
 +#include <StepGeom_CartesianTransformationOperator3d.hxx>
 +#include <StepGeom_CurveBoundedSurface.hxx>
@@ -271,7 +275,7 @@ diff --git a/src/DataExchange/TKDESTEP/STEPControl/STEPControl_ActorRead.cxx b/s
  
  IMPLEMENT_STANDARD_RTTIEXT(STEPControl_ActorRead, Transfer_ActorOfTransientProcess)
  
-@@ -206,6 +248,359 @@
+@@ -206,6 +249,369 @@
  // The better way is to pass this information via binder or via TopoDS_Shape itself, however,
  // this is very specific info to do so...
  bool NM_DETECTED = false;
@@ -561,7 +565,9 @@ diff --git a/src/DataExchange/TKDESTEP/STEPControl/STEPControl_ActorRead.cxx b/s
 +    return anOp.IsDone() ? anOp.Shape() : TopoDS_Shape();
 +  }
 +
-+  // Planar faces to sweep, with their outer wires the right way round.
++  // Planar faces to sweep, with their outer wires the right way round, and an edge for each
++  // segment of a polyline boundary: OCCT reads a polyline as one degree-1 B-spline, which would
++  // sweep to a single creased face that the mesher refines without end at its creases.
 +  TopoDS_Face fixed(const TopoDS_Face& theFace) const
 +  {
 +    if (theFace.IsNull())
@@ -572,7 +578,15 @@ diff --git a/src/DataExchange/TKDESTEP/STEPControl/STEPControl_ActorRead.cxx b/s
 +    aFix.SetPrecision(myPrecision);
 +    aFix.SetMaxTolerance(myMaxTol);
 +    aFix.Perform();
-+    return aFix.Face();
++    ShapeUpgrade_ShapeDivideContinuity aSplit(aFix.Face());
++    aSplit.SetTolerance(myPrecision);
++    aSplit.SetBoundaryCriterion(GeomAbs_C1);
++    aSplit.SetPCurveCriterion(GeomAbs_C1);
++    if (!aSplit.Perform() || aSplit.Result().ShapeType() != TopAbs_FACE)
++    {
++      return aFix.Face();
++    }
++    return TopoDS::Face(aSplit.Result());
 +  }
 +
 +  TopoDS_Face area(const occ::handle<StepGeom_CurveBoundedSurface>& theArea) const
@@ -631,18 +645,18 @@ diff --git a/src/DataExchange/TKDESTEP/STEPControl/STEPControl_ActorRead.cxx b/s
  } // namespace
  
  // ============================================================================
-@@ -309,6 +704,10 @@
-     return true;
-   }
-   if (start->IsKind(STANDARD_TYPE(StepShape_FaceBasedSurfaceModel)))
-+  {
-+    return true;
-+  }
-+  if (SolidModelBuilder::IsSupported(start))
+@@ -312,6 +718,10 @@
    {
      return true;
    }
-@@ -1782,6 +2181,7 @@
++  if (SolidModelBuilder::IsSupported(start))
++  {
++    return true;
++  }
+   if (aCanReadTessGeom && start->IsKind(STANDARD_TYPE(StepVisual_TessellatedFace)))
+   {
+     return true;
+@@ -1782,6 +2192,7 @@
    bool                                  found = false;
    StepToTopoDS_Builder                  myShapeBuilder;
    TopoDS_Shape                          mappedShape;
@@ -650,7 +664,7 @@ diff --git a/src/DataExchange/TKDESTEP/STEPControl/STEPControl_ActorRead.cxx b/s
    int                                   nbTPitems = TP->NbMapped();
  #ifdef TRANSLOG
    OSD_Timer chrono;
-@@ -1910,6 +2310,11 @@
+@@ -1910,6 +2321,11 @@
                            aHasGeom,
                            aLocalFactors);
        found = true;
@@ -662,7 +676,7 @@ diff --git a/src/DataExchange/TKDESTEP/STEPControl/STEPControl_ActorRead.cxx b/s
      }
    }
    catch (Standard_Failure const&)
-@@ -1924,9 +2329,9 @@
+@@ -1924,9 +2340,9 @@
      return shbinder;
    }
  
