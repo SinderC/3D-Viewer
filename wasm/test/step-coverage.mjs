@@ -291,13 +291,15 @@ const tests = {
   'parts in other files (external references), opened together or not'() {
     const part = new Step();
     product(part, context(part), 'box', [box(part, [0, 0, 0], 10)], 'ADVANCED_BREP_SHAPE_REPRESENTATION');
-    const assembly = (file) => {
+    // withBracket: a part of its own too, so it shows something without the other file.
+    const assembly = (file, withBracket = false) => {
       const s = new Step();
       const ctx = context(s);
       const top = product(s, ctx, 'top');
       const ref = product(s, ctx, 'box'); // no shape here: it is in the other file
       occurrence(s, ctx, top, ref, 'first');
       occurrence(s, ctx, top, ref, 'second', [20, 0, 0]);
+      if (withBracket) occurrence(s, ctx, top, product(s, ctx, 'bracket', [box(s, [0, 20, 0], 10)], 'ADVANCED_BREP_SHAPE_REPRESENTATION'), 'bracket');
       const doc = s.add(`DOCUMENT_FILE('${file}','',$,${s.add("DOCUMENT_TYPE('')")},'',$)`);
       s.add(`DOCUMENT_REPRESENTATION_TYPE('digital',${doc})`);
       const adr = s.add(`APPLIED_DOCUMENT_REFERENCE(${doc},'',(${ref.pd}))`);
@@ -317,6 +319,10 @@ const tests = {
     const r = readResult('external-assembly.stp', assembly('box.stp'));
     if (r.json) assert.deepEqual(JSON.parse(r.json).externalFiles, [{ name: 'box.stp', loaded: false }]);
     else assert.match(r.error, /box\.stp/);
+    // Partly in it: its own part shows, and the missing file is named.
+    m = read('external-assembly-partial.stp', assembly('box.stp', true));
+    assert.deepEqual(triangles(m), [12]);
+    assert.deepEqual(m.externalFiles, [{ name: 'box.stp', loaded: false }]);
   },
 
   'a colour on one occurrence of a nested component (SHUO)'() {
