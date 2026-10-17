@@ -55,4 +55,7 @@ export default defineConfig({
     }),
   ],
   worker: { format: 'es' },
+  // The main chunk is mostly three.js, needed as soon as a model opens, and the service worker caches it,
+  // so splitting it gains little. The limit still flags real growth.
+  build: { chunkSizeWarningLimit: 1200 },
 });
