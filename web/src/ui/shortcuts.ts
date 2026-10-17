@@ -51,7 +51,7 @@ export const SHORTCUTS: Shortcut[] = [
     group: 'View',
     run: (c) => c.viewer?.setView(view),
   })),
-  { key: 'o', label: 'Orthographic', group: 'View', run: (c) => c.dispatch({ type: 'toggleOrtho' }) },
+  { key: 'o', label: 'Orthographic view', group: 'View', run: (c) => c.dispatch({ type: 'toggleOrtho' }) },
   {
     key: 'd',
     label: 'Next display style',

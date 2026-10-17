@@ -9,7 +9,6 @@ import {
   GhostIcon,
   GridIcon,
   MeasureIcon,
-  OrthoIcon,
   PmiIcon,
   RealisticIcon,
   StudioIcon,
@@ -82,15 +81,6 @@ export function ViewBar({ state, dispatch, viewer, size }: Props) {
           </button>
         ))}
       </Menu>
-      <button
-        className="icon"
-        title="Orthographic projection (O)"
-        aria-label="Orthographic projection"
-        aria-pressed={state.ortho}
-        onClick={() => dispatch({ type: 'toggleOrtho' })}
-      >
-        <OrthoIcon />
-      </button>
       <span className="sep" />
       <Menu up title="Display style (D)" className="icon wide" label={<>{DISPLAY[display].icon}<Chevron /></>}>
         {Object.entries(DISPLAY).map(([id, { label, icon }]) => (

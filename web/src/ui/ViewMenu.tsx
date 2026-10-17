@@ -50,11 +50,11 @@ function useFullscreen(): boolean {
   return full;
 }
 
-// Panels, viewport overlays and appearance; the view toolbar's toggles too, with their shortcuts.
+// Panels, viewport overlays and appearance; the view toolbar's view toggles too, with their shortcuts.
+// Tools (measure, section, explode) stay on the toolbar.
 export function ViewMenu({ state, dispatch, viewer, prefs, narrow, onHelp }: Props) {
   const full = useFullscreen();
   const loaded = state.status === 'ready';
-  const measuring = state.tool === 'measure';
   return (
     <Menu title="View" label="View" className="menu-trigger" bar>
       <MenuItem label="Sidebar" checked={prefs.sidebar} onClick={prefs.toggleSidebar} />
@@ -64,20 +64,12 @@ export function ViewMenu({ state, dispatch, viewer, prefs, narrow, onHelp }: Pro
       <MenuItem label="Axes" checked={prefs.axes} onClick={prefs.toggleAxes} />
       <MenuItem label="Ground grid" kbd="G" checked={state.grid} onClick={() => dispatch({ type: 'toggleGrid' })} />
       <MenuItem label="Ghost hidden parts" kbd="X" checked={state.ghost} onClick={() => dispatch({ type: 'toggleGhost' })} />
-      <MenuItem label="Orthographic" kbd="O" checked={state.ortho} onClick={() => dispatch({ type: 'toggleOrtho' })} />
       <MenuItem
         label="PMI"
         kbd="P"
         checked={state.pmi}
         disabled={!state.model?.pmi.length}
         onClick={() => dispatch({ type: 'togglePmi' })}
-      />
-      <MenuItem
-        label="Measure"
-        kbd="M"
-        checked={measuring}
-        disabled={!loaded}
-        onClick={() => dispatch({ type: 'setTool', tool: measuring ? 'select' : 'measure' })}
       />
       <hr className="menu-sep" />
       <MenuItem label="Fit all" kbd="F" disabled={!loaded} onClick={() => viewer.current?.fit()} />
@@ -87,6 +79,8 @@ export function ViewMenu({ state, dispatch, viewer, prefs, narrow, onHelp }: Pro
         disabled={state.selected === null}
         onClick={() => viewer.current?.fitSelection()}
       />
+      <MenuItem label="Orthographic view" kbd="O" checked={state.ortho} onClick={() => dispatch({ type: 'toggleOrtho' })} />
+      <MenuSubChoices label="Up axis" options={UP_AXES} value={prefs.upAxis} onChange={prefs.setUpAxis} />
       {document.fullscreenEnabled && (
         <>
           <hr className="menu-sep" />
@@ -98,7 +92,6 @@ export function ViewMenu({ state, dispatch, viewer, prefs, narrow, onHelp }: Pro
         </>
       )}
       <hr className="menu-sep" />
-      <MenuSubChoices label="Up axis" options={UP_AXES} value={prefs.upAxis} onChange={prefs.setUpAxis} />
       <MenuSubChoices label="Theme" options={THEMES} value={prefs.theme} onChange={prefs.setTheme} />
       <MenuSubChoices label="Toolbar size" options={BAR_SIZES} value={prefs.barSize} onChange={prefs.setBarSize} />
       <hr className="menu-sep" />

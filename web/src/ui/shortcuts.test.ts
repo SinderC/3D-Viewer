@@ -11,7 +11,7 @@ describe('shortcuts', () => {
   });
 
   it('tells plain keys from Cmd/Ctrl ones and leaves Alt and unlisted combinations alone', () => {
-    expect(press('o')?.label).toBe('Orthographic');
+    expect(press('o')?.label).toBe('Orthographic view');
     expect(press('o', { metaKey: true })?.label).toBe('Open a file');
     expect(press('o', { ctrlKey: true })?.label).toBe('Open a file');
     expect(press('f', { metaKey: true })).toBeUndefined();
