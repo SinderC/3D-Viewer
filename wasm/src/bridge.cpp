@@ -34,11 +34,13 @@
 #include <NCollection_DataMap.hxx>
 #include <NCollection_IndexedDataMap.hxx>
 #include <NCollection_Sequence.hxx>
+#include <OSD_Path.hxx>
 #include <Poly_PolygonOnTriangulation.hxx>
 #include <Poly_Triangulation.hxx>
 #include <RWObj_CafReader.hxx>
 #include <RWStl.hxx>
 #include <STEPCAFControl_Reader.hxx>
+#include <STEPConstruct_ExternRefs.hxx>
 #include <STEPConstruct_UnitContext.hxx>
 #include <STEPConstruct_ValidationProps.hxx>
 #include <STEPControl_Reader.hxx>
@@ -133,6 +135,7 @@
 #include <emscripten/heap.h>
 #include <emscripten/val.h>
 #include <malloc.h>
+#include <sys/stat.h>
 
 #include <algorithm>
 #include <array>
@@ -1295,6 +1298,86 @@ struct Source
   ValidationProps validation;
   // Counts the file states for validation; -1 = not stated.
   int annotations = -1, views = -1;
+  // Files the assembly references (external references), and whether they were opened with it.
+  std::vector<std::pair<std::string, bool>> externalFiles;
+};
+
+// Files opened together with the main one: name and bytes (Uint8Array).
+using ExtraFiles = std::vector<std::pair<std::string, val>>;
+
+std::string lowercase(std::string s)
+{
+  std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+  return s;
+}
+
+// File name without folders, Windows ones included.
+std::string baseName(const std::string& path)
+{
+  const size_t slash = path.find_last_of("/\\");
+  return slash == std::string::npos ? path : path.substr(slash + 1);
+}
+
+// Puts the files a STEP assembly references where OCCT looks for them (relative to the main
+// file), from those opened with it, matched by name without folders or case. All of them also go
+// next to the main file, for references from referenced files. Removed when done.
+class ExternalFiles
+{
+public:
+  static constexpr const char* kDir = "/step/"; // the main file is read as if it were here
+
+  ExternalFiles(STEPCAFControl_Reader& reader, const std::string& mainPath, const ExtraFiles& extra)
+  {
+    for (const auto& [name, bytes] : extra)
+      write(kDir + baseName(name), bytes);
+
+    OSD_Path main(mainPath.c_str());
+    main.SetName("");
+    main.SetExtension("");
+    TCollection_AsciiString dir;
+    main.SystemName(dir);
+    STEPConstruct_ExternRefs refs(reader.ChangeReader().WS());
+    refs.LoadExternRefs();
+    for (int i = 1; i <= refs.NbExternRefs(); ++i)
+    {
+      // As OCCT: STEP documents only, by a path relative to the main file.
+      const std::string format = lowercase(stepText(refs.Format(i)));
+      const char*       file   = refs.FileName(i);
+      if ((!format.empty() && format != "step ap203" && format != "step ap214") || !file || !*file)
+        continue;
+      const std::string name = baseName(file);
+      if (std::any_of(myRefs.begin(), myRefs.end(), [&](const auto& r) { return r.first == name; }))
+        continue;
+      const auto match = std::find_if(extra.begin(), extra.end(), [&](const auto& e) { return lowercase(baseName(e.first)) == lowercase(name); });
+      myRefs.emplace_back(name, match != extra.end());
+      TCollection_AsciiString path = OSD_Path::AbsolutePath(dir, file);
+      if (match != extra.end() && path.Length() > 0 && path.ToCString() != kDir + baseName(match->first))
+        write(path.ToCString(), match->second);
+    }
+  }
+  ~ExternalFiles()
+  {
+    for (const std::string& path : myWritten)
+      std::remove(path.c_str());
+  }
+  ExternalFiles(const ExternalFiles&)            = delete;
+  ExternalFiles& operator=(const ExternalFiles&) = delete;
+
+  const std::vector<std::pair<std::string, bool>>& references() const { return myRefs; }
+
+private:
+  void write(const std::string& path, const val& bytes)
+  {
+    for (size_t slash = path.find('/', 1); slash != std::string::npos; slash = path.find('/', slash + 1))
+      mkdir(path.substr(0, slash).c_str(), 0777); // folders on the way; existing ones fail harmlessly
+    std::string data(bytes["length"].as<size_t>(), '\0');
+    val(emscripten::typed_memory_view(data.size(), data.data())).call<void>("set", bytes);
+    std::ofstream(path, std::ios::binary).write(data.data(), std::streamsize(data.size()));
+    myWritten.push_back(path);
+  }
+
+  std::vector<std::string>                  myWritten;
+  std::vector<std::pair<std::string, bool>> myRefs;
 };
 
 // OCCT's IGES and mesh readers and TKJT need a real file: MEMFS.
@@ -1643,8 +1726,13 @@ void readValidationCounts(const Handle(Interface_InterfaceModel)& model, Source&
   }
 }
 
-// Frees bytes once parsed: the file is not needed for the transfer.
-Source readStepDoc(std::string& bytes, const Handle(TDocStd_Document)& doc, Progress& progress)
+// Frees bytes once parsed: the file is not needed for the transfer. extra: files opened with it,
+// for the ones it references.
+Source readStepDoc(std::string&                    bytes,
+                   const std::string&              fileName,
+                   const ExtraFiles&               extra,
+                   const Handle(TDocStd_Document)& doc,
+                   Progress&                       progress)
 {
   STEPCAFControl_Reader reader;
   reader.SetNameMode(true);
@@ -1659,9 +1747,11 @@ Source readStepDoc(std::string& bytes, const Handle(TDocStd_Document)& doc, Prog
 
   MemBuf       buf(const_cast<char*>(bytes.data()), bytes.size(), progress);
   std::istream stream(&buf);
-  if (reader.ReadStream("model.stp", stream) != IFSelect_RetDone)
+  const std::string mainPath = ExternalFiles::kDir + baseName(fileName);
+  if (reader.ReadStream(mainPath.c_str(), stream) != IFSelect_RetDone)
     throw std::runtime_error("Not a readable STEP file");
   std::string().swap(bytes);
+  const ExternalFiles external(reader, mainPath, extra);
 
   Source src{"STEP", fileSchema(reader.ChangeReader().StepModel()), fileLengthUnit(reader.ChangeReader())};
 
@@ -1678,8 +1768,16 @@ Source readStepDoc(std::string& bytes, const Handle(TDocStd_Document)& doc, Prog
 
   // OCCT's transfer progress stalls for most of the stage on single-root assemblies; don't show it.
   progress("transfer", -1);
+  src.externalFiles = external.references();
   if (!reader.Transfer(doc))
-    throw std::runtime_error("STEP transfer failed");
+  {
+    std::string missing;
+    for (const auto& [name, loaded] : src.externalFiles)
+      if (!loaded)
+        missing += (missing.empty() ? "" : ", ") + name;
+    throw std::runtime_error(missing.empty() ? "STEP transfer failed"
+                                             : "This assembly is in other files too. Open them together with it: " + missing);
+  }
   progress.mark("transferred");
   src.products   = readProductProps(reader);
   src.validation = readValidationProps(reader);
@@ -1869,13 +1967,14 @@ std::string lowerExtension(const std::string& fileName)
 
 Source readDoc(std::string&                    bytes,
                const std::string&              fileName,
+               const ExtraFiles&               extra,
                const Handle(TDocStd_Document)& doc,
                Progress&                       progress)
 {
   const std::string ext  = lowerExtension(fileName);
   const std::string name = fileName.substr(0, fileName.size() - ext.size());
   if (ext == ".stp" || ext == ".step")
-    return readStepDoc(bytes, doc, progress);
+    return readStepDoc(bytes, fileName, extra, doc, progress);
   if (ext == ".igs" || ext == ".iges")
     return readIgesDoc(bytes, doc, progress);
   if (ext == ".obj")
@@ -2037,7 +2136,16 @@ std::string toJson(const Source& src, const Builder& b)
       o << sep << '"' << key << "\":" << n;
       sep = ",";
     }
-  o << "}}";
+  o << '}';
+  if (!src.externalFiles.empty())
+  {
+    o << ",\"externalFiles\":[";
+    for (size_t i = 0; i < src.externalFiles.size(); ++i)
+      o << (i ? "," : "") << "{\"name\":\"" << jsonEscape(src.externalFiles[i].first)
+        << "\",\"loaded\":" << (src.externalFiles[i].second ? "true" : "false") << '}';
+    o << ']';
+  }
+  o << '}';
   return o.str();
 }
 
@@ -2047,9 +2155,14 @@ std::string toJson(const Source& src, const Builder& b)
 // jsBytes: Uint8Array. Copied into the heap once, not via std::string (embind keeps two copies for the call).
 val readModel(val jsBytes, const std::string& fileName, val jsOptions, val onProgress)
 {
-  Options opts;
+  Options    opts;
+  ExtraFiles extra;
   if (!jsOptions.isUndefined() && !jsOptions.isNull())
   {
+    // [{name, bytes}]: files opened together with this one, for the files it references.
+    if (const val files = jsOptions["files"]; files.isArray())
+      for (int i = 0, n = files["length"].as<int>(); i < n; ++i)
+        extra.emplace_back(files[i]["name"].as<std::string>(), files[i]["bytes"]);
     if (jsOptions["linearDeflection"].isNumber())
       opts.linearDeflection = jsOptions["linearDeflection"].as<double>();
     if (jsOptions["angularDeflection"].isNumber())
@@ -2077,7 +2190,7 @@ val readModel(val jsBytes, const std::string& fileName, val jsOptions, val onPro
     std::string bytes(jsBytes["length"].as<size_t>(), '\0');
     val(emscripten::typed_memory_view(bytes.size(), bytes.data())).call<void>("set", jsBytes);
     progress.mark("start");
-    const Source src = readDoc(bytes, fileName, doc, progress);
+    const Source src = readDoc(bytes, fileName, extra, doc, progress);
     std::string().swap(bytes); // the other readers are done with it too
 
     Builder builder(doc, opts, progress);

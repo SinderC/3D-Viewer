@@ -125,9 +125,18 @@ function styled(s, item, [r, g, b], context) {
 
 const viewer = await createOcctViewer();
 let written = 0;
-function read(text) {
-  if (process.env.DUMP) writeFileSync(`${process.env.DUMP}/${++written}.stp`, text);
-  const r = viewer.readModel(new TextEncoder().encode(text), 'test.stp', {}, () => {});
+// files: other files opened with it, {name: text}.
+function readResult(text, files = {}) {
+  if (process.env.DUMP) {
+    writeFileSync(`${process.env.DUMP}/${++written}.stp`, text);
+    for (const [name, t] of Object.entries(files)) writeFileSync(`${process.env.DUMP}/${written}-${name}`, t);
+  }
+  const encode = (t) => new TextEncoder().encode(t);
+  const opened = Object.entries(files).map(([name, t]) => ({ name, bytes: encode(t) }));
+  return viewer.readModel(encode(text), 'test.stp', { files: opened }, () => {});
+}
+function read(text, files) {
+  const r = readResult(text, files);
   assert.ok(r.json, r.error);
   return { ...JSON.parse(r.json), geometry: r.geometry.slice().buffer };
 }
@@ -280,6 +289,37 @@ const tests = {
     const m = read(s.text(AP203));
     const expected = 10 * 5 * 20 + (Math.PI / 2) * (30 * 30 - 20 * 20) * 5 + 10 * 5 * 4;
     near(volume(m, nodeNamed(m, 'swept')), expected, 0.002, 'volume');
+  },
+
+  'parts in other files (external references), opened together or not'() {
+    const part = new Step();
+    product(part, context(part), 'box', [box(part, [0, 0, 0], 10)], 'ADVANCED_BREP_SHAPE_REPRESENTATION');
+    const assembly = (file) => {
+      const s = new Step();
+      const ctx = context(s);
+      const top = product(s, ctx, 'top');
+      const ref = product(s, ctx, 'box'); // no shape here: it is in the other file
+      occurrence(s, ctx, top, ref, 'first');
+      occurrence(s, ctx, top, ref, 'second', [20, 0, 0]);
+      const doc = s.add(`DOCUMENT_FILE('${file}','',$,${s.add("DOCUMENT_TYPE('')")},'',$)`);
+      s.add(`DOCUMENT_REPRESENTATION_TYPE('digital',${doc})`);
+      const adr = s.add(`APPLIED_DOCUMENT_REFERENCE(${doc},'',(${ref.pd}))`);
+      s.add(`ROLE_ASSOCIATION(${s.add("OBJECT_ROLE('mandatory',$)")},${adr})`);
+      return s.text(AP214);
+    };
+    const triangles = (m) => m.nodes.filter((n) => n.proto >= 0).map((n) => m.protos[n.proto].indices[1] / 3);
+
+    let m = read(assembly('box.stp'), { 'box.stp': part.text(AP214) });
+    assert.deepEqual(triangles(m), [12, 12]);
+    assert.deepEqual(m.externalFiles, [{ name: 'box.stp', loaded: true }]);
+    // In a folder, or named in other case: matched by name.
+    m = read(assembly('parts/Box.STP'), { 'box.stp': part.text(AP214) });
+    assert.deepEqual(triangles(m), [12, 12]);
+    assert.deepEqual(m.externalFiles, [{ name: 'Box.STP', loaded: true }]);
+    // Opened alone: says which file is missing.
+    const r = readResult(assembly('box.stp'));
+    if (r.json) assert.deepEqual(JSON.parse(r.json).externalFiles, [{ name: 'box.stp', loaded: false }]);
+    else assert.match(r.error, /box\.stp/);
   },
 
   'a colour on one occurrence of a nested component (SHUO)'() {

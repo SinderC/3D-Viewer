@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState } from 'react';
 import type { Viewer } from '../viewer/Viewer';
 import { EXTENSIONS, FORMATS, isSupported } from '../core/formats';
+import { mainFile } from '../core/mainFile';
 import { loadModel } from '../worker/loadModel';
 import { QUALITY, type Quality } from '../worker/protocol';
 import { baseName, download } from './download';
@@ -80,15 +81,18 @@ export function App() {
     setUpAxis,
   };
   const propsPanel = showProps && !narrow;
-  const lastFile = useRef<File | null>(null);
+  const lastFiles = useRef<File[]>([]);
   const loading = useRef<AbortController | null>(null);
 
   const open = useCallback(
-    async (file: File, q: Quality = quality) => {
+    // Several files: an assembly and the files it keeps parts in (STEP external references).
+    async (files: File[], q: Quality = quality) => {
       // Only the latest file may land: cancel a load still running.
       loading.current?.abort();
       const { signal } = (loading.current = new AbortController());
-      lastFile.current = file;
+      lastFiles.current = files;
+      const file = await mainFile(files);
+      if (signal.aborted) return;
       dispatch({ type: 'loadStart', fileName: file.name, quality: q });
       if (!isSupported(file.name)) {
         dispatch({ type: 'failed', error: `Unsupported file type. Supported: ${EXTENSIONS.join(' ')}` });
@@ -96,12 +100,14 @@ export function App() {
       }
       const t0 = performance.now();
       try {
+        const others = files.filter((f) => f !== file);
         const model = await loadModel(
           await file.arrayBuffer(),
           file.name,
           (stage, percent) => dispatch({ type: 'progress', stage, percent }),
           QUALITY[q].options,
           signal,
+          await Promise.all(others.map(async (f) => ({ name: f.name, bytes: await f.arrayBuffer() }))),
         );
         dispatch({ type: 'loaded', model, ms: Math.round(performance.now() - t0) });
       } catch (e) {
@@ -113,7 +119,7 @@ export function App() {
 
   const close = () => {
     loading.current?.abort();
-    lastFile.current = null;
+    lastFiles.current = [];
     dispatch({ type: 'close' });
   };
 
@@ -130,7 +136,7 @@ export function App() {
   // Quality is applied at load time, so reload the open model with the new setting.
   const changeQuality = (q: Quality) => {
     setQuality(q);
-    if (lastFile.current) open(lastFile.current, q);
+    if (lastFiles.current.length) open(lastFiles.current, q);
   };
 
   // Theme tokens in styles.css key off this; the browser chrome follows the background.
@@ -144,7 +150,7 @@ export function App() {
   // Files opened via the OS when installed as a PWA.
   useEffect(() => {
     window.launchQueue?.setConsumer(async ({ files }) => {
-      if (files[0]) open(await files[0].getFile());
+      if (files.length) open(await Promise.all(files.map((f) => f.getFile())));
     });
   }, [open]);
 
@@ -190,8 +196,7 @@ export function App() {
       onDrop={(e) => {
         e.preventDefault();
         setDragging(false);
-        const file = e.dataTransfer.files[0];
-        if (file) open(file);
+        if (e.dataTransfer.files.length) open([...e.dataTransfer.files]);
       }}
     >
       <Toolbar
@@ -211,10 +216,10 @@ export function App() {
         ref={fileInput}
         type="file"
         accept={EXTENSIONS.join(',')}
+        multiple
         hidden
         onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) open(file);
+          if (e.target.files?.length) open([...e.target.files]);
           e.target.value = '';
         }}
       />

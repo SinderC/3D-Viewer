@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Product } from './model';
-import { countInfo, failures, formatMeasure, validationInfo } from './product';
+import { countInfo, externalFilesInfo, failures, formatMeasure, validationInfo } from './product';
 
 const product = (p: Partial<Product>): Product => ({ props: [], attributes: [], ...p });
 
@@ -9,6 +9,17 @@ describe('formatMeasure', () => {
     expect(formatMeasure(645.16, 'in', 2)).toBe('1 in²');
     expect(formatMeasure(16387.064, 'in', 3)).toBe('1 in³');
     expect(formatMeasure(14642797.5, 'mm', 3)).toBe('14,642,800 mm³');
+  });
+});
+
+describe('externalFilesInfo', () => {
+  it('fails when a referenced file was not opened, and names it', () => {
+    const files = [
+      { name: 'a.stp', loaded: true },
+      { name: 'b.stp', loaded: false },
+    ];
+    expect(externalFilesInfo(files)).toEqual(['✗ 1 of 2', 'Not opened: b.stp. Open them together with this file.']);
+    expect(externalFilesInfo(files.slice(0, 1))).toEqual(['✓ 1 of 1', 'a.stp']);
   });
 });
 

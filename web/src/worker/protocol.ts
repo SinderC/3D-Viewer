@@ -16,7 +16,13 @@ export const QUALITY: Record<Quality, { label: string; options: LoadOptions }> =
   fine: { label: 'Fine', options: { maxDeflection: 0.2 } },
 };
 
-export type WorkerRequest = { type: 'open'; bytes: ArrayBuffer; fileName: string; options?: LoadOptions };
+/** A file opened together with the one read, for the files a STEP assembly references. */
+export interface OtherFile {
+  name: string;
+  bytes: ArrayBuffer;
+}
+
+export type WorkerRequest = { type: 'open'; bytes: ArrayBuffer; fileName: string; options?: LoadOptions; others?: OtherFile[] };
 
 export type WorkerResponse =
   | { type: 'progress'; stage: string; percent: number }

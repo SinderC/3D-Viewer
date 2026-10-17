@@ -28,7 +28,7 @@ self.onmessage = async ({ data }: MessageEvent<WorkerRequest>) => {
     const res = module.readModel(
       new Uint8Array(data.bytes),
       data.fileName,
-      data.options ?? {},
+      { ...data.options, files: data.others?.map(({ name, bytes }) => ({ name, bytes: new Uint8Array(bytes) })) },
       (stage, percent) => post({ type: 'progress', stage, percent }),
     );
     if (res.error || !res.json || !res.geometry) throw new Error(res.error ?? 'Empty result');

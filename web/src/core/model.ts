@@ -25,6 +25,13 @@ export interface RawModel {
   views: SavedView[];
   products: Product[];
   counts: Counts;
+  externalFiles?: ExternalFile[];
+}
+
+/** A file a STEP assembly references for some of its parts, and whether it was opened with it. */
+export interface ExternalFile {
+  name: string;
+  loaded: boolean;
 }
 
 /** What a file says about a part or assembly beyond its shape. Lengths in mm. */
@@ -133,6 +140,7 @@ export interface Model {
   views: SavedView[];
   products: Product[];
   counts: Counts;
+  externalFiles?: ExternalFile[];
   /** Parallel to `colors`: the file's material where it says more than a colour (glTF textures, PBR). */
   materials?: Material[];
 }
@@ -202,5 +210,6 @@ export function decodeModel(raw: RawModel, geometry: ArrayBuffer): Model {
     views: raw.views,
     products: raw.products,
     counts: raw.counts,
+    externalFiles: raw.externalFiles,
   };
 }

@@ -1,6 +1,6 @@
 // Properties panel rows checking a part's validation properties (ISO 10303-203 Amd 1)
 // against the geometry as loaded.
-import type { Product } from './model';
+import type { ExternalFile, Product } from './model';
 import { UNITS, type UnitId } from './units';
 
 /** Relative difference a validation property may have from the loaded geometry. */
@@ -60,6 +60,16 @@ export function validationInfo(p: Product, unit: UnitId): Row[] {
 export function failures(rows: Row[]): number | undefined {
   const checked = rows.filter(([, value]) => value.startsWith(`${mark(true)} `) || value.startsWith(`${mark(false)} `));
   return checked.length ? checked.filter(([, value]) => value.startsWith(mark(false))).length : undefined;
+}
+
+/** Value and tooltip for the files an assembly references: how many were opened with it. */
+export function externalFilesInfo(files: ExternalFile[]): [string, string] {
+  const missing = files.filter((f) => !f.loaded).map((f) => f.name);
+  const loaded = files.length - missing.length;
+  return [
+    `${mark(!missing.length)} ${loaded} of ${files.length}`,
+    missing.length ? `Not opened: ${missing.join(', ')}. Open them together with this file.` : files.map((f) => f.name).join(', '),
+  ];
 }
 
 /** Value and tooltip for a count loaded from the file, checked against the count the file states. */
