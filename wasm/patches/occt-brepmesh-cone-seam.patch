@@ -1,0 +1,27 @@
+Change to OCCT (V8_0_1) for the Open CAD Viewer. Applied by wasm/scripts/build-occt.sh.
+
+- BRepMesh: the cone seam splitter (BRepMesh_ModelPreProcessor) picked the seam edge's pcurve by
+  evaluating it at FirstParameter(), which is infinite for a line pcurve. A seam line with a tiny
+  tilt (direction X -1.7e-16 in an Autodesk Inventor STEP file) then landed far off, the pcurves were
+  swapped, and the seam's inner points were inserted on the opposite seam. The wire crossed
+  itself and most of the cone face was left unmeshed. Now evaluated at a parameter of the edge.
+
+diff --git a/src/ModelingAlgorithms/TKMesh/BRepMesh/BRepMesh_ModelPreProcessor.cxx b/src/ModelingAlgorithms/TKMesh/BRepMesh/BRepMesh_ModelPreProcessor.cxx
+index 6f637819..6d054665 100644
+--- a/src/ModelingAlgorithms/TKMesh/BRepMesh/BRepMesh_ModelPreProcessor.cxx
++++ b/src/ModelingAlgorithms/TKMesh/BRepMesh/BRepMesh_ModelPreProcessor.cxx
+@@ -223,10 +223,11 @@ private:
+       return false;
+     }
+ 
+-    // Select the correct pcurve of the seam-edge.
+-    const gp_Pnt2d& aFPntOfPC1 = aPC1->Value(aPC1->FirstParameter());
++    // Select the correct pcurve of the seam-edge. Evaluate it at a parameter of the edge:
++    // FirstParameter() of a line pcurve is infinite, and any tilt of the line moves that point.
++    const gp_Pnt2d aFPntOfPC1 = aPC1->Value(aIPC1->GetParameter(0));
+ 
+-    if (std::abs(aLPntOfIPC1.X() - aFPntOfPC1.X()) > Precision::Confusion())
++    if (std::abs(aFPntOfIPC1.X() - aFPntOfPC1.X()) > Precision::Confusion())
+     {
+       std::swap(aPC1, aPC2);
+     }
