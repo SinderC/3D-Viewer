@@ -148,6 +148,7 @@ struct Options
 {
   double linearDeflection  = 0.001; // relative to the part's bounding-box diagonal
   double angularDeflection = 0.5;   // radians
+  double maxDeflection     = 0;     // mm ceiling on the linear deflection, 0 = none
 };
 
 // ---------------------------------------------------------------------------
@@ -376,6 +377,30 @@ void trsfToMatrix(const gp_Trsf& t, double m[16])
   for (int c = 0; c < 4; ++c)
     for (int r = 0; r < 4; ++r)
       m[c * 4 + r] = (r == 3) ? (c == 3 ? 1.0 : 0.0) : t.Value(r + 1, c + 1);
+}
+
+// The mesh cannot follow features smaller than its deflection (a fan blade's 1 mm leading edge round
+// at 0.9 mm), so exact surface normals at nodes on them disagree with the triangles around them and
+// shade as spikes. Such nodes take the area-weighted normal of their triangles instead.
+void matchNormalsToMesh(const Handle(Poly_Triangulation)& tri, double maxAngle)
+{
+  std::vector<gp_XYZ> sum(tri->NbNodes() + 1);
+  for (int i = 1; i <= tri->NbTriangles(); ++i)
+  {
+    int n[3];
+    tri->Triangle(i).Get(n[0], n[1], n[2]);
+    const gp_XYZ p[3] = {tri->Node(n[0]).XYZ(), tri->Node(n[1]).XYZ(), tri->Node(n[2]).XYZ()};
+    const gp_XYZ c    = (p[1] - p[0]).Crossed(p[2] - p[0]);
+    for (const int v : n)
+      sum[v] += c;
+  }
+  const double cosMax = std::cos(maxAngle);
+  for (int i = 1; i <= tri->NbNodes(); ++i)
+  {
+    const double length = sum[i].Modulus();
+    if (length > 0 && gp_XYZ(tri->Normal(i).XYZ()).Dot(sum[i]) < cosMax * length)
+      tri->SetNormal(i, gp_Dir(sum[i]));
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -640,7 +665,11 @@ private:
         continue;
 
       if (!tri->HasNormals())
+      {
         BRepLib_ToolTriangulatedShape::ComputeNormals(face, tri);
+        // Nodes the mesher resolved lie within about half its angular deflection of their triangles.
+        matchNormalsToMesh(tri, 0.7 * myOpts.angularDeflection);
+      }
 
       const gp_Trsf  t        = loc.Transformation();
       const bool     reversed = face.Orientation() == TopAbs_REVERSED;
@@ -701,7 +730,10 @@ private:
     Bnd_Box box;
     BRepBndLib::Add(shape, box);
     const double diag = box.IsVoid() ? 1.0 : std::sqrt(box.SquareExtent());
-    return std::max(diag * myOpts.linearDeflection, 1e-4);
+    double d = diag * myOpts.linearDeflection;
+    if (myOpts.maxDeflection > 0)
+      d = std::min(d, myOpts.maxDeflection);
+    return std::max(d, 1e-4);
   }
 
   // Styles from the part and its sub-shape labels; larger shapes first so faces override solids.
@@ -1877,6 +1909,8 @@ val readModel(val jsBytes, const std::string& fileName, val jsOptions, val onPro
       opts.linearDeflection = jsOptions["linearDeflection"].as<double>();
     if (jsOptions["angularDeflection"].isNumber())
       opts.angularDeflection = jsOptions["angularDeflection"].as<double>();
+    if (jsOptions["maxDeflection"].isNumber())
+      opts.maxDeflection = jsOptions["maxDeflection"].as<double>();
   }
 
   // Silence OCCT's default stdout messenger; errors are returned to JS.
