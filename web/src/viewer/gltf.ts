@@ -1,7 +1,9 @@
 // glTF / GLB read by three.js, which keeps what OCCT drops (textures, vertex colours, PBR maps),
 // converted into the app's Model: one node per glTF node, one prototype per mesh primitive.
+// sceneToModel also serves the other three.js readers (viewer/fbx.ts).
 import * as THREE from 'three';
 import { UV_SETS, type Model, type ModelNode, type Proto } from '../core/model';
+import type { UnitId } from '../core/units';
 
 // glTF is in metres and Y-up; models here are in mm and Z-up.
 const TO_MODEL = new THREE.Matrix4().makeRotationX(Math.PI / 2).scale(new THREE.Vector3(1000, 1000, 1000));
@@ -16,7 +18,7 @@ function floats(attr: THREE.BufferAttribute | THREE.InterleavedBufferAttribute):
   return out;
 }
 
-function proto(geometry: THREE.BufferGeometry, color: number): Proto {
+function proto(geometry: THREE.BufferGeometry, groups: Proto['groups']): Proto {
   if (!geometry.getAttribute('normal')) {
     geometry = geometry.clone();
     geometry.computeVertexNormals();
@@ -33,7 +35,7 @@ function proto(geometry: THREE.BufferGeometry, color: number): Proto {
     faceData: new Float64Array(7),
     edgeStarts: EMPTY_U32,
     edgeData: new Float64Array(0),
-    groups: [{ start: 0, count: indices.length, color }],
+    groups: groups.map((g) => ({ ...g, count: Math.min(g.count, indices.length - g.start) })), // Infinity counts run to the end
     uvs: Object.fromEntries(UV_SETS.flatMap((set) => (geometry.hasAttribute(set) ? [[set, floats(geometry.getAttribute(set))]] : []))),
     vertexColors: vertexColor && { array: floats(vertexColor), itemSize: vertexColor.itemSize as 3 | 4 },
   };
@@ -52,7 +54,11 @@ export async function readGltf(bytes: ArrayBuffer, fileName: string): Promise<Mo
   }
 
   if (!scene) throw new Error('The glTF file has no scene to show');
+  return sceneToModel(scene, fileName, 'glTF', TO_MODEL, 'm');
+}
 
+/** Converts a three.js scene into a Model; toModel takes scene units and axes to mm, Z-up. */
+export function sceneToModel(scene: THREE.Object3D, fileName: string, format: string, toModel: THREE.Matrix4, unit: UnitId): Model {
   const nodes: ModelNode[] = [];
   const protos: Proto[] = [];
   const colors: Model['colors'] = [];
@@ -82,22 +88,31 @@ export async function readGltf(bytes: ArrayBuffer, fileName: string): Promise<Mo
   const visit = (o: THREE.Object3D, parent: number) => {
     o.updateMatrix();
     const node = add(o.name, parent, o.matrix);
-    if (o instanceof THREE.Mesh && !Array.isArray(o.material)) {
-      const color = colorIndex(o.material);
-      const key = `${o.geometry.uuid}:${color}`;
-      let p = protoOf.get(key);
-      if (p === undefined) protoOf.set(key, (p = protos.push(proto(o.geometry, color)) - 1));
-      node.proto = p;
+    if (o instanceof THREE.Mesh) {
+      // A material array (FBX) colours the geometry's groups; a single material the whole mesh.
+      const groups: Proto['groups'] = Array.isArray(o.material)
+        ? o.geometry.groups.flatMap((g: THREE.GeometryGroup) => {
+            const m = o.material[g.materialIndex ?? 0];
+            return m ? [{ start: g.start, count: g.count, color: colorIndex(m) }] : [];
+          })
+        : [{ start: 0, count: Infinity, color: colorIndex(o.material) }];
+      if (groups.length) {
+        const key = `${o.geometry.uuid}:${groups.map((g) => g.color).join(',')}`;
+        let p = protoOf.get(key);
+        if (p === undefined) protoOf.set(key, (p = protos.push(proto(o.geometry, groups)) - 1));
+        node.proto = p;
+      }
     }
     for (const c of o.children) visit(c, node.id);
   };
-  const root = add(fileName, -1, TO_MODEL);
+  scene.updateMatrix(); // FBXLoader turns Z-up files on the scene itself
+  const root = add(fileName, -1, toModel.clone().multiply(scene.matrix));
   for (const c of scene.children) visit(c, root.id);
 
   return {
     schema: '',
-    format: 'glTF',
-    unit: 'm',
+    format,
+    unit,
     colors,
     materials,
     nodes,

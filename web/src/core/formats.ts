@@ -1,5 +1,5 @@
 // Supported file types and what reads them: the WASM bridge (readDoc in wasm/src/bridge.cpp) or
-// three.js in the browser (viewer/gltf.ts), which keeps glTF textures and vertex colours.
+// three.js in the browser (viewer/gltf.ts, viewer/fbx.ts), which keeps textures and vertex colours.
 export const FORMATS = [
   { name: 'STEP', extensions: ['.stp', '.step'], mime: 'model/step' },
   { name: 'JT', extensions: ['.jt'], mime: 'model/jt' },
@@ -7,6 +7,7 @@ export const FORMATS = [
   { name: 'IGES', extensions: ['.igs', '.iges'], mime: 'model/iges' },
   { name: 'glTF', extensions: ['.gltf'], mime: 'model/gltf+json', reader: 'three' },
   { name: 'GLB', extensions: ['.glb'], mime: 'model/gltf-binary', reader: 'three' },
+  { name: 'FBX', extensions: ['.fbx'], mime: 'application/octet-stream', reader: 'three' },
   { name: 'OBJ', extensions: ['.obj'], mime: 'model/obj' },
   { name: 'VRML', extensions: ['.wrl', '.vrml'], mime: 'model/vrml' },
   { name: 'BREP', extensions: ['.brep', '.brp'], mime: 'application/octet-stream' },
