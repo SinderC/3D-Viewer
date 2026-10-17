@@ -44,6 +44,9 @@
 #include <STEPControl_Reader.hxx>
 #include <StepBasic_Approval.hxx>
 #include <StepBasic_ApprovalAssignment.hxx>
+#include <StepBasic_ApprovalDateTime.hxx>
+#include <StepBasic_ApprovalPersonOrganization.hxx>
+#include <StepBasic_ApprovalRole.hxx>
 #include <StepBasic_ApprovalStatus.hxx>
 #include <StepBasic_AreaUnit.hxx>
 #include <StepBasic_CalendarDate.hxx>
@@ -51,6 +54,7 @@
 #include <StepBasic_DateAndTimeAssignment.hxx>
 #include <StepBasic_DateAssignment.hxx>
 #include <StepBasic_DateRole.hxx>
+#include <StepBasic_DateTimeSelect.hxx>
 #include <StepBasic_DateTimeRole.hxx>
 #include <StepBasic_DerivedUnit.hxx>
 #include <StepBasic_DerivedUnitElement.hxx>
@@ -59,10 +63,13 @@
 #include <StepBasic_MeasureWithUnit.hxx>
 #include <StepBasic_NamedUnit.hxx>
 #include <StepBasic_Organization.hxx>
+#include <StepBasic_OrganizationAssignment.hxx>
+#include <StepBasic_OrganizationRole.hxx>
 #include <StepBasic_Person.hxx>
 #include <StepBasic_PersonAndOrganization.hxx>
 #include <StepBasic_PersonAndOrganizationAssignment.hxx>
 #include <StepBasic_PersonAndOrganizationRole.hxx>
+#include <StepBasic_PersonOrganizationSelect.hxx>
 #include <StepBasic_Product.hxx>
 #include <StepBasic_ProductDefinition.hxx>
 #include <StepBasic_ProductDefinitionFormation.hxx>
@@ -74,6 +81,8 @@
 #include <StepGeom_GeomRepContextAndGlobUnitAssCtxAndGlobUncertaintyAssCtx.hxx>
 #include <StepGeom_GeometricRepresentationContextAndGlobalUnitAssignedContext.hxx>
 #include <StepRepr_GlobalUnitAssignedContext.hxx>
+#include <StepRepr_CharacterizedDefinition.hxx>
+#include <StepRepr_MaterialDesignation.hxx>
 #include <StepRepr_MeasureRepresentationItem.hxx>
 #include <StepRepr_ProductDefinitionShape.hxx>
 #include <StepRepr_PropertyDefinition.hxx>
@@ -87,6 +96,7 @@
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
 #include <NCollection_List.hxx>
+#include <NCollection_Map.hxx>
 #include <TopTools_ShapeMapHasher.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Compound.hxx>
@@ -105,6 +115,8 @@
 #include <XCAFDoc_Dimension.hxx>
 #include <XCAFDoc_DocumentTool.hxx>
 #include <XCAFDoc_GeomTolerance.hxx>
+#include <XCAFDoc_GraphNode.hxx>
+#include <XCAFDoc_LayerTool.hxx>
 #include <XCAFDoc_ShapeTool.hxx>
 #include <XCAFDoc_View.hxx>
 #include <XCAFDoc_ViewTool.hxx>
@@ -136,6 +148,7 @@ using emscripten::val;
 
 using LabelSequence = NCollection_Sequence<TDF_Label>;
 using FaceColorMap  = NCollection_DataMap<TopoDS_Shape, int, TopTools_ShapeMapHasher>;
+using FaceSet       = NCollection_Map<TopoDS_Shape, TopTools_ShapeMapHasher>;
 using ShapeStyleMap = NCollection_IndexedDataMap<TopoDS_Shape, XCAFPrs_Style, TopTools_ShapeMapHasher>;
 using EdgeFacesMap  = NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>, TopTools_ShapeMapHasher>;
 
@@ -244,6 +257,7 @@ struct Node
   int         proto = -1;
   int         color = -1;
   int         product = -1;
+  bool        hidden  = false; // invisible in the file (STEP invisibility, hidden layers)
 };
 
 std::vector<uint8_t> gGeometry;
@@ -337,6 +351,15 @@ std::string labelName(const TDF_Label& l)
   return TCollection_AsciiString(n->Get()).ToCString(); // UTF-8
 }
 
+// STEP string without the blanks files put in for "no value".
+std::string stepText(const Handle(TCollection_HAsciiString)& s)
+{
+  std::string t = s.IsNull() ? std::string() : s->ToCString();
+  t.erase(0, t.find_first_not_of(' '));
+  t.erase(t.find_last_not_of(' ') + 1);
+  return t;
+}
+
 std::string jsonEscape(const std::string& s)
 {
   std::string out;
@@ -414,6 +437,7 @@ public:
         myProgress(progress),
         myShapes(XCAFDoc_DocumentTool::ShapeTool(doc->Main())),
         myColors(XCAFDoc_DocumentTool::ColorTool(doc->Main())),
+        myLayers(XCAFDoc_DocumentTool::LayerTool(doc->Main())),
         myDimTols(XCAFDoc_DocumentTool::DimTolTool(doc->Main())),
         myViews(XCAFDoc_DocumentTool::ViewTool(doc->Main()))
   {
@@ -435,7 +459,7 @@ public:
     LabelSequence roots;
     myShapes->GetFreeShapes(roots);
     for (const TDF_Label& root : roots)
-      visit(root, -1);
+      visit(root, -1, {});
 
     collectPmi();
     collectViews();
@@ -468,7 +492,20 @@ private:
     return -1;
   }
 
-  void visit(const TDF_Label& label, int parent)
+  // Hidden in the file: the label is invisible, or all the layers it is on are (as XCAFPrs decides).
+  bool isVisible(const TDF_Label& l) const
+  {
+    if (!XCAFDoc_ColorTool::IsVisible(l))
+      return false;
+    LabelSequence layers;
+    if (!myLayers->GetLayers(l, layers) || layers.IsEmpty())
+      return true;
+    return std::any_of(layers.begin(), layers.end(), [this](const TDF_Label& layer) { return myLayers->IsVisible(layer); });
+  }
+
+  // path: the component labels from the root down to this one, for colours and visibility a file
+  // sets on one occurrence of a nested component (SHUO).
+  void visit(const TDF_Label& label, int parent, LabelSequence path)
   {
     Node node;
     node.parent = parent;
@@ -488,7 +525,13 @@ private:
       if (node.name.empty() || node.name.rfind("=>[", 0) == 0)
         node.name = labelName(def);
     }
-    node.color = labelColor(label);
+    node.color  = labelColor(label);
+    node.hidden = !isVisible(label) || !isVisible(def);
+    if (XCAFDoc_ShapeTool::IsComponent(label))
+    {
+      path.Append(label);
+      occurrenceStyle(path, node);
+    }
 
     const bool assembly = XCAFDoc_ShapeTool::IsAssembly(def);
     if (!assembly)
@@ -507,7 +550,28 @@ private:
       LabelSequence comps;
       XCAFDoc_ShapeTool::GetComponents(def, comps, false);
       for (const TDF_Label& c : comps)
-        visit(c, id);
+        visit(c, id, path);
+    }
+  }
+
+  // Colour and visibility set on this occurrence through a higher-level one (SHUO). The longest
+  // chain the file styles wins: it names the occurrence most specifically.
+  void occurrenceStyle(const LabelSequence& path, Node& node)
+  {
+    for (int first = 1; first < path.Length(); ++first)
+    {
+      LabelSequence chain;
+      for (int i = first; i <= path.Length(); ++i)
+        chain.Append(path(i));
+      Handle(XCAFDoc_GraphNode) shuo;
+      if (!myShapes->FindSHUO(chain, shuo))
+        continue;
+      const TDF_Label    l = shuo->Label();
+      Quantity_ColorRGBA c;
+      if (myColors->GetColor(l, XCAFDoc_ColorSurf, c) || myColors->GetColor(l, XCAFDoc_ColorGen, c))
+        node.color = colorIndex(toRGBA(c));
+      node.hidden = node.hidden || !XCAFDoc_ColorTool::IsVisible(l);
+      return;
     }
   }
 
@@ -542,6 +606,7 @@ private:
     Product p;
     if (auto props = myProductProps->find(entry.ToCString()); props != myProductProps->end())
       p.props = props->second;
+    addLayers(def, p.props);
     p.attributes = namedData(def);
 
     // Validation properties: the file's value, then the B-rep's when it has exact surfaces.
@@ -588,6 +653,24 @@ private:
     }
     myProductByEntry[entry.ToCString()] = idx;
     return idx;
+  }
+
+  // Layers a definition or its bodies are on.
+  void addLayers(const TDF_Label& def, Props& props) const
+  {
+    LabelSequence labels;
+    labels.Append(def);
+    XCAFDoc_ShapeTool::GetSubShapes(def, labels);
+    for (const TDF_Label& l : labels)
+    {
+      const auto layers = myLayers->GetLayers(l); // held: a range-for over *GetLayers(l) frees it
+      for (const TCollection_ExtendedString& layer : *layers)
+      {
+        const std::pair<std::string, std::string> p("Layer", TCollection_AsciiString(layer).ToCString());
+        if (std::find(props.begin(), props.end(), p) == props.end())
+          props.push_back(p);
+      }
+    }
   }
 
   // Strings, integers and reals of a label's named data (e.g. STEP user-defined attributes), by name.
@@ -649,7 +732,8 @@ private:
     }
 
     int        partColor = -1;
-    const auto colorOf   = faceStyles(def, shape, partColor);
+    FaceSet    hidden;
+    const auto colorOf   = faceStyles(def, shape, partColor, hidden);
 
     std::vector<float>    pos, nrm, edges;
     std::vector<uint32_t> idx, faceStarts, edgeStarts;
@@ -661,7 +745,7 @@ private:
       const TopoDS_Face&         face = TopoDS::Face(ex.Current());
       TopLoc_Location            loc;
       Handle(Poly_Triangulation) tri = BRep_Tool::Triangulation(face, loc);
-      if (tri.IsNull() || tri->NbTriangles() == 0)
+      if (tri.IsNull() || tri->NbTriangles() == 0 || hidden.Contains(face))
         continue;
 
       if (!tri->HasNormals())
@@ -711,7 +795,7 @@ private:
     }
 
     // Free edges count only on triangulated parts (JT parts with XT edges), not next to B-rep faces.
-    collectEdges(shape, !hasSurfaces, edges, edgeStarts, edgeData);
+    collectEdges(shape, !hasSurfaces, hidden, edges, edgeStarts, edgeData);
 
     proto.positions  = append(pos);
     proto.normals    = append(nrm);
@@ -737,9 +821,11 @@ private:
   }
 
   // Styles from the part and its sub-shape labels; larger shapes first so faces override solids.
+  // Faces of sub-shapes the file hides (e.g. a construction body in a multi-body part) go in hidden.
   FaceColorMap faceStyles(const TDF_Label&    def,
                                             const TopoDS_Shape& shape,
-                                            int&                partColor)
+                                            int&                partColor,
+                                            FaceSet&            hidden)
   {
     FaceColorMap     result;
     ShapeStyleMap     styles;
@@ -750,6 +836,9 @@ private:
     {
       // Mesh readers may give a visual material only, no surface colour.
       const XCAFPrs_Style& st = it.Value();
+      if (!st.IsVisible() && !it.Key().IsPartner(shape)) // a hidden part is a hidden node, see visit
+        for (TopExp_Explorer ex(it.Key(), TopAbs_FACE); ex.More(); ex.Next())
+          hidden.Add(ex.Current());
       if (st.IsSetColorSurf())
         entries.emplace_back(it.Key(), colorIndex(toRGBA(st.GetColorSurfRGBA())));
       else if (!st.Material().IsNull())
@@ -817,6 +906,7 @@ private:
   // Face edges follow their face's mesh; free edges (the XT edges of JT parts) are sampled.
   void collectEdges(const TopoDS_Shape&    shape,
                     bool                   freeEdges,
+                    const FaceSet&         hidden,
                     std::vector<float>&    out,
                     std::vector<uint32_t>& starts,
                     std::vector<double>&   data) const
@@ -839,7 +929,11 @@ private:
         sampleEdge(edge, freeDeflection, out, starts, data);
         continue;
       }
-      const TopoDS_Face& face = TopoDS::Face(edgeFaces(i).First());
+      // The edge follows the mesh of a face that is drawn.
+      const auto shown = std::find_if(edgeFaces(i).begin(), edgeFaces(i).end(), [&](const TopoDS_Shape& f) { return !hidden.Contains(f); });
+      if (shown == edgeFaces(i).end())
+        continue;
+      const TopoDS_Face& face = TopoDS::Face(*shown);
       if (BRep_Tool::IsClosed(edge, face))
         continue; // seam
 
@@ -1171,6 +1265,7 @@ private:
   int                        myPartsMeshed = 0;
   Handle(XCAFDoc_ShapeTool)  myShapes;
   Handle(XCAFDoc_ColorTool)  myColors;
+  Handle(XCAFDoc_LayerTool)  myLayers;
   std::vector<Node>          myNodes;
   std::vector<Proto>         myProtos;
   std::vector<RGBA>          myColorTable;
@@ -1238,15 +1333,6 @@ std::string fileLengthUnit(STEPControl_Reader& reader)
   return len.IsEmpty() ? std::string() : std::string(len.First().ToCString());
 }
 
-// STEP string without the blanks files put in for "no value".
-std::string stepText(const Handle(TCollection_HAsciiString)& s)
-{
-  std::string t = s.IsNull() ? std::string() : s->ToCString();
-  t.erase(0, t.find_first_not_of(' '));
-  t.erase(t.find_last_not_of(' ') + 1);
-  return t;
-}
-
 // "design_owner" → "Design owner"
 std::string roleLabel(const Handle(TCollection_HAsciiString)& role)
 {
@@ -1270,10 +1356,10 @@ std::string dateText(const Handle(StepBasic_Date)& date, const Handle(StepBasic_
   return buf;
 }
 
-std::string personText(const Handle(StepBasic_PersonAndOrganization)& po)
+std::string personText(const Handle(StepBasic_Person)& p, const Handle(StepBasic_Organization)& o)
 {
   std::string person, org;
-  if (const auto p = po->ThePerson(); !p.IsNull())
+  if (!p.IsNull())
   {
     const std::string first = p->HasFirstName() ? stepText(p->FirstName()) : std::string();
     const std::string last  = p->HasLastName() ? stepText(p->LastName()) : std::string();
@@ -1281,9 +1367,21 @@ std::string personText(const Handle(StepBasic_PersonAndOrganization)& po)
     if (person.empty())
       person = stepText(p->Id());
   }
-  if (!po->TheOrganization().IsNull())
-    org = stepText(po->TheOrganization()->Name());
+  if (!o.IsNull())
+    org = stepText(o->Name());
   return person.empty() || org.empty() ? person + org : person + ", " + org;
+}
+
+std::string personText(const Handle(StepBasic_PersonAndOrganization)& po)
+{
+  return personText(po->ThePerson(), po->TheOrganization());
+}
+
+std::string personText(const StepBasic_PersonOrganizationSelect& s)
+{
+  if (const auto po = s.PersonAndOrganization(); !po.IsNull())
+    return personText(po);
+  return personText(s.Person(), s.Organization());
 }
 
 // XCAF label entry of a product definition's shape; empty if it has none.
@@ -1340,8 +1438,27 @@ ProductProps readProductProps(STEPCAFControl_Reader& reader)
         const Handle(Standard_Transient)& e = it.Value();
         if (const auto a = Handle(StepBasic_ApprovalAssignment)::DownCast(e); !a.IsNull())
         {
-          if (!a->AssignedApproval().IsNull() && !a->AssignedApproval()->Status().IsNull())
-            add("Approval", stepText(a->AssignedApproval()->Status()->Name()));
+          const Handle(StepBasic_Approval) approval = a->AssignedApproval();
+          if (approval.IsNull())
+            continue;
+          if (!approval->Status().IsNull())
+            add("Approval", stepText(approval->Status()->Name()));
+          // Who approved, and when, refer to the approval.
+          for (Interface_EntityIterator by = graph.Sharings(approval); by.More(); by.Next())
+          {
+            if (const auto po = Handle(StepBasic_ApprovalPersonOrganization)::DownCast(by.Value()); !po.IsNull())
+            {
+              const std::string role = po->Role().IsNull() ? std::string() : roleLabel(po->Role()->Role());
+              add(role.empty() ? "Approver" : role, personText(po->PersonOrganization()));
+            }
+            else if (const auto dt = Handle(StepBasic_ApprovalDateTime)::DownCast(by.Value()); !dt.IsNull())
+            {
+              const StepBasic_DateTimeSelect& when = dt->DateTime();
+              add("Approval date",
+                  !when.DateAndTime().IsNull() ? dateText(when.DateAndTime()->DateComponent(), when.DateAndTime()->TimeComponent())
+                                               : dateText(when.Date(), nullptr));
+            }
+          }
         }
         else if (const auto s = Handle(StepBasic_SecurityClassificationAssignment)::DownCast(e); !s.IsNull())
         {
@@ -1353,6 +1470,11 @@ ProductProps readProductProps(STEPCAFControl_Reader& reader)
         {
           if (!p->AssignedPersonAndOrganization().IsNull() && !p->Role().IsNull())
             add(roleLabel(p->Role()->Name()), personText(p->AssignedPersonAndOrganization()));
+        }
+        else if (const auto o = Handle(StepBasic_OrganizationAssignment)::DownCast(e); !o.IsNull())
+        {
+          if (!o->AssignedOrganization().IsNull() && !o->Role().IsNull())
+            add(roleLabel(o->Role()->Name()), stepText(o->AssignedOrganization()->Name()));
         }
         else if (const auto d = Handle(StepBasic_DateAndTimeAssignment)::DownCast(e); !d.IsNull())
         {
@@ -1370,6 +1492,25 @@ ProductProps readProductProps(STEPCAFControl_Reader& reader)
 
     if (!props.empty())
       out[entry] = std::move(props);
+  }
+
+  // Materials (AP203/AP214 material_designation) of a part or its shape. OCCT's own material
+  // reader takes any descriptive item on a part's properties, such as a 'CAD_SOURCE', for one.
+  for (int i = 1; i <= model->NbEntities(); ++i)
+  {
+    const auto m = Handle(StepRepr_MaterialDesignation)::DownCast(model->Value(i));
+    if (m.IsNull())
+      continue;
+    Handle(StepBasic_ProductDefinition) pd = m->OfDefinition().ProductDefinition();
+    if (const auto pds = m->OfDefinition().ProductDefinitionShape(); pd.IsNull() && !pds.IsNull())
+      pd = pds->Definition().ProductDefinition();
+    const std::string entry = pdEntry(reader, pd);
+    const std::pair<std::string, std::string> material("Material", stepText(m->Name()));
+    Props& props = out[entry];
+    if (!entry.empty() && !material.second.empty() && std::find(props.begin(), props.end(), material) == props.end())
+      props.push_back(material);
+    if (props.empty())
+      out.erase(entry);
   }
   return out;
 }
@@ -1513,6 +1654,8 @@ Source readStepDoc(std::string& bytes, const Handle(TDocStd_Document)& doc, Prog
   reader.SetViewMode(true); // saved views
   reader.SetPropsMode(false); // validation properties are read by readValidationProps
   reader.SetMetaMode(true);   // user-defined attributes
+  reader.SetMatMode(false);   // materials are read by readProductProps
+  reader.SetSHUOMode(true);   // colours and visibility of one occurrence of a nested component
 
   MemBuf       buf(const_cast<char*>(bytes.data()), bytes.size(), progress);
   std::istream stream(&buf);
@@ -1777,6 +1920,8 @@ std::string toJson(const Source& src, const Builder& b)
       << ",\"proto\":" << n.proto << ",\"color\":" << n.color;
     if (n.product >= 0)
       o << ",\"product\":" << n.product;
+    if (n.hidden)
+      o << ",\"hidden\":true";
     if (n.hasMatrix)
     {
       o << ",\"matrix\":[";

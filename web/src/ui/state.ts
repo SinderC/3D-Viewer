@@ -120,7 +120,15 @@ export function reducer(state: State, action: Action): State {
     case 'progress':
       return { ...state, progress: { stage: action.stage, percent: action.percent } };
     case 'loaded':
-      return { ...state, status: 'ready', model: action.model, unit: action.model.unit, loadMs: action.ms, progress: undefined };
+      return {
+        ...state,
+        status: 'ready',
+        model: action.model,
+        unit: action.model.unit,
+        loadMs: action.ms,
+        progress: undefined,
+        hidden: new Set(action.model.nodes.filter((n) => n.hidden).map((n) => n.id)),
+      };
     case 'failed':
       return { ...state, status: 'error', error: action.error, progress: undefined };
     case 'close':

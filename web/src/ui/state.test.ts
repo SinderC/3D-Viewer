@@ -25,6 +25,12 @@ describe('reducer', () => {
     });
   });
 
+  it('starts with the parts the file hides hidden', () => {
+    const model = { unit: 'mm', nodes: [{ id: 0 }, { id: 1, hidden: true }, { id: 2 }] } as unknown as Model;
+    const s = reducer({ ...initialState, hidden: new Set([2]) }, { type: 'loaded', model, ms: 1 });
+    expect([...s.hidden]).toEqual([1]);
+  });
+
   it('falls back to shading and point distance for models without edges', () => {
     const withEdges = { protos: [{ edges: new Float32Array(6) }] } as unknown as Model;
     const meshOnly = { protos: [{ edges: new Float32Array(0) }] } as unknown as Model;

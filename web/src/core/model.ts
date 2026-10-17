@@ -9,7 +9,7 @@ export interface RawModel {
   schema: string; // STEP only
   fileUnit: string;
   colors: [number, number, number, number][];
-  nodes: { name: string; parent: number; proto: number; color: number; product?: number; matrix?: number[] }[];
+  nodes: { name: string; parent: number; proto: number; color: number; product?: number; hidden?: boolean; matrix?: number[] }[];
   protos: {
     positions: Range;
     normals: Range;
@@ -114,6 +114,8 @@ export interface ModelNode {
   color: number;
   /** Index into Model.products. */
   product?: number;
+  /** Hidden in the file (STEP invisibility or a hidden layer): starts hidden. */
+  hidden?: boolean;
   matrix?: number[];
 }
 
