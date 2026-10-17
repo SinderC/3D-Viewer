@@ -1,7 +1,7 @@
 // STEP features beyond plain B-rep parts, checked on small files written here: visibility, layers,
 // materials, approvals and organisations, occurrence colours (SHUO), shape representations OCCT
 // does not read as it comes (see wasm/patches).
-// Usage: node wasm/test/step-coverage.mjs   (DUMP=dir also writes the files there)
+// Usage: node wasm/test/step-coverage.mjs   (DUMP=dir also writes the files there, VERBOSE=1 shows volumes)
 import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
 import createOcctViewer from '../build/occt-viewer.js';
@@ -129,7 +129,25 @@ function read(text) {
   if (process.env.DUMP) writeFileSync(`${process.env.DUMP}/${++written}.stp`, text);
   const r = viewer.readModel(new TextEncoder().encode(text), 'test.stp', {}, () => {});
   assert.ok(r.json, r.error);
-  return JSON.parse(r.json);
+  return { ...JSON.parse(r.json), geometry: r.geometry.slice().buffer };
+}
+
+// Enclosed volume of a part's mesh, in mm3: negative when inside out.
+function volume(model, node) {
+  const p = model.protos[node.proto];
+  const pos = new Float32Array(model.geometry, ...p.positions);
+  const idx = new Uint32Array(model.geometry, ...p.indices);
+  let v = 0;
+  for (let t = 0; t < idx.length; t += 3) {
+    const [a, b, c] = [idx[t], idx[t + 1], idx[t + 2]].map((i) => pos.subarray(i * 3, i * 3 + 3));
+    v += a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0]);
+  }
+  return v / 6;
+}
+// Within a relative tolerance; meshing loses about 0.05% of these volumes.
+function near(actual, expected, tolerance, what) {
+  if (process.env.VERBOSE) console.log(`     ${what} ${actual.toFixed(2)}, expected ${expected.toFixed(2)}`);
+  assert.ok(Math.abs(actual - expected) <= tolerance * Math.abs(expected), `${what}: ${actual} is not ${expected}`);
 }
 const nodeNamed = (model, name) => model.nodes.find((n) => n.name === name);
 const props = (model, name) => model.products[nodeNamed(model, name).product]?.props ?? [];
@@ -210,6 +228,58 @@ const tests = {
     product(s, ctx, 'block', [box(s, [0, 0, 0], 10, 'FACE_SURFACE')], 'ELEMENTARY_BREP_SHAPE_REPRESENTATION');
     const m = read(s.text(AP203));
     assert.equal(m.protos[nodeNamed(m, 'block')?.proto]?.indices[1] / 3, 12);
+  },
+
+  'CSG: primitives, booleans and half-spaces (AP203 co20)'() {
+    const s = new Step();
+    const ctx = context(s);
+    const ax1 = (origin, z) => s.add(`AXIS1_PLACEMENT('',${pt(s, origin)},${dir(s, z)})`);
+    const block = s.add(`BLOCK('',${axis(s)},40.,20.,10.)`);
+    const hole = s.add(`RIGHT_CIRCULAR_CYLINDER('',${ax1([10, 10, -1], [0, 0, 1])},12.,3.)`);
+    // Cone on the block, apex up: the placement is at the apex and points out of the solid.
+    const cone = s.add(`RIGHT_CIRCULAR_CONE('',${ax1([30, 10, 20], [0, 0, 1])},10.,0.,0.463647609)`);
+    const cut = s.add(`BOOLEAN_RESULT('',.DIFFERENCE.,${block},${hole})`);
+    const withCone = s.add(`BOOLEAN_RESULT('',.UNION.,${cut},${cone})`);
+    // Material below z = 15 (the plane normal points away from it): trims the cone, not the block.
+    const below = s.add(`HALF_SPACE_SOLID('',${s.add(`PLANE('',${axis(s, [0, 0, 15])})`)},.T.)`);
+    const trimmed = s.add(`BOOLEAN_RESULT('',.INTERSECTION.,${withCone},${below})`);
+    const ball = s.add(`SPHERE('',2.,${pt(s, [60, 0, 0])})`);
+    const ring = s.add(`TORUS('',${ax1([60, 0, 0], [0, 0, 1])},6.,1.)`);
+    const wedge = s.add(`RIGHT_ANGULAR_WEDGE('',${axis(s, [0, 40, 0])},10.,10.,10.,4.)`);
+    const solids = [trimmed, s.add(`BOOLEAN_RESULT('',.UNION.,${ball},${ring})`), wedge].map((t) => s.add(`CSG_SOLID('',${t})`));
+    product(s, ctx, 'csg', solids, 'CSG_SHAPE_REPRESENTATION');
+    const m = read(s.text(AP203));
+    const frustum = (r1, r2, h) => (Math.PI * h / 3) * (r1 * r1 + r1 * r2 + r2 * r2);
+    const expected =
+      40 * 20 * 10 - Math.PI * 3 * 3 * 10 + // block less the hole through it
+      frustum(5, 2.5, 5) + // the cone on top (z 10..20, base radius 5) up to z = 15
+      (4 / 3) * Math.PI * 2 ** 3 + 2 * Math.PI ** 2 * 6 * 1 ** 2 + // sphere and torus, apart
+      ((10 + 4) / 2) * 10 * 10; // wedge
+    near(volume(m, nodeNamed(m, 'csg')), expected, 0.002, 'volume');
+  },
+
+  'swept solids: extruded and revolved areas and faces (AP203 co72)'() {
+    const s = new Step();
+    const ctx = context(s);
+    // 10 x 5 rectangle in the z = 0 plane.
+    const rect = (x0) => {
+      const corners = [[x0, 0, 0], [x0 + 10, 0, 0], [x0 + 10, 5, 0], [x0, 5, 0], [x0, 0, 0]].map((p) => pt(s, p));
+      return s.add(`POLYLINE('',${list(corners)})`);
+    };
+    const plane = () => s.add(`PLANE('',${axis(s)})`);
+    const area = (x0) =>
+      s.add(
+        `CURVE_BOUNDED_SURFACE('',${plane()},(${s.add(`BOUNDARY_CURVE('',(${s.add(`COMPOSITE_CURVE_SEGMENT(.CONTINUOUS.,.T.,${rect(x0)})`)}),.F.)`)}),.F.)`,
+      );
+    const extruded = s.add(`EXTRUDED_AREA_SOLID('',${area(0)},${dir(s, [0, 0, 1])},20.)`);
+    // Rectangle x 20..30 turned half way about the y axis: a half ring of radius 20..30, height 5.
+    const revolved = s.add(`REVOLVED_AREA_SOLID('',${area(20)},${s.add(`AXIS1_PLACEMENT('',${pt(s, [0, 0, 0])},${dir(s, [0, 1, 0])})`)},3.14159265358979)`);
+    const face = s.add(`FACE_SURFACE('',(${s.add(`FACE_OUTER_BOUND('',${s.add(`POLY_LOOP('',${list([[50, 0, 0], [60, 0, 0], [60, 5, 0], [50, 5, 0]].map((p) => pt(s, p)))})`)},.T.)`)}),${plane()},.T.)`);
+    const extrudedFace = s.add(`EXTRUDED_FACE_SOLID('',${face},${dir(s, [0, 0, -1])},4.)`);
+    product(s, ctx, 'swept', [extruded, revolved, extrudedFace]);
+    const m = read(s.text(AP203));
+    const expected = 10 * 5 * 20 + (Math.PI / 2) * (30 * 30 - 20 * 20) * 5 + 10 * 5 * 4;
+    near(volume(m, nodeNamed(m, 'swept')), expected, 0.002, 'volume');
   },
 
   'a colour on one occurrence of a nested component (SHUO)'() {
