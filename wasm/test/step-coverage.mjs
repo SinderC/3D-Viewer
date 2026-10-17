@@ -2,6 +2,7 @@
 // materials, approvals and organisations, occurrence colours (SHUO), shape representations OCCT
 // does not read as it comes (see wasm/patches).
 // Usage: node wasm/test/step-coverage.mjs   (DUMP=dir also writes the files there, VERBOSE=1 shows volumes)
+// e.g. DUMP=samples/step-coverage, where the sample runs then load them too.
 import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
 import createOcctViewer from '../build/occt-viewer.js';
@@ -124,19 +125,15 @@ function styled(s, item, [r, g, b], context) {
 }
 
 const viewer = await createOcctViewer();
-let written = 0;
-// files: other files opened with it, {name: text}.
-function readResult(text, files = {}) {
-  if (process.env.DUMP) {
-    writeFileSync(`${process.env.DUMP}/${++written}.stp`, text);
-    for (const [name, t] of Object.entries(files)) writeFileSync(`${process.env.DUMP}/${written}-${name}`, t);
-  }
+// name: the file's name, also where DUMP writes it. files: other files opened with it, {name: text}.
+function readResult(name, text, files = {}) {
+  if (process.env.DUMP) for (const [n, t] of Object.entries({ [name]: text, ...files })) writeFileSync(`${process.env.DUMP}/${n}`, t);
   const encode = (t) => new TextEncoder().encode(t);
-  const opened = Object.entries(files).map(([name, t]) => ({ name, bytes: encode(t) }));
-  return viewer.readModel(encode(text), 'test.stp', { files: opened }, () => {});
+  const opened = Object.entries(files).map(([n, t]) => ({ name: n, bytes: encode(t) }));
+  return viewer.readModel(encode(text), name, { files: opened }, () => {});
 }
-function read(text, files) {
-  const r = readResult(text, files);
+function read(name, text, files) {
+  const r = readResult(name, text, files);
   assert.ok(r.json, r.error);
   return { ...JSON.parse(r.json), geometry: r.geometry.slice().buffer };
 }
@@ -176,7 +173,7 @@ const tests = {
     const styles = [styled(s, shown, [0, 0, 1]), styled(s, construction, [0, 1, 0]), styled(s, hidden, [1, 1, 0])];
     s.add(`INVISIBILITY((${styles[1]},${styles[2]}))`);
     s.add(`MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION('',${list(styles)},${ctx})`);
-    const m = read(s.text(AP214));
+    const m = read('invisible-parts-and-bodies.stp', s.text(AP214));
     assert.equal(nodeNamed(m, 'hidden part')?.hidden, true);
     assert.equal(nodeNamed(m, 'two bodies')?.hidden, undefined);
     const proto = m.protos[nodeNamed(m, 'two bodies').proto];
@@ -196,7 +193,7 @@ const tests = {
     occurrence(s, ctx, top, hiddenPart, 'hidden part');
     s.add(`PRESENTATION_LAYER_ASSIGNMENT('Bodies','',(${shown}))`);
     s.add(`INVISIBILITY((${s.add(`PRESENTATION_LAYER_ASSIGNMENT('Construction','',(${construction},${hidden}))`)}))`);
-    const m = read(s.text(AP214));
+    const m = read('hidden-layer.stp', s.text(AP214));
     assert.equal(nodeNamed(m, 'hidden part')?.hidden, true);
     assert.equal(nodeNamed(m, 'two bodies')?.hidden, undefined);
     assert.equal(m.protos[nodeNamed(m, 'two bodies').proto].indices[1] / 3, 12, 'only the visible box is meshed');
@@ -223,7 +220,7 @@ const tests = {
     const time = s.add(`LOCAL_TIME(9,30,$,${s.add('COORDINATED_UNIVERSAL_TIME_OFFSET(0,$,.AHEAD.)')})`);
     s.add(`APPROVAL_DATE_TIME(${s.add(`DATE_AND_TIME(${date},${time})`)},${approval})`);
     s.add(`APPLIED_ORGANIZATION_ASSIGNMENT(${acme},${s.add("ORGANIZATION_ROLE('design_supplier')")},(${part.pd}))`);
-    const m = read(s.text(AP214));
+    const m = read('part-data.stp', s.text(AP214));
     const p = props(m, 'bracket');
     assert.ok(p.some(([k, v]) => k === 'Layer' && v === 'Bodies'), JSON.stringify(p));
     assert.deepEqual(p.filter(([k]) => k === 'Material'), [['Material', 'Steel S235']]);
@@ -235,7 +232,7 @@ const tests = {
     const s = new Step();
     const ctx = context(s);
     product(s, ctx, 'block', [box(s, [0, 0, 0], 10, 'FACE_SURFACE')], 'ELEMENTARY_BREP_SHAPE_REPRESENTATION');
-    const m = read(s.text(AP203));
+    const m = read('elementary-brep.stp', s.text(AP203));
     assert.equal(m.protos[nodeNamed(m, 'block')?.proto]?.indices[1] / 3, 12);
   },
 
@@ -257,7 +254,7 @@ const tests = {
     const wedge = s.add(`RIGHT_ANGULAR_WEDGE('',${axis(s, [0, 40, 0])},10.,10.,10.,4.)`);
     const solids = [trimmed, s.add(`BOOLEAN_RESULT('',.UNION.,${ball},${ring})`), wedge].map((t) => s.add(`CSG_SOLID('',${t})`));
     product(s, ctx, 'csg', solids, 'CSG_SHAPE_REPRESENTATION');
-    const m = read(s.text(AP203));
+    const m = read('csg.stp', s.text(AP203));
     const frustum = (r1, r2, h) => (Math.PI * h / 3) * (r1 * r1 + r1 * r2 + r2 * r2);
     const expected =
       40 * 20 * 10 - Math.PI * 3 * 3 * 10 + // block less the hole through it
@@ -286,7 +283,7 @@ const tests = {
     const face = s.add(`FACE_SURFACE('',(${s.add(`FACE_OUTER_BOUND('',${s.add(`POLY_LOOP('',${list([[50, 0, 0], [60, 0, 0], [60, 5, 0], [50, 5, 0]].map((p) => pt(s, p)))})`)},.T.)`)}),${plane()},.T.)`);
     const extrudedFace = s.add(`EXTRUDED_FACE_SOLID('',${face},${dir(s, [0, 0, -1])},4.)`);
     product(s, ctx, 'swept', [extruded, revolved, extrudedFace]);
-    const m = read(s.text(AP203));
+    const m = read('swept-solids.stp', s.text(AP203));
     const expected = 10 * 5 * 20 + (Math.PI / 2) * (30 * 30 - 20 * 20) * 5 + 10 * 5 * 4;
     near(volume(m, nodeNamed(m, 'swept')), expected, 0.002, 'volume');
   },
@@ -309,15 +306,15 @@ const tests = {
     };
     const triangles = (m) => m.nodes.filter((n) => n.proto >= 0).map((n) => m.protos[n.proto].indices[1] / 3);
 
-    let m = read(assembly('box.stp'), { 'box.stp': part.text(AP214) });
+    let m = read('external-assembly.stp', assembly('box.stp'), { 'box.stp': part.text(AP214) });
     assert.deepEqual(triangles(m), [12, 12]);
     assert.deepEqual(m.externalFiles, [{ name: 'box.stp', loaded: true }]);
     // In a folder, or named in other case: matched by name.
-    m = read(assembly('parts/Box.STP'), { 'box.stp': part.text(AP214) });
+    m = read('external-assembly-in-folder.stp', assembly('parts/Box.STP'), { 'box.stp': part.text(AP214) });
     assert.deepEqual(triangles(m), [12, 12]);
     assert.deepEqual(m.externalFiles, [{ name: 'Box.STP', loaded: true }]);
     // Opened alone: says which file is missing.
-    const r = readResult(assembly('box.stp'));
+    const r = readResult('external-assembly.stp', assembly('box.stp'));
     if (r.json) assert.deepEqual(JSON.parse(r.json).externalFiles, [{ name: 'box.stp', loaded: false }]);
     else assert.match(r.error, /box\.stp/);
   },
@@ -337,7 +334,7 @@ const tests = {
     s.add(`SHAPE_DEFINITION_REPRESENTATION(${s.add(`PRODUCT_DEFINITION_SHAPE('','',${shuo})`)},${shuoSr})`);
     const red = styled(s, body, [1, 0, 0], shuoSr);
     s.add(`MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION('',(${red}),${ctx})`);
-    const m = read(s.text(AP214));
+    const m = read('shuo-colour.stp', s.text(AP214));
     const boxes = m.nodes.filter((n) => n.name === 'box');
     assert.equal(boxes.length, 2);
     const colours = boxes.map((n) => (n.color >= 0 ? m.colors[n.color].slice(0, 3) : null));
