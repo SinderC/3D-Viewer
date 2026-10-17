@@ -1,6 +1,10 @@
 // Measurements on picked points, B-rep edges and faces: highlights, dimension lines and a screen-space label.
 import * as THREE from 'three';
+import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
+import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
 import { formatLength, type UnitId } from '../core/units';
+import { LINE_PX } from './objects';
 
 export type MeasureMode =
   | 'edgeLength'
@@ -151,7 +155,7 @@ export class Measure {
   private hoverKey: string | undefined;
 
   private readonly markerMaterial = new THREE.PointsMaterial({ color: COLOR, size: 9, sizeAttenuation: false, depthTest: false });
-  private readonly lineMaterial = new THREE.LineBasicMaterial({ color: COLOR, depthTest: false });
+  private readonly lineMaterial = new LineMaterial({ color: COLOR, linewidth: LINE_PX, depthTest: false });
   private readonly faceMaterial = new THREE.MeshBasicMaterial({
     color: COLOR,
     transparent: true,
@@ -239,6 +243,11 @@ export class Measure {
     return true;
   }
 
+  /** The canvas size in CSS pixels, which the line widths are relative to. */
+  setSize(width: number, height: number): void {
+    this.lineMaterial.resolution.set(width, height);
+  }
+
   updateLabel(camera: THREE.Camera, canvas: HTMLCanvasElement): void {
     for (const { result, label } of this.done) {
       const p = result.anchor.clone().project(camera);
@@ -297,23 +306,25 @@ export class Measure {
     const markers = picks.filter((p) => p.kind === 'point').map((p) => p.point);
     const lines = this.done.flatMap((d) => d.result.lines);
     if (lines.length) {
-      add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(lines), this.lineMaterial));
+      add(this.lineSegments(lines.flatMap((p) => p.toArray())));
       markers.push(...lines);
     }
     if (markers.length) add(new THREE.Points(new THREE.BufferGeometry().setFromPoints(markers), this.markerMaterial));
   }
 
   private highlight(p: Pick, faceMaterial: THREE.Material): THREE.Object3D | null {
-    const geometry = (positions: Float32Array) =>
-      new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(positions, 3));
     const o =
       p.kind === 'edge'
-        ? new THREE.LineSegments(geometry(p.segments), this.lineMaterial)
+        ? this.lineSegments(p.segments)
         : p.kind === 'face'
-          ? new THREE.Mesh(geometry(p.triangles), faceMaterial)
+          ? new THREE.Mesh(new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(p.triangles, 3)), faceMaterial)
           : null;
     if (o) o.renderOrder = 10;
     return o;
+  }
+
+  private lineSegments(positions: number[] | Float32Array): LineSegments2 {
+    return new LineSegments2(new LineSegmentsGeometry().setPositions(positions), this.lineMaterial);
   }
 }
 

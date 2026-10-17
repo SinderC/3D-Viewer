@@ -2,12 +2,15 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
+import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
 import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from 'three-mesh-bvh';
 import { APPEARANCES, type AppearanceId, type PartColor } from '../core/appearances';
 import { EDGE_STRIDE, FACE_STRIDE, faceTriangles, type Model, type Proto } from '../core/model';
 import type { UnitId } from '../core/units';
 import { Measure, type EdgePick, type FacePick, type MeasureMode, type Pick } from './measure';
-import { ensureBoundsTree, isShown } from './objects';
+import { ensureBoundsTree, isShown, LINE_PX } from './objects';
 import { boxUvs } from './boxUv';
 import { applyExplode, explodeOffsets, type ExplodeItem } from './explode';
 import { toGlb, toStl } from './export';
@@ -90,6 +93,8 @@ const LIGHTS = {
 const ANIMATION_MS = 300;
 const CLICK_TOLERANCE_PX = 4;
 const EDGE_PICK_PX = 6;
+const PIVOT_FLASH_MS = 1000; // how long the rotation center shows after it is set
+const PIVOT_RADIUS_PX = 18; // radius of the rotation center's sphere on screen
 // Adaptive quality: when frames are slow while the camera moves, it renders fewer pixels and no
 // ambient occlusion until the camera has been still for SETTLE_MS. A still view is always full quality.
 const SETTLE_MS = 150;
@@ -167,6 +172,15 @@ export class Viewer {
   private pointerDown: { x: number; y: number } | null = null;
   private readonly pointers = new Set<number>();
   private rotateFrom: { x: number; y: number } | null = null;
+  // Rotation center picked with a right-click; null rotates about the controls' target.
+  private pivot: THREE.Vector3 | null = null;
+  private pivotTimer = 0;
+  // A wire sphere at the rotation center, as AutoCAD's orbit: three rings about the world axes,
+  // scaled to a constant size on screen.
+  private readonly pivotMarker = new LineSegments2(
+    ringsGeometry(),
+    new LineMaterial({ color: 0xff7d2d, linewidth: LINE_PX, depthTest: false }),
+  );
 
   private readonly edgeMaterial = new THREE.LineBasicMaterial({ color: EDGE_COLOR });
   private readonly ghostMaterial = new THREE.MeshStandardMaterial({
@@ -213,6 +227,9 @@ export class Viewer {
     this.scene.add(this.modelRoot);
     this.scene.add(this.caps);
     this.scene.add(this.ghosts);
+    this.pivotMarker.visible = false;
+    this.pivotMarker.renderOrder = 1;
+    this.scene.add(this.pivotMarker);
 
     this.controls = this.createControls();
 
@@ -243,7 +260,10 @@ export class Viewer {
   dispose(): void {
     this.resizeObserver.disconnect();
     clearTimeout(this.settleTimer);
+    clearTimeout(this.pivotTimer);
     this.clear();
+    this.pivotMarker.geometry.dispose();
+    this.pivotMarker.material.dispose();
     this.controls.dispose();
     this.measure.dispose();
     this.cube.dispose();
@@ -513,6 +533,7 @@ export class Viewer {
         this.caps,
         ...this.pmi.all,
         ...this.measure.objects,
+        this.pivotMarker,
         ...(this.grid ? [this.grid] : []),
         ...(this.contactShadow ? [this.contactShadow.mesh] : []),
       ]);
@@ -779,13 +800,16 @@ export class Viewer {
     }
   }
 
-  // Free rotation about the screen axes through the target, so the model tumbles over the poles.
+  // Free rotation about the screen axes through the pivot (or the target), so the model tumbles over the poles.
   // Left drag without modifiers (those pan) and with one pointer (two pinch and pan).
   private handleRotateStart = (e: PointerEvent): void => {
     this.pointers.add(e.pointerId);
     const free = e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey && this.pointers.size === 1;
     this.rotateFrom = free ? { x: e.clientX, y: e.clientY } : null;
-    if (free) cancelAnimationFrame(this.animation);
+    if (free) {
+      cancelAnimationFrame(this.animation);
+      this.showPivot(true);
+    }
   };
 
   private handleRotate = (e: PointerEvent): void => {
@@ -798,21 +822,45 @@ export class Viewer {
     const turn = new THREE.Quaternion()
       .setFromAxisAngle(new THREE.Vector3(0, 1, 0).applyQuaternion(q), -dx)
       .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0).applyQuaternion(q), -dy));
+    // Turning the target too keeps it on the line of sight, so the controls' lookAt gives the turned view.
     const { target } = this.controls;
-    this.camera.position.sub(target).applyQuaternion(turn).add(target);
+    const center = this.pivot ?? target.clone();
+    this.camera.position.sub(center).applyQuaternion(turn).add(center);
+    target.sub(center).applyQuaternion(turn).add(center);
     this.camera.up.applyQuaternion(turn);
     this.controls.update();
   };
 
   private handleRotateEnd = (e: PointerEvent): void => {
     this.pointers.delete(e.pointerId);
+    if (this.rotateFrom) this.showPivot(false);
     this.rotateFrom = null;
   };
+
+  // Rotate about `p` from now on without moving the view: the target slides along the line of sight to
+  // the depth of `p`, so zoom and pan also work at that depth.
+  private setPivot(p: THREE.Vector3): void {
+    this.pivot = p.clone();
+    const eye = this.camera.position;
+    const dir = this.camera.getWorldDirection(new THREE.Vector3());
+    this.controls.target.copy(eye).addScaledVector(dir, Math.max(p.clone().sub(eye).dot(dir), this.camera.near)); // not behind the camera
+    this.controls.update();
+    this.showPivot(true);
+    this.pivotTimer = window.setTimeout(() => this.showPivot(false), PIVOT_FLASH_MS);
+  }
+
+  private showPivot(on: boolean): void {
+    clearTimeout(this.pivotTimer);
+    this.pivotMarker.position.copy(this.pivot ?? this.controls.target);
+    this.pivotMarker.visible = on;
+    this.requestRender();
+  }
 
   // Look at the box from `dir` (target towards camera), optionally turning and zooming there smoothly.
   // `up` is the world direction to show up on screen (the up axis for the standard views); omitted keeps the current one.
   private frame(direction: THREE.Vector3, box: THREE.Box3, animate = false, up?: THREE.Vector3): void {
     cancelAnimationFrame(this.animation);
+    this.pivot = null;
     const dir = direction.clone().normalize();
     const upDir = up?.clone() ?? this.camera.up.clone();
     // Looking along the up axis: show the upright +Y up from above and -Y from below, as the ViewCube labels.
@@ -891,6 +939,8 @@ export class Viewer {
     if (!w || !h) return;
     this.renderer.setSize(w, h);
     this.effects?.setSize(w, h, this.renderer.getPixelRatio());
+    this.pivotMarker.material.resolution.set(w, h);
+    this.measure.setSize(w, h);
     const aspect = w / h;
     this.perspective.aspect = aspect;
     this.perspective.updateProjectionMatrix();
@@ -906,7 +956,13 @@ export class Viewer {
   private handleClick = (e: PointerEvent): void => {
     const down = this.pointerDown;
     this.pointerDown = null;
-    if (e.button !== 0 || !down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > CLICK_TOLERANCE_PX) return;
+    if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > CLICK_TOLERANCE_PX) return;
+    // Right-click (two-finger tap on a trackpad): rotate about the point, or the model's center off it.
+    if (e.button === 2) {
+      const hit = this.raycast(e.clientX, e.clientY);
+      return this.setPivot(hit ? hit.point : this.visibleBounds().getBoundingSphere(new THREE.Sphere()).center);
+    }
+    if (e.button !== 0) return;
 
     const hit = this.raycast(e.clientX, e.clientY);
     if (this.tool === 'sectionFace') {
@@ -1120,12 +1176,24 @@ export class Viewer {
     requestAnimationFrame((now) => {
       this.renderQueued = false;
       this.timeFrame(now);
+      if (this.pivotMarker.visible) this.pivotMarker.scale.setScalar(PIVOT_RADIUS_PX * this.worldPerPixel(this.camera.position.distanceTo(this.pivotMarker.position)));
       this.draw();
       this.cube.update(this.upright.clone().invert().multiply(this.camera.quaternion));
       this.triad.update(this.camera);
       this.measure.updateLabel(this.camera, this.renderer.domElement);
     });
   };
+}
+
+// Unit circles in the XY, YZ and ZX planes, as line segments.
+function ringsGeometry(segments = 48): LineSegmentsGeometry {
+  const [x, y, z] = [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)];
+  const points: THREE.Vector3[] = [];
+  for (const [u, v] of [[x, y], [y, z], [z, x]]) {
+    const at = (i: number) => u.clone().multiplyScalar(Math.cos((i / segments) * 2 * Math.PI)).addScaledVector(v, Math.sin((i / segments) * 2 * Math.PI));
+    for (let i = 0; i < segments; i++) points.push(at(i), at(i + 1));
+  }
+  return new LineSegmentsGeometry().setPositions(points.flatMap((p) => p.toArray()));
 }
 
 // Index of the last element <= value in an ascending array (value >= sorted[0]).
