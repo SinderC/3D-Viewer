@@ -141,6 +141,15 @@ export const RealisticIcon = () => (
   </Icon>
 );
 
+// A sun low over the ground: the studio style's warm key light.
+export const StudioIcon = () => (
+  <Icon>
+    <circle cx="8" cy="8.5" r="2.75" />
+    <path d="M8 2.5v1.25M3.75 4.25l.9.9M12.25 4.25l-.9.9M2 8.5h1.25M12.75 8.5H14" />
+    <path d="M3.5 14.2h9" strokeOpacity="0.5" />
+  </Icon>
+);
+
 export const AppearanceIcon = () => (
   <Icon>
     <circle cx="8" cy="8" r="6.25" />

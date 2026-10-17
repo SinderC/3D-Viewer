@@ -12,6 +12,7 @@ import {
   OrthoIcon,
   PmiIcon,
   RealisticIcon,
+  StudioIcon,
   SectionIcon,
   ShadedEdgesIcon,
   ShadedIcon,
@@ -47,6 +48,7 @@ const DISPLAY: Record<DisplayStyle, { label: string; icon: ReactNode }> = {
   shadedEdges: { label: 'Shaded with edges', icon: <ShadedEdgesIcon /> },
   shaded: { label: 'Shaded', icon: <ShadedIcon /> },
   realistic: { label: 'Realistic', icon: <RealisticIcon /> },
+  studio: { label: 'Studio', icon: <StudioIcon /> },
   wireframe: { label: 'Wireframe', icon: <WireframeIcon /> },
 };
 

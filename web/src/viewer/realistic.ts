@@ -1,5 +1,5 @@
-// The "Realistic" display style: post-processing (ambient occlusion, tone mapping, vignette) and a soft
-// contact shadow under the model. Made on first use; the other styles render straight to the canvas.
+// The "Realistic" and "Studio" display styles: post-processing (ambient occlusion, tone mapping, grading,
+// vignette) and a soft contact shadow under the model. Made on first use; the other styles render straight to the canvas.
 import * as THREE from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
@@ -12,9 +12,23 @@ import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
 
 type Camera = THREE.PerspectiveCamera | THREE.OrthographicCamera;
 
-// Composites the tone-mapped scene (premultiplied by its coverage) over the background, with a soft vignette.
+/** Colour grading of the model (not the background): 1, 1, 0 leaves it as tone mapped. */
+export interface Grade {
+  saturation: number;
+  contrast: number;
+  /** Shifts colour towards orange (positive) or blue (negative). */
+  warmth: number;
+}
+
+// Grades the tone-mapped scene (premultiplied by its coverage), composites it over the background, with a soft vignette.
 const BACKDROP = {
-  uniforms: { tDiffuse: { value: null }, background: { value: new THREE.Color() } },
+  uniforms: {
+    tDiffuse: { value: null },
+    background: { value: new THREE.Color() },
+    saturation: { value: 1 },
+    contrast: { value: 1 },
+    warmth: { value: 0 },
+  },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
     void main() {
@@ -24,10 +38,18 @@ const BACKDROP = {
   fragmentShader: /* glsl */ `
     uniform sampler2D tDiffuse;
     uniform vec3 background;
+    uniform float saturation;
+    uniform float contrast;
+    uniform float warmth;
     varying vec2 vUv;
     void main() {
       vec4 scene = texture2D(tDiffuse, vUv);
-      vec3 color = scene.rgb + background * (1.0 - scene.a);
+      vec3 model = scene.a > 0.0 ? scene.rgb / scene.a : vec3(0.0);
+      float luma = dot(model, vec3(0.2126, 0.7152, 0.0722));
+      model = mix(vec3(luma), model, saturation);
+      model = (model - 0.5) * contrast + 0.5;
+      model *= vec3(1.0 + warmth, 1.0, 1.0 - warmth);
+      vec3 color = clamp(model, 0.0, 1.0) * scene.a + background * (1.0 - scene.a);
       vec2 d = vUv - 0.5;
       color *= 1.0 - 0.35 * smoothstep(0.2, 0.8, dot(d, d) * 2.0);
       gl_FragColor = vec4(color, 1.0);
@@ -82,6 +104,13 @@ export class Effects {
     // Colours are stored linear and uploaded as they are, but the backdrop pass works in the output's sRGB.
     const { r, g, b } = new THREE.Color(color).getRGB(new THREE.Color(), THREE.SRGBColorSpace);
     this.backdrop.uniforms.background.value.setRGB(r, g, b, THREE.LinearSRGBColorSpace);
+  }
+
+  setGrade({ saturation, contrast, warmth }: Grade): void {
+    const { uniforms } = this.backdrop;
+    uniforms.saturation.value = saturation;
+    uniforms.contrast.value = contrast;
+    uniforms.warmth.value = warmth;
   }
 
   /** How far ambient occlusion reaches, in world units: a few percent of the model is right. */

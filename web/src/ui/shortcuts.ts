@@ -23,7 +23,7 @@ export interface Shortcut {
   run: (ctx: ShortcutContext) => void;
 }
 
-const DISPLAY_CYCLE: DisplayStyle[] = ['shadedEdges', 'shaded', 'realistic', 'wireframe'];
+const DISPLAY_CYCLE: DisplayStyle[] = ['shadedEdges', 'shaded', 'realistic', 'studio', 'wireframe'];
 
 const hideSelected = ({ state, dispatch }: ShortcutContext) => {
   if (state.selected === null) return;

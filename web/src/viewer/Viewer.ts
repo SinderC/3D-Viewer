@@ -16,7 +16,7 @@ import { applyExplode, explodeOffsets, type ExplodeItem } from './explode';
 import { toGlb, toStl } from './export';
 import { Finishes, FINISH_UVS } from './finishes';
 import { PmiLayer } from './pmi';
-import { ContactShadow, Effects } from './realistic';
+import { ContactShadow, Effects, type Grade } from './realistic';
 import { buildSectionCaps, disposeCaps, sectionPlane, sectionPosition } from './section';
 import { AxisTriad } from './AxisTriad';
 import { ViewCube } from './ViewCube';
@@ -27,7 +27,10 @@ THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
 export type Tool = 'select' | 'measure' | 'sectionFace'; // sectionFace: the next click picks the face to cut along
 export type ViewName = 'iso' | 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom';
-export type DisplayStyle = 'shadedEdges' | 'shaded' | 'wireframe' | 'realistic';
+export type DisplayStyle = 'shadedEdges' | 'shaded' | 'wireframe' | 'realistic' | 'studio';
+type Photographic = Extract<DisplayStyle, 'realistic' | 'studio'>;
+// The styles rendered through the effects (realistic.ts), lit mostly by the sun.
+const photographic = (style: DisplayStyle): style is Photographic => style === 'realistic' || style === 'studio';
 export type Axis = 'x' | 'y' | 'z';
 /** What a part shows over its file material; neither for the file's look. */
 export interface Look {
@@ -83,13 +86,26 @@ const THEMES: Record<Theme, { background: number; grid: [number, number]; wire: 
   dark: { background: 0x2a2d34, grid: [0x565b66, 0x3a3e46], wire: 0xc8ccd4, pmi: 0x4fb4ff },
   light: { background: 0xeef0f3, grid: [0xb4b9c2, 0xd4d8de], wire: 0x3a3e46, pmi: 0x1f78d1 },
 };
-// Light intensities; in the realistic style the environment adds light, so the lamps dim.
-// The plain styles light from the camera, so every face towards you is lit; the realistic one lights
-// mostly from a fixed overhead sun, so shape reads from shading as in a photo.
+// Light intensities and colours; in the photographic styles the environment adds light, so the lamps dim.
+// The plain styles light from the camera, so every face towards you is lit; the photographic ones light
+// mostly from a fixed overhead sun, so shape reads from shading as in a photo. Studio is the animated-film
+// recipe: a warm sun casting shadows, a cool sky fill and a warm bounce from the ground, then graded.
+const NEUTRAL: Grade = { saturation: 1, contrast: 1, warmth: 0 };
 const LIGHTS = {
-  plain: { key: 2.2, fill: 1.4, sun: 0, environment: 0 },
-  realistic: { key: 0.35, fill: 0.1, sun: 3.2, environment: 0.35 },
+  plain: { key: 2.2, fill: 1.4, sun: 0, environment: 0, sunColor: 0xffffff, sky: 0xffffff, ground: 0x50545c, grade: NEUTRAL },
+  realistic: { key: 0.35, fill: 0.1, sun: 3.2, environment: 0.35, sunColor: 0xffffff, sky: 0xffffff, ground: 0x50545c, grade: NEUTRAL },
+  studio: {
+    key: 0.1,
+    fill: 0.9,
+    sun: 4.2,
+    environment: 0.15,
+    sunColor: 0xffd9a8,
+    sky: 0x9cc4ff,
+    ground: 0xb08458,
+    grade: { saturation: 1.2, contrast: 1.12, warmth: 0.04 },
+  },
 };
+const SHADOW_MAP_SIZE = 2048;
 const ANIMATION_MS = 300;
 const CLICK_TOLERANCE_PX = 4;
 const EDGE_PICK_PX = 6;
@@ -204,6 +220,12 @@ export class Viewer {
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setPixelRatio(this.pixelRatio);
     this.renderer.localClippingEnabled = true;
+    // Only the studio sun casts. The light is fixed to the model, so its map is redrawn when the model changes, not per frame.
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.renderer.shadowMap.autoUpdate = false;
+    this.sun.shadow.mapSize.setScalar(SHADOW_MAP_SIZE);
+    this.sun.shadow.radius = 3;
     this.finishes = new Finishes(this.renderer.capabilities.getMaxAnisotropy());
     const pmrem = new THREE.PMREMGenerator(this.renderer);
     const room = new RoomEnvironment();
@@ -220,7 +242,7 @@ export class Viewer {
     this.perspective.up.copy(Z_UP);
     this.ortho.up.copy(Z_UP);
     this.scene.add(this.hemisphere);
-    this.scene.add(this.sun);
+    this.scene.add(this.sun, this.sun.target);
     this.scene.add(this.camera);
     this.camera.add(this.light);
     this.light.position.set(0.5, 1, 1);
@@ -323,6 +345,7 @@ export class Viewer {
         const mats = proto.groups.map((g) => material(g.color >= 0 ? g.color : color));
         const mesh = new THREE.Mesh(geometries[node.proto].faces, mats.length === 1 ? mats[0] : mats);
         mesh.userData = { nodeId: id, baseMaterial: mesh.material, fileMaterial: mesh.material, proto };
+        mesh.castShadow = mesh.receiveShadow = true;
         obj.add(mesh);
         this.meshes.push(mesh);
 
@@ -356,6 +379,7 @@ export class Viewer {
       polygonOffsetFactor: 1,
       polygonOffsetUnits: 1,
       clippingPlanes: this.clipping,
+      clipShadows: true,
       visible: this.display !== 'wireframe',
     });
   }
@@ -521,12 +545,13 @@ export class Viewer {
     for (const m of [...this.materials, ...this.lookMaterials.values()]) m.visible = faces;
     this.edgeLines.forEach((l) => (l.visible = style === 'shadedEdges' || style === 'wireframe'));
     this.edgeMaterial.color.set(faces ? EDGE_COLOR : this.theme.wire);
-    this.setRealistic(style === 'realistic');
+    this.setPhotographic(photographic(style) ? style : null);
     this.invalidate('caps', 'realistic');
   }
 
   // Tone mapping, environment light, ambient occlusion and a contact shadow, for a photographic look.
-  private setRealistic(on: boolean): void {
+  private setPhotographic(style: Photographic | null): void {
+    const on = style !== null;
     if (on && !this.effects) {
       this.effects = new Effects(this.renderer, this.scene, this.camera, this.clipping, () => [
         this.ghosts,
@@ -542,23 +567,45 @@ export class Viewer {
       this.scene.add(this.contactShadow.mesh);
       this.resize();
     }
-    const lights = on ? LIGHTS.realistic : LIGHTS.plain;
+    const lights = LIGHTS[style ?? 'plain'];
     this.light.intensity = lights.key;
     this.hemisphere.intensity = lights.fill;
+    this.hemisphere.color.set(lights.sky);
+    this.hemisphere.groundColor.set(lights.ground);
     this.sun.intensity = lights.sun;
+    this.sun.color.set(lights.sunColor);
+    this.sun.castShadow = style === 'studio';
+    this.effects?.setGrade(lights.grade);
     this.scene.environment = on ? this.environment : null;
     this.scene.environmentIntensity = lights.environment;
     this.scene.background = on ? null : this.background; // the effects composite it untouched
-    this.renderer.toneMapping = on ? THREE.NeutralToneMapping : THREE.NoToneMapping;
+    // AgX rolls highlights off like film, which the graded studio look wants; neutral keeps colours true.
+    this.renderer.toneMapping = style === 'studio' ? THREE.AgXToneMapping : on ? THREE.NeutralToneMapping : THREE.NoToneMapping;
     this.contactShadow?.setVisible(on);
   }
 
   // The contact shadow and the occlusion radius follow what is shown, not the camera.
   private updateRealistic(): void {
-    if (this.display !== 'realistic' || !this.effects || !this.contactShadow) return;
+    if (!photographic(this.display) || !this.effects || !this.contactShadow) return;
     const bounds = this.visibleBounds();
     this.contactShadow.update(this.renderer, this.modelRoot, this.toUpright(bounds), this.upright, this.pmi.all);
     this.effects.setOcclusionRadius(0.04 * bounds.getSize(new THREE.Vector3()).length());
+    this.fitSunShadow(bounds);
+  }
+
+  // Aim the sun's shadow camera at what is shown, just enclosing it, and redraw the shadow map.
+  private fitSunShadow(bounds: THREE.Box3): void {
+    const { center, radius } = bounds.getBoundingSphere(new THREE.Sphere());
+    const r = Math.max(radius, 1e-3);
+    this.sun.target.position.copy(center);
+    this.sun.position.copy(SUN).applyQuaternion(this.upright).setLength(2 * r).add(center);
+    const camera = this.sun.shadow.camera;
+    Object.assign(camera, { left: -r, right: r, top: r, bottom: -r, near: r * 0.5, far: r * 3.5 });
+    camera.updateProjectionMatrix();
+    // Offsets against shadow acne on large flat CAD faces, relative to the model and to the map's texels.
+    this.sun.shadow.normalBias = (2 * r) / SHADOW_MAP_SIZE;
+    this.sun.shadow.bias = -0.0005;
+    this.renderer.shadowMap.needsUpdate = true;
   }
 
   // ---------------------------------------------------------------------------
@@ -681,6 +728,7 @@ export class Viewer {
       this.clipPlane.copy(sectionPlane(this.bounds, dir, position, flip));
       this.clipping.push(this.clipPlane);
     }
+    this.renderer.shadowMap.needsUpdate = true; // cut-away parts cast no shadow
     this.invalidate('caps');
   }
 
@@ -1166,7 +1214,7 @@ export class Viewer {
     if (this.stale.has('caps')) this.updateCaps();
     if (this.stale.has('realistic')) this.updateRealistic();
     this.stale.clear();
-    if (this.display === 'realistic' && this.effects) this.effects.render();
+    if (photographic(this.display) && this.effects) this.effects.render();
     else this.renderer.render(this.scene, this.camera);
   }
 
