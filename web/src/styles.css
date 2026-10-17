@@ -19,6 +19,7 @@
   --menu-edge: inset 0 0 0 0.5px rgb(255 255 255 / 0.08); /* light catching the raised menu's rim */
   --success: #5cc87a;
   --danger: #ff8080;
+  --warning: #f2b544;
   --danger-fill: #e05252;
   --measure: #ffb020;
   --on-measure: #1b1d22;
@@ -59,6 +60,7 @@
   --menu-edge: inset 0 0 0 0.5px rgb(0 0 0 / 0.04);
   --success: #23884a;
   --danger: #d23c3c;
+  --warning: #b7791f;
   --danger-fill: #d23c3c;
   --cube-face: #f7f8fa;
   --cube-edge: #b9bec6;
@@ -271,8 +273,8 @@ input[type='checkbox'] { accent-color: var(--accent); margin: 0; }
 @starting-style { .overlay.drop { opacity: 0; } }
 .overlay.error p:first-child { color: var(--danger); }
 
-/* Missing referenced files (MissingFiles.tsx) */
-/* Above the view bar, clear of the view cube. */
+/* Missing referenced files (MissingFiles.tsx): a warning, an error when nothing could be shown.
+   Above the view bar, clear of the view cube; it rises from the bar and sinks back into it. */
 .notice {
   position: absolute;
   bottom: 72px;
@@ -284,12 +286,16 @@ input[type='checkbox'] { accent-color: var(--accent); margin: 0; }
   align-items: center;
   gap: 10px;
   padding: 8px 8px 8px 14px;
-  border: 1px solid var(--danger);
+  border: 1px solid var(--warning);
   border-radius: var(--radius-m);
   background: var(--surface-1);
   box-shadow: var(--shadow-2);
   font-size: 13px;
+  transition: opacity 200ms var(--ease-out), translate 200ms var(--ease-out);
 }
+.notice.error { border-color: var(--danger); }
+.notice.leaving { opacity: 0; translate: 0 8px; }
+@starting-style { .notice { opacity: 0; translate: 0 8px; } }
 .notice p { margin: 0; overflow-wrap: anywhere; }
 .notice button:not(.icon) { flex: none; }
 .muted { color: var(--text-2); font-size: 13px; }
@@ -494,6 +500,8 @@ button.icon[aria-pressed='true'] { color: var(--accent); background: var(--accen
   @starting-style { .menu:popover-open, .menu.bar:popover-open { transform: none; } }
   .caret svg, .section > summary svg, .progress > div { transition: none; }
   .progress.indeterminate > div { width: 100%; animation: none; opacity: 0.4; }
+  .notice, .notice.leaving { translate: none; }
+  @starting-style { .notice { translate: none; } }
 }
 
 @media (max-width: 700px) {
