@@ -5,3 +5,8 @@ export function isShown(o: THREE.Object3D): boolean {
   for (let p: THREE.Object3D | null = o; p; p = p.parent) if (!p.visible) return false;
   return true;
 }
+
+/** Build the geometry's BVH on first use. Indirect, so the index keeps the order `faceStarts` refers to. */
+export function ensureBoundsTree(geometry: THREE.BufferGeometry): void {
+  if (!geometry.boundsTree) geometry.computeBoundsTree({ indirect: true });
+}

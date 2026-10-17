@@ -71,6 +71,20 @@ describe('buildSectionCaps', () => {
     expect(capArea(buildSectionCaps([moved], zPlane(10.5), style))).toBeCloseTo(4);
   });
 
+  it('builds an indirect bounds tree only for meshes the plane crosses, and keeps the mesh on each cap', () => {
+    const lazy = (position: THREE.Vector3) => {
+      const m = new THREE.Mesh(box(2));
+      m.position.copy(position);
+      m.updateMatrixWorld(true);
+      return m;
+    };
+    const [crossed, missed] = [lazy(new THREE.Vector3()), lazy(new THREE.Vector3(0, 0, 10))];
+    const caps = buildSectionCaps([crossed, missed], zPlane(0.3), style);
+    expect(crossed.geometry.boundsTree?.indirect).toBe(true); // keeps the index order faceStarts refers to
+    expect(missed.geometry.boundsTree).toBeUndefined();
+    expect(caps.children.filter((c) => c instanceof THREE.Mesh).map((c) => c.userData.mesh)).toEqual([crossed]);
+  });
+
   it('skips open surfaces', () => {
     const sheet = new THREE.PlaneGeometry(2, 2).rotateX(Math.PI / 2); // vertical sheet, no inside
     expect(capArea(buildSectionCaps([mesh(sheet)], zPlane(0), style))).toBe(0);

@@ -89,6 +89,11 @@ export class Effects {
     this.ao.updateGtaoMaterial({ radius });
   }
 
+  /** Ambient occlusion on or off, e.g. off while the camera moves on a slow machine. */
+  setOcclusion(on: boolean): void {
+    this.ao.enabled = on;
+  }
+
   setCamera(camera: Camera): void {
     this.renderPass.camera = camera;
     this.ao.camera = camera;

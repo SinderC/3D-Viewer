@@ -38,12 +38,14 @@ export interface EdgePick {
   radius: number;
   center: THREE.Vector3;
   axis: THREE.Vector3;
+  key?: string; // which edge of which part: the same key is the same highlight
 }
 export interface FacePick {
   kind: 'face';
   point: THREE.Vector3;
   triangles: Float32Array; // non-indexed, for highlighting
   plane: THREE.Plane | null; // outward normal; null when the face is not planar
+  key?: string; // which face of which part: the same key is the same highlight
 }
 export type Pick = PointPick | EdgePick | FacePick;
 
@@ -146,6 +148,7 @@ export class Measure {
   private unit: UnitId = 'mm';
   private picks: Pick[] = [];
   private done: Done[] = [];
+  private hoverKey: string | undefined;
 
   private readonly markerMaterial = new THREE.PointsMaterial({ color: COLOR, size: 9, sizeAttenuation: false, depthTest: false });
   private readonly lineMaterial = new THREE.LineBasicMaterial({ color: COLOR, depthTest: false });
@@ -227,6 +230,9 @@ export class Measure {
   // Preview of the edge or face under the cursor. Returns whether anything changed.
   setHover(pick: Pick | null): boolean {
     if (!pick && !this.hoverGroup.children.length) return false;
+    const key = pick?.kind === 'point' ? undefined : pick?.key;
+    if (key !== undefined && key === this.hoverKey) return false;
+    this.hoverKey = key;
     clearGroup(this.hoverGroup);
     const o = pick && this.highlight(pick, this.hoverFaceMaterial);
     if (o) this.hoverGroup.add(o);

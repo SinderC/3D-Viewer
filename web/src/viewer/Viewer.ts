@@ -7,7 +7,7 @@ import { APPEARANCES, type AppearanceId, type PartColor } from '../core/appearan
 import { EDGE_STRIDE, FACE_STRIDE, faceTriangles, type Model, type Proto } from '../core/model';
 import type { UnitId } from '../core/units';
 import { Measure, type EdgePick, type FacePick, type MeasureMode, type Pick } from './measure';
-import { isShown } from './objects';
+import { ensureBoundsTree, isShown } from './objects';
 import { boxUvs } from './boxUv';
 import { applyExplode, explodeOffsets, type ExplodeItem } from './explode';
 import { toGlb, toStl } from './export';
@@ -90,6 +90,15 @@ const LIGHTS = {
 const ANIMATION_MS = 300;
 const CLICK_TOLERANCE_PX = 4;
 const EDGE_PICK_PX = 6;
+// Adaptive quality: when frames are slow while the camera moves, it renders fewer pixels and no
+// ambient occlusion until the camera has been still for SETTLE_MS. A still view is always full quality.
+const SETTLE_MS = 150;
+const SLOW_FRAME_MS = 24; // median frame time while moving, below ~42 fps
+const FRAME_SAMPLES = 15;
+const FRAME_GAP_MS = 100; // longer gaps are pauses in the gesture, not frames
+const MOVING_PIXEL_RATIO = Math.SQRT1_2; // half the pixels
+
+type Work = 'ghosts' | 'caps' | 'realistic';
 
 export class Viewer {
   onPick: (nodeId: number | null) => void = () => {};
@@ -145,6 +154,16 @@ export class Viewer {
   private theme = THEMES.dark;
   private animation = 0;
   private renderQueued = false;
+  // Derived scene parts to rebuild before the next frame, so several changes in one frame build them once.
+  private readonly stale = new Set<Work>();
+  private readonly pixelRatio = window.devicePixelRatio;
+  private slow = false; // frames measured slow while moving, for this model
+  private moving = false;
+  private settleTimer = 0;
+  private lastFrame = 0;
+  private frameTimes: number[] = [];
+  private hoverEvent: PointerEvent | null = null; // latest pointer move, picked once per frame
+  private hoverQueued = false;
   private pointerDown: { x: number; y: number } | null = null;
   private readonly pointers = new Set<number>();
   private rotateFrom: { x: number; y: number } | null = null;
@@ -169,7 +188,7 @@ export class Viewer {
 
   constructor(private readonly container: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
-    this.renderer.setPixelRatio(window.devicePixelRatio);
+    this.renderer.setPixelRatio(this.pixelRatio);
     this.renderer.localClippingEnabled = true;
     this.finishes = new Finishes(this.renderer.capabilities.getMaxAnisotropy());
     const pmrem = new THREE.PMREMGenerator(this.renderer);
@@ -207,7 +226,10 @@ export class Viewer {
     canvas.addEventListener('pointerdown', (e) => (this.pointerDown = { x: e.clientX, y: e.clientY }));
     canvas.addEventListener('pointerup', this.handleClick);
     canvas.addEventListener('pointermove', this.handleHover);
-    canvas.addEventListener('pointerleave', () => this.setHover(null));
+    canvas.addEventListener('pointerleave', () => {
+      this.hoverEvent = null;
+      this.setHover(null);
+    });
     canvas.addEventListener('pointerdown', this.handleRotateStart);
     canvas.addEventListener('pointermove', this.handleRotate);
     canvas.addEventListener('pointerup', this.handleRotateEnd);
@@ -220,6 +242,7 @@ export class Viewer {
 
   dispose(): void {
     this.resizeObserver.disconnect();
+    clearTimeout(this.settleTimer);
     this.clear();
     this.controls.dispose();
     this.measure.dispose();
@@ -241,6 +264,8 @@ export class Viewer {
 
   load(model: Model): void {
     this.clear();
+    this.slow = false; // measured again for this model
+    this.frameTimes = [];
 
     this.materials = model.colors.map(([r, g, b, a], i) => {
       const fromFile = model.materials?.[i];
@@ -258,8 +283,7 @@ export class Viewer {
       for (const [set, uvs] of Object.entries(p.uvs ?? {})) g.setAttribute(set, new THREE.BufferAttribute(uvs, 2));
       if (p.vertexColors) g.setAttribute('color', new THREE.BufferAttribute(p.vertexColors.array, p.vertexColors.itemSize));
       p.groups.forEach((grp, i) => g.addGroup(grp.start, grp.count, i));
-      // Indirect: keep the index order, which faceStarts refers to.
-      g.computeBoundsTree({ indirect: true });
+      // No bounds tree yet: it is built when a pick or a section first needs it (ensureBoundsTree).
       const e = new THREE.BufferGeometry();
       e.setAttribute('position', new THREE.BufferAttribute(p.edges, 3));
       return { faces: g, edges: e };
@@ -391,7 +415,7 @@ export class Viewer {
         m.dispose();
         this.lookMaterials.delete(key);
       }
-    this.updateCaps(); // cut faces take the part colours
+    this.recolorCaps();
     this.requestRender();
   }
 
@@ -439,10 +463,7 @@ export class Viewer {
 
   setHidden(hidden: ReadonlySet<number>): void {
     this.nodeObjects.forEach((o, id) => (o.visible = !hidden.has(id)));
-    this.updateGhosts();
-    this.updateCaps();
-    this.updateRealistic();
-    this.requestRender();
+    this.invalidate('ghosts', 'caps', 'realistic');
   }
 
   /** Move parts apart: 0 assembled, 1 fully exploded. The section keeps the assembled bounds. */
@@ -450,17 +471,13 @@ export class Viewer {
     applyExplode(this.explodeItems, amount);
     this.modelRoot.updateMatrixWorld(true);
     this.measure.clear(); // measured where the parts were
-    this.updateGhosts();
-    this.updateCaps();
-    this.updateRealistic();
-    this.requestRender();
+    this.invalidate('ghosts', 'caps', 'realistic');
   }
 
   /** Draw hidden parts as translucent ghosts, for context; they cannot be picked or measured. */
   setGhost(on: boolean): void {
     this.ghost = on;
-    this.updateGhosts();
-    this.requestRender();
+    this.invalidate('ghosts');
   }
 
   // Ghosts share the parts' geometry and copy their placement; hidden parts themselves stay invisible.
@@ -485,8 +502,7 @@ export class Viewer {
     this.edgeLines.forEach((l) => (l.visible = style === 'shadedEdges' || style === 'wireframe'));
     this.edgeMaterial.color.set(faces ? EDGE_COLOR : this.theme.wire);
     this.setRealistic(style === 'realistic');
-    this.updateCaps();
-    this.requestRender();
+    this.invalidate('caps', 'realistic');
   }
 
   // Tone mapping, environment light, ambient occlusion and a contact shadow, for a photographic look.
@@ -514,7 +530,6 @@ export class Viewer {
     this.scene.background = on ? null : this.background; // the effects composite it untouched
     this.renderer.toneMapping = on ? THREE.NeutralToneMapping : THREE.NoToneMapping;
     this.contactShadow?.setVisible(on);
-    this.updateRealistic();
   }
 
   // The contact shadow and the occlusion radius follow what is shown, not the camera.
@@ -523,7 +538,6 @@ export class Viewer {
     const bounds = this.visibleBounds();
     this.contactShadow.update(this.renderer, this.modelRoot, this.toUpright(bounds), this.upright, this.pmi.all);
     this.effects.setOcclusionRadius(0.04 * bounds.getSize(new THREE.Vector3()).length());
-    this.requestRender();
   }
 
   // ---------------------------------------------------------------------------
@@ -569,9 +583,8 @@ export class Viewer {
       this.removeGrid();
       this.addGrid();
     }
-    this.updateRealistic();
     if (!this.bounds.isEmpty()) this.setView('iso');
-    this.requestRender();
+    this.invalidate('realistic');
   }
 
   /** A world box in the upright frame; exact, as the frame turns in quarter turns. */
@@ -647,8 +660,7 @@ export class Viewer {
       this.clipPlane.copy(sectionPlane(this.bounds, dir, position, flip));
       this.clipping.push(this.clipPlane);
     }
-    this.updateCaps();
-    this.requestRender();
+    this.invalidate('caps');
   }
 
   // Solid-looking cut: fill each visible part's cross-section with its own colour.
@@ -660,6 +672,12 @@ export class Viewer {
       outline: this.capOutline,
     });
     this.scene.add(this.caps);
+  }
+
+  // Cut faces take the part colours; the cut itself stays.
+  private recolorCaps(): void {
+    for (const cap of this.caps.children)
+      if (cap instanceof THREE.Mesh && cap.userData.mesh) cap.material = this.capMaterial(cap.userData.mesh);
   }
 
   private clearCaps(): void {
@@ -712,9 +730,53 @@ export class Viewer {
   private createControls(): OrbitControls {
     const controls = new OrbitControls(this.camera, this.renderer.domElement);
     controls.enableRotate = false;
-    controls.addEventListener('change', this.requestRender);
+    controls.addEventListener('change', this.cameraMoved);
     controls.addEventListener('start', () => cancelAnimationFrame(this.animation));
     return controls;
+  }
+
+  // Every camera change (orbit, pan, zoom, view animations) comes here through the controls.
+  private cameraMoved = (): void => {
+    clearTimeout(this.settleTimer);
+    this.settleTimer = window.setTimeout(this.settle, SETTLE_MS);
+    if (!this.moving) {
+      this.moving = true;
+      this.applyQuality();
+    }
+    this.requestRender();
+  };
+
+  private settle = (): void => {
+    this.moving = false;
+    this.applyQuality();
+  };
+
+  // Reduced while the camera moves on a machine measured slow; full quality otherwise.
+  private applyQuality(): void {
+    const reduce = this.moving && this.slow;
+    const ratio = this.pixelRatio * (reduce ? MOVING_PIXEL_RATIO : 1);
+    if (ratio !== this.renderer.getPixelRatio()) {
+      this.renderer.setPixelRatio(ratio);
+      this.resize();
+    }
+    this.effects?.setOcclusion(!reduce);
+    this.requestRender();
+  }
+
+  // While the camera moves, the time between frames is how long one takes. Gaps longer than a frame
+  // can be are pauses in the gesture; a median ignores the odd short pause.
+  private timeFrame(now: number): void {
+    const dt = this.moving && this.lastFrame ? now - this.lastFrame : Infinity;
+    this.lastFrame = this.moving ? now : 0;
+    if (this.slow || dt > FRAME_GAP_MS) return;
+    this.frameTimes.push(dt);
+    if (this.frameTimes.length < FRAME_SAMPLES) return;
+    const median = [...this.frameTimes].sort((a, b) => a - b)[FRAME_SAMPLES >> 1];
+    this.frameTimes.shift();
+    if (median > SLOW_FRAME_MS) {
+      this.slow = true;
+      this.applyQuality();
+    }
   }
 
   // Free rotation about the screen axes through the target, so the model tumbles over the poles.
@@ -859,12 +921,24 @@ export class Viewer {
     this.requestRender();
   };
 
-  // Highlight the edge or face a click would pick; points get no preview.
   private handleHover = (e: PointerEvent): void => {
+    this.hoverEvent = e;
+    if (this.hoverQueued) return;
+    this.hoverQueued = true;
+    requestAnimationFrame(() => {
+      this.hoverQueued = false;
+      const latest = this.hoverEvent;
+      this.hoverEvent = null;
+      if (latest) this.hover(latest);
+    });
+  };
+
+  // Highlight the edge or face a click would pick; points get no preview.
+  private hover(e: PointerEvent): void {
     const kind = this.tool === 'sectionFace' ? 'face' : this.tool === 'measure' ? this.measure.pickKind : null;
     if (!kind || kind === 'point' || e.buttons) return this.setHover(null);
     this.setHover(this.pick(kind, this.raycast(e.clientX, e.clientY), e));
-  };
+  }
 
   private setHover(pick: Pick | null): void {
     if (this.measure.setHover(pick)) this.requestRender();
@@ -879,9 +953,15 @@ export class Viewer {
   }
 
   private raycast(clientX: number, clientY: number): THREE.Intersection | undefined {
-    return this.raycaster(clientX, clientY)
-      .intersectObjects(this.meshes.filter(isShown), false)
-      .find((h) => this.unclipped(h.point));
+    const raycaster = this.raycaster(clientX, clientY);
+    const shown = this.meshes.filter(isShown);
+    const sphere = new THREE.Sphere();
+    for (const { geometry, matrixWorld } of shown) {
+      if (geometry.boundsTree) continue;
+      if (!geometry.boundingSphere) geometry.computeBoundingSphere();
+      if (raycaster.ray.intersectsSphere(sphere.copy(geometry.boundingSphere!).applyMatrix4(matrixWorld))) ensureBoundsTree(geometry);
+    }
+    return raycaster.intersectObjects(shown, false).find((h) => this.unclipped(h.point));
   }
 
   private unclipped(p: THREE.Vector3, tolerance = 0): boolean {
@@ -911,7 +991,7 @@ export class Viewer {
       const normal = new THREE.Vector3(d[4], d[5], d[6]).applyMatrix3(new THREE.Matrix3().getNormalMatrix(m)).normalize();
       plane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, origin);
     }
-    return { kind: 'face', point: hit.point.clone(), triangles, plane };
+    return { kind: 'face', point: hit.point.clone(), triangles, plane, key: `${mesh.id}:${f}` };
   }
 
   // The visible B-rep edge nearest the cursor, within a few pixels.
@@ -924,8 +1004,17 @@ export class Viewer {
     raycaster.params.Line = { threshold };
 
     const hits: THREE.Intersection[] = [];
+    const sphere = new THREE.Sphere();
     for (const lines of this.edgeLines) {
-      if (lines.parent && isShown(lines.parent)) THREE.LineSegments.prototype.raycast.call(lines, raycaster, hits);
+      if (!lines.parent || !isShown(lines.parent)) continue;
+      if (occluder) {
+        // Parts wholly behind the surface under the cursor: none of their hits would pass the test below.
+        if (!lines.geometry.boundingSphere) lines.geometry.computeBoundingSphere();
+        sphere.copy(lines.geometry.boundingSphere!).applyMatrix4(lines.matrixWorld);
+        const nearest = raycaster.ray.origin.distanceTo(sphere.center) - sphere.radius - threshold;
+        if (nearest > occluder.distance + 4 * threshold) continue;
+      }
+      THREE.LineSegments.prototype.raycast.call(lines, raycaster, hits);
     }
     let best: THREE.Intersection | undefined;
     let bestRay = Infinity;
@@ -961,6 +1050,7 @@ export class Viewer {
       radius: d[2],
       center: new THREE.Vector3(d[3], d[4], d[5]).applyMatrix4(m),
       axis: new THREE.Vector3(d[6], d[7], d[8]).transformDirection(m),
+      key: `${lines.id}:${i}`,
     };
   }
 
@@ -1009,7 +1099,17 @@ export class Viewer {
   // ---------------------------------------------------------------------------
   // Rendering (on demand)
 
+  /** Rebuild `work` before the next frame. */
+  private invalidate(...work: Work[]): void {
+    work.forEach((w) => this.stale.add(w));
+    this.requestRender();
+  }
+
   private draw(): void {
+    if (this.stale.has('ghosts')) this.updateGhosts();
+    if (this.stale.has('caps')) this.updateCaps();
+    if (this.stale.has('realistic')) this.updateRealistic();
+    this.stale.clear();
     if (this.display === 'realistic' && this.effects) this.effects.render();
     else this.renderer.render(this.scene, this.camera);
   }
@@ -1017,8 +1117,9 @@ export class Viewer {
   private requestRender = (): void => {
     if (this.renderQueued) return;
     this.renderQueued = true;
-    requestAnimationFrame(() => {
+    requestAnimationFrame((now) => {
       this.renderQueued = false;
+      this.timeFrame(now);
       this.draw();
       this.cube.update(this.upright.clone().invert().multiply(this.camera.quaternion));
       this.triad.update(this.camera);

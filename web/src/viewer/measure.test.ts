@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
-import { evaluate, type EdgePick, type FacePick } from './measure';
+import { evaluate, Measure, type EdgePick, type FacePick } from './measure';
 
 const v = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
 
@@ -77,5 +77,17 @@ describe('evaluate', () => {
 
   it('point coordinates', () => {
     expect(evaluate('pointCoords', [{ kind: 'point', point: v(1, -2, 25.4) }], 'mm').text).toBe('X 1.000 mm   Y -2.000 mm   Z 25.400 mm');
+  });
+});
+
+describe('Measure hover', () => {
+  it('keeps the highlight while the cursor stays on the same face', () => {
+    const m = new Measure(new THREE.Scene(), {} as HTMLElement);
+    const hover = (key: string) => ({ ...face(v(0, 0, 1), v(0, 0, 0)), triangles: new Float32Array(9), key });
+    expect(m.setHover(hover('1:4'))).toBe(true);
+    expect(m.setHover(hover('1:4'))).toBe(false);
+    expect(m.setHover(hover('1:5'))).toBe(true);
+    expect(m.setHover(null)).toBe(true);
+    expect(m.setHover(hover('1:5'))).toBe(true); // shown again after leaving
   });
 });

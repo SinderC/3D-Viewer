@@ -3,6 +3,7 @@
 // Requires closed meshes; open chains (sheet bodies) are skipped.
 import * as THREE from 'three';
 import { INTERSECTED, NOT_INTERSECTED } from 'three-mesh-bvh';
+import { ensureBoundsTree } from './objects';
 
 export interface CapStyle {
   material: (mesh: THREE.Mesh) => THREE.Material;
@@ -37,13 +38,18 @@ export function sectionPosition(box: THREE.Box3, dir: THREE.Vector3, point: THRE
   return hi > lo ? THREE.MathUtils.clamp((dir.dot(point) - lo) / (hi - lo), 0, 1) : 0.5;
 }
 
-/** Builds caps for all meshes, in world space. Meshes must have a bounds tree. */
+/** Builds caps for all meshes, in world space; each cap keeps its mesh in `userData.mesh`. */
 export function buildSectionCaps(meshes: THREE.Mesh[], plane: THREE.Plane, style: CapStyle): THREE.Group {
   const group = new THREE.Group();
   const outline: number[] = [];
   const inverse = new THREE.Matrix4();
+  const box = new THREE.Box3();
 
   for (const mesh of meshes) {
+    // Parts the plane misses need neither a cut nor a bounds tree.
+    if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+    if (!plane.intersectsBox(box.copy(mesh.geometry.boundingBox!).applyMatrix4(mesh.matrixWorld))) continue;
+    ensureBoundsTree(mesh.geometry);
     // Cut in the mesh's local frame so shared geometry is not transformed per vertex.
     const local = plane.clone().applyMatrix4(inverse.copy(mesh.matrixWorld).invert());
     const loops = closedLoops(cutSegments(mesh.geometry, local));
@@ -52,7 +58,9 @@ export function buildSectionCaps(meshes: THREE.Mesh[], plane: THREE.Plane, style
     const geometry = triangulate(loops, local.normal);
     if (!geometry) continue;
     geometry.applyMatrix4(mesh.matrixWorld);
-    group.add(new THREE.Mesh(geometry, style.material(mesh)));
+    const cap = new THREE.Mesh(geometry, style.material(mesh));
+    cap.userData.mesh = mesh;
+    group.add(cap);
 
     const p = new THREE.Vector3();
     for (const loop of loops) {
