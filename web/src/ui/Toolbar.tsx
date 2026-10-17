@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react';
-import { QUALITY, type Quality } from '../worker/protocol';
-import { GitHubIcon, PropertiesIcon } from './icons';
-import { Menu, MenuChoices, MenuItem } from './Menu';
+import { PropertiesIcon } from './icons';
+import { Menu, MenuItem } from './Menu';
 import type { State } from './state';
 
 interface Props {
@@ -10,19 +9,18 @@ interface Props {
   onClose: () => void;
   onSaveImage: () => void;
   onExport: (format: 'stl' | 'glb') => void;
-  quality: Quality;
-  onQuality: (q: Quality) => void;
   showProps: boolean;
   onToggleProps: () => void;
-  /** Menus after File (View). */
+  onHelp: () => void;
+  /** Menus between File and Help (View, Settings). */
   children: ReactNode;
 }
 
 export const MAC = /Mac|iPhone|iPad/.test(navigator.userAgent);
 const MOD = MAC ? '⌘' : 'Ctrl+';
-const QUALITY_LABELS = Object.fromEntries(Object.entries(QUALITY).map(([id, q]) => [id, q.label])) as Record<Quality, string>;
+const REPO = 'https://github.com/SinderC/3D-Viewer';
 
-export function Toolbar({ status, onOpen, onClose, onSaveImage, onExport, quality, onQuality, showProps, onToggleProps, children }: Props) {
+export function Toolbar({ status, onOpen, onClose, onSaveImage, onExport, showProps, onToggleProps, onHelp, children }: Props) {
   return (
     <header className="toolbar">
       <span className="app-name">Open CAD Viewer</span>
@@ -33,18 +31,12 @@ export function Toolbar({ status, onOpen, onClose, onSaveImage, onExport, qualit
         <MenuItem label="Save image…" disabled={status !== 'ready'} onClick={onSaveImage} />
         <MenuItem label="Export STL…" disabled={status !== 'ready'} onClick={() => onExport('stl')} />
         <MenuItem label="Export glTF (GLB)…" disabled={status !== 'ready'} onClick={() => onExport('glb')} />
-        <hr className="menu-sep" />
-        {/* Applied when a file is read: changing it reloads the open model. */}
-        <MenuChoices
-          label="Mesh quality"
-          options={QUALITY_LABELS}
-          value={quality}
-          disabled={status === 'loading'}
-          onChange={onQuality}
-        />
-        <p className="menu-note">Changing it reloads the open model.</p>
       </Menu>
       {children}
+      <Menu title="Help" label="Help" className="menu-trigger" bar>
+        <MenuItem label="Keyboard shortcuts" kbd="?" onClick={onHelp} />
+        <MenuItem label="Source on GitHub" onClick={() => window.open(REPO, '_blank', 'noopener')} />
+      </Menu>
       <button
         className="icon props-toggle"
         aria-pressed={showProps}
@@ -54,16 +46,6 @@ export function Toolbar({ status, onOpen, onClose, onSaveImage, onExport, qualit
       >
         <PropertiesIcon />
       </button>
-      <a
-        className="repo-link"
-        href="https://github.com/SinderC/3D-Viewer"
-        target="_blank"
-        rel="noopener noreferrer"
-        title="Source on GitHub"
-        aria-label="Source on GitHub"
-      >
-        <GitHubIcon />
-      </a>
     </header>
   );
 }

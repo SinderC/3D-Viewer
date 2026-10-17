@@ -99,9 +99,6 @@ html, body, #root { height: 100%; margin: 0; }
 }
 .app-name { padding: 0 8px 0 4px; font-size: 15px; font-weight: 600; letter-spacing: -0.015em; white-space: nowrap; }
 .props-toggle { margin-left: auto; }
-.repo-link { padding: 4px; color: var(--text-2); }
-.repo-link:hover { color: var(--text); }
-.repo-link svg { display: block; }
 .sep { width: 1px; align-self: stretch; background: var(--hairline); margin: 0 4px; }
 
 /* Controls: feedback on press, not release. Only transform animates. */
@@ -144,8 +141,11 @@ input[type='checkbox'] { accent-color: var(--accent); margin: 0; }
 .splitter.left { left: -4px; }
 .splitter:hover, .splitter:active, .splitter:focus-visible { background: linear-gradient(var(--accent), var(--accent)) center / 2px 100% no-repeat; outline: none; }
 .tree { flex: 1; overflow: auto; padding: 4px 0; }
+.tree-bar { display: flex; gap: 4px; align-items: center; margin: 4px 8px; }
+.tree-bar button.icon { width: 28px; height: 28px; }
 .search {
-  margin: 4px 8px;
+  flex: 1;
+  min-width: 0;
   padding: 4px 8px;
   border: 1px solid var(--hairline-strong);
   border-radius: var(--radius-s);
@@ -481,7 +481,6 @@ button.icon[aria-pressed='true'] { color: var(--accent); background: var(--accen
   .app.no-side { grid-template: 'bar' auto 'stage' 1fr / 1fr; }
   .sidebar { border-right: 0; border-top: 1px solid var(--hairline); }
   .splitter, .toolbar .props-toggle, .app-name { display: none; }
-  .repo-link { margin-left: auto; }
 }
 
 /* Keyboard shortcuts dialog (ShortcutHelp.tsx); the padding is inside, so a click on the dialog itself is on the backdrop. */

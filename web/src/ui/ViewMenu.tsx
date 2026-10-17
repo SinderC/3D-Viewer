@@ -35,7 +35,6 @@ interface Props {
   prefs: ViewPrefs;
   /** No properties panel in narrow windows (they show an Info tab instead). */
   narrow: boolean;
-  onHelp: () => void;
 }
 
 const SHIFT = MAC ? '⇧' : 'Shift+';
@@ -50,9 +49,9 @@ function useFullscreen(): boolean {
   return full;
 }
 
-// Panels, viewport overlays and appearance; the view toolbar's view toggles too, with their shortcuts.
+// Panels, viewport overlays and the camera; the view toolbar's view toggles too, with their shortcuts.
 // Tools (measure, section, explode) stay on the toolbar.
-export function ViewMenu({ state, dispatch, viewer, prefs, narrow, onHelp }: Props) {
+export function ViewMenu({ state, dispatch, viewer, prefs, narrow }: Props) {
   const full = useFullscreen();
   const loaded = state.status === 'ready';
   return (
@@ -91,11 +90,6 @@ export function ViewMenu({ state, dispatch, viewer, prefs, narrow, onHelp }: Pro
           />
         </>
       )}
-      <hr className="menu-sep" />
-      <MenuSubChoices label="Theme" options={THEMES} value={prefs.theme} onChange={prefs.setTheme} />
-      <MenuSubChoices label="Toolbar size" options={BAR_SIZES} value={prefs.barSize} onChange={prefs.setBarSize} />
-      <hr className="menu-sep" />
-      <MenuItem label="Keyboard shortcuts" kbd="?" onClick={onHelp} />
     </Menu>
   );
 }

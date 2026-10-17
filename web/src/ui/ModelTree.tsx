@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode } from 'react';
 import type { Model } from '../core/model';
-import { Chevron, IsolateIcon } from './icons';
+import { Chevron, IsolateIcon, ShowAllIcon } from './icons';
+import { keyLabel } from './shortcuts';
 import { isolate, searchTree, type Action } from './state';
 
 interface Props {
@@ -42,15 +43,26 @@ export function ModelTree({ model, hidden, selected, dispatch }: Props) {
   const roots = search ? model.roots.filter((id) => search.shown.has(id)) : model.roots;
   return (
     <>
-      <input
-        type="search"
-        className="search"
-        placeholder="Search parts"
-        aria-label="Search parts"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        onKeyDown={(e) => e.key === 'Escape' && setQuery('')}
-      />
+      <div className="tree-bar">
+        <input
+          type="search"
+          className="search"
+          placeholder="Search parts"
+          aria-label="Search parts"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => e.key === 'Escape' && setQuery('')}
+        />
+        <button
+          className="icon"
+          title={`Show all (${keyLabel({ key: 'H' })})`}
+          aria-label="Show all"
+          disabled={hidden.size === 0}
+          onClick={() => dispatch({ type: 'setHidden', hidden: new Set() })}
+        >
+          <ShowAllIcon />
+        </button>
+      </div>
       <div className="tree" role="tree">
         {roots.map((id) => (
           <Row key={id} id={id} depth={0} ctx={ctx} />

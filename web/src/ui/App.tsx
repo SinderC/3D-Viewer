@@ -12,6 +12,7 @@ import { Sidebar } from './Sidebar';
 import { Splitter } from './Splitter';
 import { initialState, reducer, type State } from './state';
 import { useStored, useStoredFlag } from './storage';
+import { SettingsMenu } from './SettingsMenu';
 import { Toolbar } from './Toolbar';
 import { ViewBar } from './ViewBar';
 import { ViewerCanvas } from './ViewerCanvas';
@@ -199,12 +200,12 @@ export function App() {
         onClose={close}
         onSaveImage={saveImage}
         onExport={exportModel}
-        quality={quality}
-        onQuality={changeQuality}
         showProps={showProps}
         onToggleProps={toggleProps}
+        onHelp={() => setHelp(true)}
       >
-        <ViewMenu state={state} dispatch={dispatch} viewer={viewer} prefs={prefs} narrow={narrow} onHelp={() => setHelp(true)} />
+        <ViewMenu state={state} dispatch={dispatch} viewer={viewer} prefs={prefs} narrow={narrow} />
+        <SettingsMenu status={status} quality={quality} onQuality={changeQuality} prefs={prefs} />
       </Toolbar>
       <input
         ref={fileInput}

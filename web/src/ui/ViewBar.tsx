@@ -15,14 +15,12 @@ import {
   SectionIcon,
   ShadedEdgesIcon,
   ShadedIcon,
-  ShowAllIcon,
   ViewsIcon,
   WireframeIcon,
   ZoomSelectionIcon,
 } from './icons';
 import { AppearanceMenu } from './AppearanceMenu';
 import { Menu } from './Menu';
-import { keyLabel } from './shortcuts';
 import type { BarSize } from './ViewMenu';
 import { canExplode, displayStyle, hasEdges, measureMode, needsEdges, unavailable, type Action, type State } from './state';
 
@@ -105,6 +103,15 @@ export function ViewBar({ state, dispatch, viewer, size }: Props) {
         onClick={() => dispatch({ type: 'toggleGrid' })}
       >
         <GridIcon />
+      </button>
+      <button
+        className="icon"
+        title="Ghost hidden parts (X)"
+        aria-label="Ghost hidden parts"
+        aria-pressed={state.ghost}
+        onClick={() => dispatch({ type: 'toggleGhost' })}
+      >
+        <GhostIcon />
       </button>
       {state.model!.pmi.length > 0 && (
         <button
@@ -217,25 +224,6 @@ export function ViewBar({ state, dispatch, viewer, size }: Props) {
           </select>
         </label>
       </Menu>
-      <span className="sep" />
-      <button
-        className="icon"
-        title="Ghost hidden parts (X)"
-        aria-label="Ghost hidden parts"
-        aria-pressed={state.ghost}
-        onClick={() => dispatch({ type: 'toggleGhost' })}
-      >
-        <GhostIcon />
-      </button>
-      <button
-        className="icon"
-        title={`Show all (${keyLabel({ key: 'H' })})`}
-        aria-label="Show all"
-        disabled={state.hidden.size === 0}
-        onClick={() => dispatch({ type: 'setHidden', hidden: new Set() })}
-      >
-        <ShowAllIcon />
-      </button>
     </div>
   );
 }
