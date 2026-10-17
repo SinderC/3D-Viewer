@@ -489,7 +489,7 @@ button.icon[aria-pressed='true'] { color: var(--accent); background: var(--accen
 .viewcube .home:hover:not(:disabled) { background: none; color: var(--text); }
 
 /* XYZ axis indicator (AxisTriad.ts); size matches SIZE there */
-.axis-triad { position: absolute; right: 12px; bottom: 12px; width: 80px; height: 80px; pointer-events: none; overflow: visible; }
+.axis-triad { position: absolute; right: 12px; bottom: calc(12px + var(--triad-lift, 0px)); width: 80px; height: 80px; pointer-events: none; overflow: visible; }
 .axis-triad line { stroke-width: 2.5; stroke-linecap: round; }
 .axis-triad text { stroke: none; font-size: 12px; font-weight: 700; text-anchor: middle; dominant-baseline: central; user-select: none; }
 

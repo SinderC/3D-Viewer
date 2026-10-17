@@ -1,4 +1,4 @@
-import type { Dispatch, ReactNode, RefObject } from 'react';
+import { useLayoutEffect, useRef, type Dispatch, type ReactNode, type RefObject } from 'react';
 import { UNITS, type UnitId } from '../core/units';
 import { MEASURE_MODES, type MeasureMode } from '../viewer/measure';
 import type { Axis, DisplayStyle, ViewName, Viewer } from '../viewer/Viewer';
@@ -49,6 +49,29 @@ const DISPLAY: Record<DisplayStyle, { label: string; icon: ReactNode }> = {
   wireframe: { label: 'Wireframe', icon: <WireframeIcon /> },
 };
 
+// On a narrow stage the bar reaches under the axis triad in the corner: lift the triad above it.
+// Measured rather than a breakpoint, since the bar's width depends on its size and the model's buttons.
+function useLiftTriad(bar: RefObject<HTMLDivElement | null>) {
+  useLayoutEffect(() => {
+    const el = bar.current;
+    const stage = el?.parentElement;
+    const triad = stage?.querySelector<HTMLElement>('.axis-triad');
+    if (!el || !stage || !triad) return;
+    const update = () => {
+      const b = el.getBoundingClientRect();
+      const t = triad.getBoundingClientRect();
+      const overlaps = t.width > 0 && b.right > t.left;
+      stage.style.setProperty('--triad-lift', overlaps ? `${b.height + 8}px` : '0px');
+    };
+    const observer = new ResizeObserver(update);
+    for (const e of [el, stage, triad]) observer.observe(e);
+    return () => {
+      observer.disconnect();
+      stage.style.removeProperty('--triad-lift');
+    };
+  }, [bar]);
+}
+
 // Camera and display controls floating over the bottom of the viewport.
 export function ViewBar({ state, dispatch, viewer, size }: Props) {
   const { section } = state;
@@ -57,8 +80,10 @@ export function ViewBar({ state, dispatch, viewer, size }: Props) {
   const mode = measureMode(state);
   const noEdges = 'This model has no edges';
   const measuring = state.tool === 'measure';
+  const bar = useRef<HTMLDivElement>(null);
+  useLiftTriad(bar);
   return (
-    <div className={`viewbar ${size}`}>
+    <div className={`viewbar ${size}`} ref={bar}>
       <button className="icon" title="Fit all (F)" aria-label="Fit all" onClick={() => viewer.current?.fit()}>
         <FitIcon />
       </button>
