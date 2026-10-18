@@ -75,6 +75,9 @@ export function externalFilesInfo(files: ExternalFile[]): [string, string] {
   ];
 }
 
+/** A row per referenced file whose location the assembly states: the name, and where it is. */
+export const externalFileLocations = (files: ExternalFile[]): Row[] => files.flatMap((f) => (f.location ? [[f.name, f.location] as Row] : []));
+
 /** Value and tooltip for a count loaded from the file, checked against the count the file states. */
 export function countInfo(loaded: number, stated: number): [string, string] {
   return [`${mark(loaded === stated)} ${loaded}`, `The file states ${stated}`];

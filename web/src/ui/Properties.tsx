@@ -1,7 +1,7 @@
 import { Fragment, useState } from 'react';
 import { sizeOf } from '../core/bounds';
 import { pmiInfo } from '../core/pmi';
-import { countInfo, externalFilesInfo, failures, formatSize, validationInfo, type Row } from '../core/product';
+import { countInfo, externalFileLocations, externalFilesInfo, failures, formatSize, validationInfo, type Row } from '../core/product';
 import { QUALITY } from '../worker/protocol';
 import { Chevron } from './icons';
 import type { State } from './state';
@@ -33,7 +33,7 @@ export function Properties({ state }: { state: State }) {
   if (state.quality) file.push(['Mesh quality', QUALITY[state.quality].label]);
   if (model.counts.annotations !== undefined) file.push(['PMI', ...countInfo(model.pmi.length, model.counts.annotations)]);
   if (model.counts.views !== undefined) file.push(['Views', ...countInfo(model.views.length, model.counts.views)]);
-  if (model.externalFiles?.length) file.push(['Referenced files', ...externalFilesInfo(model.externalFiles)]);
+  if (model.externalFiles?.length) file.push(['Referenced files', ...externalFilesInfo(model.externalFiles)], ...externalFileLocations(model.externalFiles));
   file.push(['Load time', `${((state.loadMs ?? 0) / 1000).toFixed(2)} s`]);
 
   const toggle = (name: string, open: boolean) =>

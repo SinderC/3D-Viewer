@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Product } from './model';
-import { countInfo, externalFilesInfo, failures, formatMeasure, validationInfo } from './product';
+import { countInfo, externalFileLocations, externalFilesInfo, failures, formatMeasure, validationInfo } from './product';
 
 const product = (p: Partial<Product>): Product => ({ props: [], attributes: [], ...p });
 
@@ -20,6 +20,7 @@ describe('externalFilesInfo', () => {
     ];
     expect(externalFilesInfo(files)).toEqual(['✗ 1 of 2', 'Not opened: b.stp (./parts/). Open them together with this file.']);
     expect(externalFilesInfo(files.slice(0, 1))).toEqual(['✓ 1 of 1', 'a.stp']);
+    expect(externalFileLocations(files)).toEqual([['b.stp', './parts/']]);
   });
 });
 

@@ -20,9 +20,7 @@ export function MissingFiles({ model, onAdd }: { model: Model; onAdd: () => void
       onTransitionEnd={(e) => leaving === model && e.propertyName === 'opacity' && setDismissed(model)}
     >
       <p>
-        <strong title={missingFiles.some((f) => f.location) ? missingFiles.map(externalFileLabel).join('\n') : undefined}>
-          {missing.join(', ')}
-        </strong> {missing.length === 1 ? 'is' : 'are'} missing,{' '}
+        <strong>{missingFiles.map(externalFileLabel).join(', ')}</strong> {missing.length === 1 ? 'is' : 'are'} missing,{' '}
         {nothingShown ? 'so no parts can be shown.' : "so some parts aren't shown."}
       </p>
       <button onClick={onAdd}>{missing.length === 1 ? `Add ${missing[0]}…` : 'Add files…'}</button>

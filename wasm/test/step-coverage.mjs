@@ -368,9 +368,9 @@ const tests = {
     assert.deepEqual(triangles(m), [12]);
     assert.deepEqual(m.externalFiles, [{ name: 'box.stp', loaded: false }]);
     // Where the file says the missing file is: a folder or a URL.
-    m = read('external-assembly-location.stp', assembly('box.stp', { bracket: true, location: "'./part_dir/'" }));
+    m = read('external-assembly-location-folder.stp', assembly('box.stp', { bracket: true, location: "'./part_dir/'" }));
     assert.deepEqual(m.externalFiles, [{ name: 'box.stp', loaded: false, location: './part_dir/' }]);
-    m = read('external-assembly-location.stp', assembly('box.stp', { location: "IDENTIFIER('https://plm.example.com/parts/')" }), { 'box.stp': part.text(AP214) });
+    m = read('external-assembly-location-url.stp', assembly('box.stp', { location: "IDENTIFIER('https://plm.example.com/parts/')" }), { 'box.stp': part.text(AP214) });
     assert.deepEqual(triangles(m), [12, 12]);
     assert.deepEqual(m.externalFiles, [{ name: 'box.stp', loaded: true, location: 'https://plm.example.com/parts/' }]);
     // Not part files: a paper document, or a file the viewer cannot read, named without a format.
@@ -405,11 +405,11 @@ const tests = {
     const tall = m.nodes.find((n) => n.proto >= 0);
     const zs = [...new Float32Array(m.geometry, ...m.protos[tall.proto].positions)].filter((_, i) => i % 3 === 2);
     assert.deepEqual([Math.min(...zs), Math.max(...zs)], [0, 10]);
-    m = read('external-assembly-stl.stp', assembly('box.stl', { bracket: true }));
+    m = read('external-assembly-stl-partial.stp', assembly('box.stl', { bracket: true }));
     assert.deepEqual(triangles(m), [12]);
     assert.deepEqual(m.externalFiles, [{ name: 'box.stl', loaded: false }]);
     for (const format of ['ISO 10303-242 Domain Model XML', ['JT', true]]) {
-      m = read('external-assembly-format.stp', assembly('box.stp', { bracket: true, format }), { 'box.stp': part.text(AP214) });
+      m = read('external-assembly-format-unread.stp', assembly('box.stp', { bracket: true, format }), { 'box.stp': part.text(AP214) });
       assert.deepEqual(triangles(m), [12], String(format));
       assert.equal(m.externalFiles, undefined, String(format));
     }
