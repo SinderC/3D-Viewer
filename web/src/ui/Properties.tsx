@@ -1,5 +1,5 @@
 import { Fragment, useState } from 'react';
-import { sizeOf } from '../core/bounds';
+import { boxesOf } from '../core/bounds';
 import { pmiInfo } from '../core/pmi';
 import { countInfo, externalFileLocations, externalFilesInfo, failures, formatSize, validationInfo, type Row } from '../core/product';
 import { QUALITY } from '../worker/protocol';
@@ -18,8 +18,12 @@ export function Properties({ state }: { state: State }) {
   const product = node?.product === undefined ? undefined : model.products[node.product];
 
   const size = (id: number | null): Row[] => {
-    const s = sizeOf(model, id);
-    return s ? [['Size', formatSize(s, unit), 'Bounding box along X × Y × Z']] : [];
+    const boxes = boxesOf(model, id);
+    if (!boxes) return [];
+    const rows: Row[] = [['Size', formatSize(boxes.size, unit), 'Bounding box along X × Y × Z']];
+    if (boxes.own) rows.push(['Own axes', formatSize(boxes.own, unit), 'Bounding box along its own X × Y × Z, before it is placed']);
+    rows.push(['Smallest box', formatSize(boxes.min, unit), 'Smallest box in any orientation, longest side first']);
+    return rows;
   };
 
   const file: Row[] = [
