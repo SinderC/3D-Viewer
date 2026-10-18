@@ -46,7 +46,7 @@ function pixels(f: (x: number, y: number) => [number, number, number]): HTMLCanv
 
 // Fine streaks along u, wrapping at the edges so the tile repeats seamlessly.
 function brushed(): HTMLCanvasElement {
-  const rnd = random(1);
+  const rnd = random(4);
   const [c, ctx] = canvas();
   ctx.fillStyle = 'rgb(200 200 200)';
   ctx.fillRect(0, 0, SIZE, SIZE);
