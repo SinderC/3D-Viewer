@@ -101,6 +101,12 @@ describe('sectionPlane', () => {
     expect(sectionPlane(box, new THREE.Vector3(1, 0, 0), 0.25, true).distanceToPoint(new THREE.Vector3(1, 0, 0))).toBeLessThan(0);
   });
 
+  it('keeps a face the plane would lie on, so it is not clipped pixel by pixel', () => {
+    const x = new THREE.Vector3(1, 0, 0);
+    expect(sectionPlane(box, x, 1, false).distanceToPoint(new THREE.Vector3(10, 5, 5))).toBeGreaterThan(0);
+    expect(sectionPlane(box, x, 0, true).distanceToPoint(new THREE.Vector3(0, 5, 5))).toBeGreaterThan(0);
+  });
+
   it('maps a point on a slanted face to its position and back', () => {
     const dir = new THREE.Vector3(1, 1, 0).normalize();
     const point = new THREE.Vector3(5, 5, 0);

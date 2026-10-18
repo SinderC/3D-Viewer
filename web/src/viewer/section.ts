@@ -25,11 +25,15 @@ function projectedRange(box: THREE.Box3, n: THREE.Vector3): [number, number] {
 /**
  * Cut across `box` perpendicular to the unit vector `dir`, at `position` (0..1) along it. Keeps the side
  * towards -dir (the material behind a face whose outward normal is `dir`), or towards +dir when flipped.
+ * The plane sits a hair into the removed side: at the ends of the range, or through a picked face, it
+ * would otherwise lie on a face and clip random pixels of it.
  */
 export function sectionPlane(box: THREE.Box3, dir: THREE.Vector3, position: number, flip: boolean): THREE.Plane {
   const [lo, hi] = projectedRange(box, dir);
   const at = dir.clone().multiplyScalar(THREE.MathUtils.lerp(lo, hi, position));
-  return new THREE.Plane().setFromNormalAndCoplanarPoint(dir.clone().multiplyScalar(flip ? 1 : -1), at);
+  const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(dir.clone().multiplyScalar(flip ? 1 : -1), at);
+  plane.constant += 1e-5 * box.getSize(new THREE.Vector3()).length();
+  return plane;
 }
 
 /** The sectionPlane position (0..1) of the plane through `point`. */
