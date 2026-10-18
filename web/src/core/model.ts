@@ -82,7 +82,8 @@ export interface PmiItem {
   faces: number[];
   /** Assembly PMI: the nodes it is drawn in (instances of the assembly it is defined in), instead of `proto`. */
   nodes?: number[];
-  /** Assembly PMI: referenced faces per component instance, as [node, ...faces of the node's prototype]. */
+  /** Assembly PMI: referenced faces per component instance, as [owner node, instance node, ...faces of
+   * the instance's prototype]; the owner is the one of `nodes` the instance is under. */
   nodeFaces?: number[][];
   value?: [number];
   plusMinus?: [lower: number, upper: number];

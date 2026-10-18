@@ -51,9 +51,11 @@ export function pmiLabel(p: PmiItem, unit: UnitId): string {
   return parts.filter(Boolean).join(' ');
 }
 
-/** Faces the item refers to; for assembly PMI, on one instance of its assembly. */
+/** Faces the item refers to; for assembly PMI, under the first instance of its assembly. */
 const faceCount = (p: PmiItem) =>
-  p.nodeFaces ? p.nodeFaces.reduce((n, [, ...faces]) => n + faces.length, 0) / Math.max(p.nodes?.length ?? 1, 1) : p.faces.length;
+  p.nodeFaces
+    ? p.nodeFaces.filter(([owner]) => owner === p.nodes?.[0]).reduce((n, [, , ...faces]) => n + faces.length, 0)
+    : p.faces.length;
 
 /** Label/value rows for the info panel. */
 export function pmiInfo(p: PmiItem, unit: UnitId): [string, string][] {

@@ -398,6 +398,13 @@ const tests = {
       near(Math.abs(volume(m, m.nodes.find((n) => n.proto >= 0))), 1000, 0.001, 'STL part volume');
       assert.deepEqual(m.externalFiles, [{ name: 'box.stl', loaded: true }], String(format));
     }
+    // An OBJ part, tall along z: in its own frame, not turned from y-up as a file opened alone is
+    const obj = ['v 0 0 0', 'v 1 0 0', 'v 1 1 0', 'v 0 1 0', 'v 0 0 10', 'v 1 0 10', 'v 1 1 10', 'v 0 1 10',
+      'f 1 3 2', 'f 1 4 3', 'f 5 6 7', 'f 5 7 8', 'f 1 2 6', 'f 1 6 5', 'f 2 3 7', 'f 2 7 6', 'f 3 4 8', 'f 3 8 7', 'f 4 1 5', 'f 4 5 8'].join('\n');
+    m = read('external-assembly-obj.stp', assembly('tall.obj'), { 'tall.obj': obj });
+    const tall = m.nodes.find((n) => n.proto >= 0);
+    const zs = [...new Float32Array(m.geometry, ...m.protos[tall.proto].positions)].filter((_, i) => i % 3 === 2);
+    assert.deepEqual([Math.min(...zs), Math.max(...zs)], [0, 10]);
     m = read('external-assembly-stl.stp', assembly('box.stl', { bracket: true }));
     assert.deepEqual(triangles(m), [12]);
     assert.deepEqual(m.externalFiles, [{ name: 'box.stl', loaded: false }]);
@@ -455,15 +462,15 @@ const tests = {
     assert.ok(distance, summary);
     assert.equal(distance.proto, -1, `owned by the assembly, not drawn on each bracket: ${summary}`);
     assert.deepEqual(distance.nodes, [named('top')]);
-    assert.deepEqual(distance.nodeFaces, [[s1b1, plusX[0]], [s2b1, plusX[0]]]);
+    assert.deepEqual(distance.nodeFaces, [[0, s1b1, plusX[0]], [0, s2b1, plusX[0]]]);
     const flat = m.pmi.find((p) => p.type === 'Flatness');
     assert.ok(flat, summary);
     assert.deepEqual(flat.nodes, [named('top')]);
-    assert.deepEqual(flat.nodeFaces, [[b2, plusX[0]]]);
+    assert.deepEqual(flat.nodeFaces, [[0, b2, plusX[0]]]);
     const drawn = m.pmi.find((p) => p.name === 'Dimension.1');
     assert.ok(drawn, summary);
     assert.deepEqual(drawn.nodes, [named('top')]);
-    assert.deepEqual(drawn.nodeFaces, [[s1b1, plusX[0]]]);
+    assert.deepEqual(drawn.nodeFaces, [[0, s1b1, plusX[0]]]);
     assert.deepEqual([...new Float32Array(m.geometry, ...drawn.segments)], [10, 5, 12, 40, 5, 12]);
   },
 
@@ -514,7 +521,7 @@ const tests = {
     const distance = m.pmi.find((p) => p.kind === 'dimension');
     assert.ok(distance, JSON.stringify(m.pmi));
     assert.deepEqual(distance.nodes, [0]);
-    assert.deepEqual(distance.nodeFaces.map(([node, ...faces]) => [node, faces.length]), [[b1, 1], [b2, 1]]);
+    assert.deepEqual(distance.nodeFaces.map(([, node, ...faces]) => [node, faces.length]), [[b1, 1], [b2, 1]]);
 
     // Nested (7.4, Figure 26): top places sub.stp, which places bracket.stp. The top file navigates
     // to the bracket in sub.stp with a usage whose parent is the local representation of sub and whose
@@ -540,7 +547,7 @@ const tests = {
     const across = m.pmi.find((p) => p.kind === 'dimension');
     assert.ok(across, JSON.stringify(m.nodes.map(tree)));
     assert.deepEqual(across.nodes, [0]);
-    assert.deepEqual(across.nodeFaces.map(([node, ...faces]) => [node, faces.length]), [[leaf('root/s1/b1'), 1], [leaf('root/s2/b1'), 1]]);
+    assert.deepEqual(across.nodeFaces.map(([, node, ...faces]) => [node, faces.length]), [[leaf('root/s1/b1'), 1], [leaf('root/s2/b1'), 1]]);
   },
 
   'attributes on one component instance: on its NAUO, or deeper down on a MLRD (UDA RP 6.2)'() {
@@ -593,6 +600,15 @@ const tests = {
     );
     s.add(`CONTEXT_DEPENDENT_SHAPE_REPRESENTATION(${rel},${s.add(`PRODUCT_DEFINITION_SHAPE('','',${quantified(gasket, 'g', 2)})`)})`);
     quantified(washer, 'w', 4); // no placement
+    // 2.5 m of hose: a quantity with a unit, not a count
+    const hose = product(s, ctx, 'hose', [box(s, [0, 0, 0], 1)], 'ADVANCED_BREP_SHAPE_REPRESENTATION');
+    const metre = s.add('( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT($,.METRE.) )');
+    s.add(
+      `(ASSEMBLY_COMPONENT_USAGE($) NEXT_ASSEMBLY_USAGE_OCCURRENCE() PRODUCT_DEFINITION_RELATIONSHIP('h','hose',$,${top.pd},${hose.pd}) ` +
+        `PRODUCT_DEFINITION_USAGE() QUANTIFIED_ASSEMBLY_COMPONENT_USAGE(${s.add(`LENGTH_MEASURE_WITH_UNIT(LENGTH_MEASURE(2.5),${metre})`)}))`,
+    );
+    // a second, unplaced usage of the gasket, which is placed by the first: not "not placed"
+    s.add(`NEXT_ASSEMBLY_USAGE_OCCURRENCE('g2','','',${top.pd},${gasket.pd},$)`);
     s.add(`PROMISSORY_USAGE_OCCURRENCE('p1','bolt','',${top.pd},${bolt.pd},$)`); // somewhere below top
     const m = read('quantified-usage.stp', s.text(AP214));
 
@@ -603,6 +619,7 @@ const tests = {
     assert.deepEqual(g.occurrence, [['Id', 'g'], ['Name', 'quantified usage'], ['Quantity', '2']]);
     assert.deepEqual(props(m, 'top').filter(([k]) => k === 'Not placed' || k === 'Somewhere below'), [
       ['Not placed', 'washer × 4'],
+      ['Not placed', 'hose × 2.5 m'],
       ['Somewhere below', 'bolt'],
     ]);
   },

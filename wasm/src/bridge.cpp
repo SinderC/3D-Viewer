@@ -85,6 +85,8 @@
 #include <StepBasic_SecurityClassificationLevel.hxx>
 #include <StepBasic_VolumeUnit.hxx>
 #include <StepData_StepModel.hxx>
+#include <StepBasic_ConversionBasedUnit.hxx>
+#include <StepBasic_SiUnit.hxx>
 #include <STEPConstruct_Tool.hxx>
 #include <StepBasic_ProductDefinitionReferenceWithLocalRepresentation.hxx>
 #include <StepRepr_QuantifiedNextAssemblyUsageOccurrence.hxx>
@@ -154,6 +156,7 @@
 #include <fstream>
 #include <map>
 #include <set>
+#include <tuple>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -221,9 +224,9 @@ struct Pmi
   Range                    triangles;  // filled presentation areas such as text glyphs, float32 xyz x3
   std::vector<int>         faces;      // referenced faces of the owning part (faceStarts indices)
   // Assembly PMI: drawn in each of these nodes (the instances of the assembly it is defined in),
-  // with its faces on the instances it refers to: per instance node, its faces
-  std::vector<int>                           nodes;
-  std::vector<std::pair<int, std::vector<int>>> nodeFaces;
+  // with its faces on the instances it refers to: per owner node and instance node, its faces
+  std::vector<int>                                    nodes;
+  std::vector<std::tuple<int, int, std::vector<int>>> nodeFaces;
   std::vector<double>      value;      // nominal value (dimension, tolerance), if any
   std::vector<double>      plusMinus;  // lower and upper tolerance, if any
   std::vector<double>      range;      // lower and upper limit, if any
@@ -580,7 +583,9 @@ private:
 
     const int id = int(myNodes.size());
     myNodes.push_back(node);
-    myNodeLabels.push_back({entryOf(def), XCAFDoc_ShapeTool::IsComponent(label) ? entryOf(label) : std::string()});
+    myNodesByDef[entryOf(def)].push_back(id);
+    if (XCAFDoc_ShapeTool::IsComponent(label))
+      myChildByComponent[{parent, entryOf(label)}] = id;
 
     if (assembly)
     {
@@ -1225,24 +1230,16 @@ private:
   {
     for (const auto& ref : refs)
     {
-      const std::string assembly = entryOf(ref.Assembly);
-      for (int owner = 0; owner < int(myNodes.size()); ++owner)
+      const auto owners = myNodesByDef.find(entryOf(ref.Assembly));
+      for (int owner : owners == myNodesByDef.end() ? std::vector<int>() : owners->second)
       {
-        if (myNodeLabels[size_t(owner)].first != assembly)
-          continue;
         if (std::find(p.nodes.begin(), p.nodes.end(), owner) == p.nodes.end())
           p.nodes.push_back(owner);
         int node = owner;
-        for (const TDF_Label& component : ref.Path)
+        for (auto it = ref.Path.cbegin(); it != ref.Path.cend() && node >= 0; ++it)
         {
-          const std::string entry = entryOf(component);
-          int               child = -1;
-          for (int n = node + 1; n < int(myNodes.size()) && child < 0; ++n)
-            if (myNodes[size_t(n)].parent == node && myNodeLabels[size_t(n)].second == entry)
-              child = n;
-          node = child;
-          if (node < 0)
-            break;
+          const auto child = myChildByComponent.find({node, entryOf(*it)});
+          node             = child == myChildByComponent.end() ? -1 : child->second;
         }
         if (node < 0 || myNodes[size_t(node)].proto < 0)
           continue;
@@ -1253,7 +1250,7 @@ private:
             if (const int* i = faceIndex.Seek(ex.Current()); i && std::find(faces.begin(), faces.end(), *i) == faces.end())
               faces.push_back(*i);
         if (!faces.empty())
-          p.nodeFaces.emplace_back(node, std::move(faces));
+          p.nodeFaces.emplace_back(owner, node, std::move(faces));
       }
     }
   }
@@ -1374,8 +1371,10 @@ private:
   const ProductProps*        myProductProps = nullptr;
   const AssemblyRefs*        myAssemblyRefs = nullptr;
   const ProductProps*        myOccurrences  = nullptr;
-  // Per node: its definition label entry, and its component label entry (empty for a root)
-  std::vector<std::pair<std::string, std::string>> myNodeLabels;
+  // For assembly PMI: the nodes of each definition label entry, and each node's child by its
+  // component label entry
+  std::map<std::string, std::vector<int>>       myNodesByDef;
+  std::map<std::pair<int, std::string>, int>    myChildByComponent;
   const ValidationProps*     myValidation   = nullptr;
 };
 
@@ -1424,11 +1423,13 @@ std::string baseName(const std::string& path)
 }
 
 std::string lowerExtension(const std::string& fileName);
+// part: a part placed by an assembly, read in its own frame (no Y-up to Z-up turn for OBJ and VRML)
 Source      readDoc(std::string&                    bytes,
                     const std::string&              fileName,
                     const ExtraFiles&               extra,
                     const Handle(TDocStd_Document)& doc,
-                    Progress&                       progress);
+                    Progress&                       progress,
+                    bool                            part = false);
 
 // Formats other than STEP that readDoc reads, for parts a STEP assembly keeps in such files.
 bool isOtherPartFormat(const std::string& fileName)
@@ -1449,6 +1450,9 @@ bool isPhysical(const Interface_Graph& graph, const Handle(StepBasic_DocumentFil
   return false;
 }
 
+// StepData_SelectMember::Kind of a string (StepData_Field numbering; OCCT names no constant for it)
+constexpr int kStringKind = 6;
+
 // ExtRef RP 5.2.3: the path in a referenced file's 'external document id and location'
 // (external_source), unless it is only the name.
 std::string fileLocation(const Interface_Graph& graph, const Handle(StepBasic_DocumentFile)& file, const std::string& name)
@@ -1461,7 +1465,7 @@ std::string fileLocation(const Interface_Graph& graph, const Handle(StepBasic_Do
     const auto id   = aeia.IsNull() || aeia->Source().IsNull()
                         ? Handle(StepData_SelectNamed)()
                         : Handle(StepData_SelectNamed)::DownCast(aeia->Source()->SourceId().Value());
-    if (!id.IsNull() && id->Kind() == 6 && id->String() && *id->String() && baseName(id->String()) != name)
+    if (!id.IsNull() && id->Kind() == kStringKind && id->String() && *id->String() && baseName(id->String()) != name)
       return id->String();
   }
   return {};
@@ -1535,7 +1539,16 @@ public:
   {
     const Handle(Transfer_TransientProcess)& tp = reader.ChangeReader().WS()->TransferReader()->TransientProcess();
     const auto& labels = reader.GetShapeLabelMap();
-    std::map<std::string, Handle(TDocStd_Document)> read; // by name: a file used by several parts is read once
+    // By name: a file used by several parts is read once. Closed when done, also when one fails.
+    struct Documents : std::map<std::string, Handle(TDocStd_Document)>
+    {
+      ~Documents()
+      {
+        for (auto& [name, doc] : *this)
+          if (!doc.IsNull())
+            XCAFApp_Application::GetApplication()->Close(doc);
+      }
+    } read;
     for (const OtherPart& part : myOthers)
     {
       const int    index = part.bytes ? tp->MapIndex(part.pd) : 0;
@@ -1549,14 +1562,13 @@ public:
         XCAFApp_Application::GetApplication()->NewDocument("BinXCAF", from);
         std::string bytes((*part.bytes)["length"].as<size_t>(), '\0');
         val(emscripten::typed_memory_view(bytes.size(), bytes.data())).call<void>("set", *part.bytes);
-        readDoc(bytes, part.name, {}, from, progress); // a file that cannot be read fails the whole model, as when opened alone
+        // A file that cannot be read fails the whole model, as when opened alone
+        readDoc(bytes, part.name, {}, from, progress, true);
       }
       NCollection_Sequence<TDF_Label> roots;
       XCAFDoc_DocumentTool::ShapeTool(from->Main())->GetFreeShapes(roots);
       XCAFDoc_Editor::Extract(roots, labels.Find(shape));
     }
-    for (auto& [name, from] : read)
-      XCAFApp_Application::GetApplication()->Close(from);
   }
 
 private:
@@ -1683,6 +1695,21 @@ std::string pdEntry(STEPCAFControl_Reader& reader, const Handle(StepBasic_Produc
   return entry.ToCString();
 }
 
+// A unit as text: an SI unit's symbol ("m", "kg"), a conversion based unit's name ("INCH"), or
+// nothing for a count (a named unit without dimensions).
+std::string unitSymbol(const StepBasic_Unit& unit)
+{
+  static const char* const kPrefixes[] = {"E", "P", "T", "G", "M", "k", "h", "da", "d", "c", "m", "µ", "n", "p", "f", "a"};
+  static const char* const kNames[]    = {"m",  "g",  "s",  "A",  "K",  "mol", "cd", "rad", "sr", "Hz", "N",  "Pa", "J", "W",
+                                          "C",  "V",  "F",  "Ω",  "S",  "Wb",  "T",  "H",   "°C", "lm", "lx", "Bq", "Gy", "Sv"};
+  const Handle(StepBasic_NamedUnit) named = unit.NamedUnit();
+  if (const auto conversion = Handle(StepBasic_ConversionBasedUnit)::DownCast(named); !conversion.IsNull())
+    return stepText(conversion->Name());
+  if (const auto si = Handle(StepBasic_SiUnit)::DownCast(named); !si.IsNull())
+    return std::string(si->HasPrefix() ? kPrefixes[si->Prefix()] : "") + kNames[si->Name()];
+  return {};
+}
+
 // What identifies each component occurrence (PDM UG 4.1.1.2: id, name, which may hold the item find
 // number, description, reference designator) and its quantity (4.1.2), by component label entry.
 // And, as product data of the assembly, the usages that cannot be placed: promissory ones (4.1.4:
@@ -1709,6 +1736,8 @@ void readUsages(STEPCAFControl_Reader& reader, const Handle(TDocStd_Document)& d
       {
         std::ostringstream q;
         q << measure->ValueComponent();
+        if (const std::string unit = unitSymbol(measure->UnitComponent()); !unit.empty())
+          q << ' ' << unit;
         quantity = q.str();
       }
     if (!nauo.IsNull())
@@ -1730,8 +1759,22 @@ void readUsages(STEPCAFControl_Reader& reader, const Handle(TDocStd_Document)& d
     if (name.empty() && !product.IsNull())
       name = stepText(product->Id());
     const std::string entry = pdEntry(reader, parent);
-    if (!entry.empty())
-      props[entry].emplace_back(nauo.IsNull() ? "Somewhere below" : "Not placed", quantity.empty() ? name : name + " × " + quantity);
+    if (entry.empty())
+      continue;
+    // A usage OCCT did not link to an instance may still be placed (e.g. by another usage of the
+    // same part): say "not placed" only when the assembly has no component of that part at all.
+    TDF_Label assembly;
+    TDF_Tool::Label(doc->GetData(), entry.c_str(), assembly);
+    LabelSequence components;
+    XCAFDoc_ShapeTool::GetComponents(assembly, components, false);
+    const std::string part   = pdEntry(reader, child);
+    const bool        placed = std::any_of(components.begin(), components.end(), [&](const TDF_Label& c) {
+      TDF_Label referred;
+      return XCAFDoc_ShapeTool::GetReferredShape(c, referred) && entryOf(referred) == part;
+    });
+    if (!nauo.IsNull() && placed)
+      continue;
+    props[entry].emplace_back(nauo.IsNull() ? "Somewhere below" : "Not placed", quantity.empty() ? name : name + " × " + quantity);
   }
 }
 
@@ -2086,30 +2129,33 @@ Source readMeshDoc(RWMesh_CafReader&              reader,
                    const std::string&             ext,
                    const std::string&             bytes,
                    const Handle(TDocStd_Document)& doc,
-                   Progress&                      progress)
+                   Progress&                      progress,
+                   bool                           part)
 {
   progress("read", -1);
   reader.SetDocument(doc);
   reader.SetSystemLengthUnit(0.001);
   reader.SetSystemCoordinateSystem(RWMesh_CoordinateSystem_Zup);
+  if (part) // the assembly's placement says how it stands
+    reader.SetFileCoordinateSystem(RWMesh_CoordinateSystem_Zup);
   TempFile file(ext, bytes);
   if (!reader.Perform(file.path(), Message_ProgressRange()))
     throw std::runtime_error("Not a readable " + src.format + " file");
   return src;
 }
 
-Source readObjDoc(const std::string& bytes, const Handle(TDocStd_Document)& doc, Progress& progress)
+Source readObjDoc(const std::string& bytes, const Handle(TDocStd_Document)& doc, Progress& progress, bool part)
 {
   RWObj_CafReader reader; // OBJ has no units; OCCT assumes Y-up
-  return readMeshDoc(reader, {"OBJ", {}, {}}, ".obj", bytes, doc, progress);
+  return readMeshDoc(reader, {"OBJ", {}, {}}, ".obj", bytes, doc, progress, part);
 }
 
-Source readVrmlDoc(const std::string& bytes, const Handle(TDocStd_Document)& doc, Progress& progress)
+Source readVrmlDoc(const std::string& bytes, const Handle(TDocStd_Document)& doc, Progress& progress, bool part)
 {
   // VRML is metres by spec, but CAD exporters rarely honour it; coordinates are taken as mm.
   VrmlAPI_CafReader reader;
   reader.SetFileLengthUnit(1.0); // VrmlData multiplies coordinates by this
-  return readMeshDoc(reader, {"VRML", {}, {}}, ".wrl", bytes, doc, progress);
+  return readMeshDoc(reader, {"VRML", {}, {}}, ".wrl", bytes, doc, progress, part);
 }
 
 TDF_Label addShape(const Handle(TDocStd_Document)& doc, const TopoDS_Shape& shape, const std::string& name)
@@ -2228,7 +2274,8 @@ Source readDoc(std::string&                    bytes,
                const std::string&              fileName,
                const ExtraFiles&               extra,
                const Handle(TDocStd_Document)& doc,
-               Progress&                       progress)
+               Progress&                       progress,
+               bool                            part)
 {
   const std::string ext  = lowerExtension(fileName);
   const std::string name = fileName.substr(0, fileName.size() - ext.size());
@@ -2237,9 +2284,9 @@ Source readDoc(std::string&                    bytes,
   if (ext == ".igs" || ext == ".iges")
     return readIgesDoc(bytes, doc, progress);
   if (ext == ".obj")
-    return readObjDoc(bytes, doc, progress);
+    return readObjDoc(bytes, doc, progress, part);
   if (ext == ".wrl" || ext == ".vrml")
-    return readVrmlDoc(bytes, doc, progress);
+    return readVrmlDoc(bytes, doc, progress, part);
   if (ext == ".stl")
     return readStlDoc(bytes, name, doc, progress);
   if (ext == ".brep" || ext == ".brp")
@@ -2363,8 +2410,9 @@ std::string toJson(const Source& src, const Builder& b)
       o << "],\"nodeFaces\":[";
       for (size_t k = 0; k < p.nodeFaces.size(); ++k)
       {
-        o << (k ? "," : "") << '[' << p.nodeFaces[k].first;
-        for (int f : p.nodeFaces[k].second)
+        const auto& [owner, node, faces] = p.nodeFaces[k];
+        o << (k ? "," : "") << '[' << owner << ',' << node;
+        for (int f : faces)
           o << ',' << f;
         o << ']';
       }

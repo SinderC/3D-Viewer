@@ -77,7 +77,7 @@ export class PmiLayer {
     if (!item || !this.model) return;
     this.paint(index!, true);
     if (item.nodeFaces) {
-      for (const [node, ...faces] of item.nodeFaces) {
+      for (const [, node, ...faces] of item.nodeFaces) {
         const owner = this.nodeObjects[node];
         if (owner) this.addFaces(faceTriangles(this.model.protos[this.model.nodes[node].proto], faces), [owner]);
       }
