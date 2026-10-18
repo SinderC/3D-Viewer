@@ -1,0 +1,439 @@
+Changes to OCCT (V8_0_1) for the Open CAD Viewer. Applied by wasm/scripts/build-occt.sh.
+
+- STEP: read the complex instance of NEXT_ASSEMBLY_USAGE_OCCURRENCE and
+  QUANTIFIED_ASSEMBLY_COMPONENT_USAGE (PDM Schema Usage Guide 4.3, 4.1.2, Example 17) as the new
+  StepRepr_QuantifiedNextAssemblyUsageOccurrence (835), a NAUO with the quantity. OCCT had no
+  rule for it: the instance was an unknown entity and the component dropped out of its assembly
+  (it showed as a loose root part instead).
+- ReadNames names subtypes of NAUO too.
+
+diff --git a/src/DataExchange/TKDESTEP/RWStepAP214/RWStepAP214_GeneralModule.cxx b/src/DataExchange/TKDESTEP/RWStepAP214/RWStepAP214_GeneralModule.cxx
+index 9dc6864f..e31be183 100644
+--- a/src/DataExchange/TKDESTEP/RWStepAP214/RWStepAP214_GeneralModule.cxx
++++ b/src/DataExchange/TKDESTEP/RWStepAP214/RWStepAP214_GeneralModule.cxx
+@@ -829,6 +829,8 @@
+ #include <StepRepr_PropertyDefinitionRelationship.hxx>
+ #include <StepRepr_PropertyDefinitionRepresentation.hxx>
+ #include <StepRepr_QuantifiedAssemblyComponentUsage.hxx>
++#include <StepRepr_QuantifiedNextAssemblyUsageOccurrence.hxx>
++#include "../RWStepRepr/RWStepRepr_RWQuantifiedNextAssemblyUsageOccurrence.pxx"
+ #include <StepRepr_Representation.hxx>
+ #include <StepRepr_RepresentationContext.hxx>
+ #include <StepRepr_RepresentationItem.hxx>
+@@ -3068,6 +3070,12 @@ void RWStepAP214_GeneralModule::FillSharedCase(const int
+       tool.Share(anent, iter);
+     }
+     break;
++    case 835: {
++      DeclareAndCast(StepRepr_QuantifiedNextAssemblyUsageOccurrence, anent, ent);
++      RWStepRepr_RWQuantifiedNextAssemblyUsageOccurrence tool;
++      tool.Share(anent, iter);
++    }
++    break;
+     case 383: {
+       DeclareAndCast(StepRepr_SpecifiedHigherUsageOccurrence, anent, ent);
+       RWStepRepr_RWSpecifiedHigherUsageOccurrence tool;
+@@ -6492,6 +6500,9 @@ bool RWStepAP214_GeneralModule::NewVoid(const int CN, occ::handle<Standard_Trans
+     case 382:
+       ent = new StepRepr_QuantifiedAssemblyComponentUsage;
+       break;
++    case 835:
++      ent = new StepRepr_QuantifiedNextAssemblyUsageOccurrence;
++      break;
+     case 383:
+       ent = new StepRepr_SpecifiedHigherUsageOccurrence;
+       break;
+@@ -8206,6 +8217,7 @@ int RWStepAP214_GeneralModule::CategoryNumber(const int CN,
+     case 380:
+     case 381:
+     case 382:
++    case 835:
+     case 383:
+     case 384:
+     case 385:
+diff --git a/src/DataExchange/TKDESTEP/RWStepAP214/RWStepAP214_ReadWriteModule.cxx b/src/DataExchange/TKDESTEP/RWStepAP214/RWStepAP214_ReadWriteModule.cxx
+index 8cc315ad..e1f75870 100644
+--- a/src/DataExchange/TKDESTEP/RWStepAP214/RWStepAP214_ReadWriteModule.cxx
++++ b/src/DataExchange/TKDESTEP/RWStepAP214/RWStepAP214_ReadWriteModule.cxx
+@@ -423,6 +423,8 @@ IMPLEMENT_STANDARD_RTTIEXT(RWStepAP214_ReadWriteModule, StepData_ReadWriteModule
+ #include <StepRepr_NextAssemblyUsageOccurrence.hxx>
+ #include <StepRepr_PromissoryUsageOccurrence.hxx>
+ #include <StepRepr_QuantifiedAssemblyComponentUsage.hxx>
++#include <StepRepr_QuantifiedNextAssemblyUsageOccurrence.hxx>
++#include "../RWStepRepr/RWStepRepr_RWQuantifiedNextAssemblyUsageOccurrence.pxx"
+ #include <StepRepr_SpecifiedHigherUsageOccurrence.hxx>
+ #include <StepRepr_AssemblyComponentUsageSubstitute.hxx>
+ #include <StepRepr_SuppliedPartRelationship.hxx>
+@@ -4590,6 +4592,14 @@ int RWStepAP214_ReadWriteModule::CaseStep(
+     }
+     else if (NbComp == 5)
+     {
++      // next_assembly_usage_occurrence that is also a quantified_assembly_component_usage
++      // (PDM Schema Usage Guide 4.3, 4.1.2)
++      if (types(1).IsEqual(StepType(379)) && types(2).IsEqual(StepType(380))
++          && types(3).IsEqual(StepType(374)) && types(4).IsEqual(StepType(377))
++          && types(5).IsEqual(StepType(382)))
++      {
++        return 835;
++      }
+       //: n5 abv 15 Feb 99: S4132 complex type bounded_curve + surface_curve
+       if ((types(1).IsEqual(StepType(48))) && (types(2).IsEqual(StepType(84)))
+           && (types(3).IsEqual(StepType(144))) && (types(4).IsEqual(StepType(247)))
+@@ -5010,6 +5020,8 @@ bool RWStepAP214_ReadWriteModule::IsComplex(const int CN) const
+       return true;
+     case 719:
+       return true;
++    case 835:
++      return true;
+     default:
+       return false;
+   }
+@@ -6830,6 +6842,13 @@ bool RWStepAP214_ReadWriteModule::ComplexType(
+       types.Append(TCollection_AsciiString(StepType(709)));
+       types.Append(TCollection_AsciiString(StepType(708)));
+       break;
++    case 835:
++      types.Append(TCollection_AsciiString(StepType(379)));
++      types.Append(TCollection_AsciiString(StepType(380)));
++      types.Append(TCollection_AsciiString(StepType(374)));
++      types.Append(TCollection_AsciiString(StepType(377)));
++      types.Append(TCollection_AsciiString(StepType(382)));
++      break;
+     default:
+       return false;
+   }
+@@ -9088,6 +9107,12 @@ void RWStepAP214_ReadWriteModule::ReadStep(const int
+       tool.ReadStep(data, num, ach, anent);
+     }
+     break;
++    case 835: {
++      DeclareAndCast(StepRepr_QuantifiedNextAssemblyUsageOccurrence, anent, ent);
++      RWStepRepr_RWQuantifiedNextAssemblyUsageOccurrence aTool;
++      aTool.ReadStep(data, num, ach, anent);
++    }
++    break;
+     case 383: {
+       DeclareAndCast(StepRepr_SpecifiedHigherUsageOccurrence, anent, ent);
+       RWStepRepr_RWSpecifiedHigherUsageOccurrence tool;
+@@ -14038,6 +14063,12 @@ void RWStepAP214_ReadWriteModule::WriteStep(const int
+       tool.WriteStep(SW, anent);
+     }
+     break;
++    case 835: {
++      DeclareAndCast(StepRepr_QuantifiedNextAssemblyUsageOccurrence, anent, ent);
++      RWStepRepr_RWQuantifiedNextAssemblyUsageOccurrence aTool;
++      aTool.WriteStep(SW, anent);
++    }
++    break;
+     case 383: {
+       DeclareAndCast(StepRepr_SpecifiedHigherUsageOccurrence, anent, ent);
+       RWStepRepr_RWSpecifiedHigherUsageOccurrence tool;
+diff --git a/src/DataExchange/TKDESTEP/RWStepRepr/FILES.cmake b/src/DataExchange/TKDESTEP/RWStepRepr/FILES.cmake
+index 6cd497be..f5048924 100644
+--- a/src/DataExchange/TKDESTEP/RWStepRepr/FILES.cmake
++++ b/src/DataExchange/TKDESTEP/RWStepRepr/FILES.cmake
+@@ -150,4 +150,6 @@ set(OCCT_RWStepRepr_FILES
+   RWStepRepr_RWTangent.pxx
+   RWStepRepr_RWValueRepresentationItem.cxx
+   RWStepRepr_RWValueRepresentationItem.pxx
++  RWStepRepr_RWQuantifiedNextAssemblyUsageOccurrence.cxx
++  RWStepRepr_RWQuantifiedNextAssemblyUsageOccurrence.pxx
+ )
+diff --git a/src/DataExchange/TKDESTEP/RWStepRepr/RWStepRepr_RWQuantifiedNextAssemblyUsageOccurrence.cxx b/src/DataExchange/TKDESTEP/RWStepRepr/RWStepRepr_RWQuantifiedNextAssemblyUsageOccurrence.cxx
+new file mode 100644
+index 00000000..aad1700c
+--- /dev/null
++++ b/src/DataExchange/TKDESTEP/RWStepRepr/RWStepRepr_RWQuantifiedNextAssemblyUsageOccurrence.cxx
+@@ -0,0 +1,120 @@
++// This file is part of Open CASCADE Technology software library.
++//
++// This library is free software; you can redistribute it and/or modify it under
++// the terms of the GNU Lesser General Public License version 2.1 as published
++// by the Free Software Foundation, with special exception defined in the file
++// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
++// distribution for complete text of the license and disclaimer of any warranty.
++//
++// Alternatively, this file may be used under the terms of Open CASCADE
++// commercial license or contractual agreement.
++
++#include "RWStepRepr_RWQuantifiedNextAssemblyUsageOccurrence.pxx"
++#include <Interface_EntityIterator.hxx>
++#include <StepBasic_ProductDefinitionOrReference.hxx>
++#include <StepData_StepReaderData.hxx>
++#include <StepData_StepWriter.hxx>
++#include <StepRepr_QuantifiedNextAssemblyUsageOccurrence.hxx>
++#include <TCollection_HAsciiString.hxx>
++
++//=================================================================================================
++
++RWStepRepr_RWQuantifiedNextAssemblyUsageOccurrence::
++  RWStepRepr_RWQuantifiedNextAssemblyUsageOccurrence() = default;
++
++//=================================================================================================
++
++void RWStepRepr_RWQuantifiedNextAssemblyUsageOccurrence::ReadStep(
++  const occ::handle<StepData_StepReaderData>&                        theData,
++  const int                                                          theNum0,
++  occ::handle<Interface_Check>&                                      theCheck,
++  const occ::handle<StepRepr_QuantifiedNextAssemblyUsageOccurrence>& theEnt) const
++{
++  int aNum = 0;
++  theData->NamedForComplex("ASSEMBLY_COMPONENT_USAGE", "ASCMUS", theNum0, aNum, theCheck);
++  occ::handle<TCollection_HAsciiString> aReferenceDesignator;
++  const bool hasReferenceDesignator = theData->CheckNbParams(aNum, 1, theCheck, "assembly_component_usage")
++                                      && theData->IsParamDefined(aNum, 1);
++  if (hasReferenceDesignator)
++  {
++    theData->ReadString(aNum, 1, "reference_designator", theCheck, aReferenceDesignator);
++  }
++
++  theData->NamedForComplex("PRODUCT_DEFINITION_RELATIONSHIP", "PRDFRL", theNum0, aNum, theCheck);
++  if (!theData->CheckNbParams(aNum, 5, theCheck, "product_definition_relationship"))
++  {
++    return;
++  }
++  occ::handle<TCollection_HAsciiString> anId, aName, aDescription;
++  theData->ReadString(aNum, 1, "id", theCheck, anId);
++  theData->ReadString(aNum, 2, "name", theCheck, aName);
++  const bool hasDescription = theData->IsParamDefined(aNum, 3);
++  if (hasDescription)
++  {
++    theData->ReadString(aNum, 3, "description", theCheck, aDescription);
++  }
++  StepBasic_ProductDefinitionOrReference aRelating, aRelated;
++  theData->ReadEntity(aNum, 4, "relating_product_definition", theCheck, aRelating);
++  theData->ReadEntity(aNum, 5, "related_product_definition", theCheck, aRelated);
++  theEnt->Init(anId,
++               aName,
++               hasDescription,
++               aDescription,
++               aRelating,
++               aRelated,
++               hasReferenceDesignator,
++               aReferenceDesignator);
++
++  theData->NamedForComplex("QUANTIFIED_ASSEMBLY_COMPONENT_USAGE", "QACU", theNum0, aNum, theCheck);
++  if (theData->CheckNbParams(aNum, 1, theCheck, "quantified_assembly_component_usage"))
++  {
++    occ::handle<Standard_Transient> aQuantity;
++    theData->ReadEntity(aNum, 1, "quantity", theCheck, STANDARD_TYPE(Standard_Transient), aQuantity);
++    theEnt->SetQuantity(aQuantity);
++  }
++}
++
++//=================================================================================================
++
++void RWStepRepr_RWQuantifiedNextAssemblyUsageOccurrence::WriteStep(
++  StepData_StepWriter&                                               theSW,
++  const occ::handle<StepRepr_QuantifiedNextAssemblyUsageOccurrence>& theEnt) const
++{
++  theSW.StartEntity("ASSEMBLY_COMPONENT_USAGE");
++  if (theEnt->HasReferenceDesignator())
++  {
++    theSW.Send(theEnt->ReferenceDesignator());
++  }
++  else
++  {
++    theSW.SendUndef();
++  }
++  theSW.StartEntity("NEXT_ASSEMBLY_USAGE_OCCURRENCE");
++  theSW.StartEntity("PRODUCT_DEFINITION_RELATIONSHIP");
++  theSW.Send(theEnt->Id());
++  theSW.Send(theEnt->Name());
++  if (theEnt->HasDescription())
++  {
++    theSW.Send(theEnt->Description());
++  }
++  else
++  {
++    theSW.SendUndef();
++  }
++  theSW.Send(theEnt->RelatingProductDefinitionAP242().Value());
++  theSW.Send(theEnt->RelatedProductDefinitionAP242().Value());
++  theSW.StartEntity("PRODUCT_DEFINITION_USAGE");
++  theSW.StartEntity("QUANTIFIED_ASSEMBLY_COMPONENT_USAGE");
++  theSW.Send(theEnt->Quantity());
++}
++
++//=================================================================================================
++
++void RWStepRepr_RWQuantifiedNextAssemblyUsageOccurrence::Share(
++  const occ::handle<StepRepr_QuantifiedNextAssemblyUsageOccurrence>& theEnt,
++  Interface_EntityIterator&                                          theIter) const
++{
++  theIter.AddItem(theEnt->RelatingProductDefinitionAP242().Value());
++  theIter.AddItem(theEnt->RelatedProductDefinitionAP242().Value());
++  theIter.AddItem(theEnt->Quantity());
++}
+diff --git a/src/DataExchange/TKDESTEP/RWStepRepr/RWStepRepr_RWQuantifiedNextAssemblyUsageOccurrence.pxx b/src/DataExchange/TKDESTEP/RWStepRepr/RWStepRepr_RWQuantifiedNextAssemblyUsageOccurrence.pxx
+new file mode 100644
+index 00000000..a15c63da
+--- /dev/null
++++ b/src/DataExchange/TKDESTEP/RWStepRepr/RWStepRepr_RWQuantifiedNextAssemblyUsageOccurrence.pxx
+@@ -0,0 +1,48 @@
++// This file is part of Open CASCADE Technology software library.
++//
++// This library is free software; you can redistribute it and/or modify it under
++// the terms of the GNU Lesser General Public License version 2.1 as published
++// by the Free Software Foundation, with special exception defined in the file
++// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
++// distribution for complete text of the license and disclaimer of any warranty.
++//
++// Alternatively, this file may be used under the terms of Open CASCADE
++// commercial license or contractual agreement.
++
++#ifndef _RWStepRepr_RWQuantifiedNextAssemblyUsageOccurrence_HeaderFile
++#define _RWStepRepr_RWQuantifiedNextAssemblyUsageOccurrence_HeaderFile
++
++#include <Standard.hxx>
++#include <Standard_DefineAlloc.hxx>
++#include <Standard_Handle.hxx>
++
++class StepData_StepReaderData;
++class Interface_Check;
++class StepRepr_QuantifiedNextAssemblyUsageOccurrence;
++class StepData_StepWriter;
++class Interface_EntityIterator;
++
++//! Read & Write tool for the complex instance of next_assembly_usage_occurrence and
++//! quantified_assembly_component_usage
++class RWStepRepr_RWQuantifiedNextAssemblyUsageOccurrence
++{
++public:
++  DEFINE_STANDARD_ALLOC
++
++  Standard_HIDDEN RWStepRepr_RWQuantifiedNextAssemblyUsageOccurrence();
++
++  Standard_HIDDEN void ReadStep(
++    const occ::handle<StepData_StepReaderData>&                        theData,
++    const int                                                          theNum,
++    occ::handle<Interface_Check>&                                      theCheck,
++    const occ::handle<StepRepr_QuantifiedNextAssemblyUsageOccurrence>& theEnt) const;
++
++  Standard_HIDDEN void WriteStep(
++    StepData_StepWriter&                                               theSW,
++    const occ::handle<StepRepr_QuantifiedNextAssemblyUsageOccurrence>& theEnt) const;
++
++  Standard_HIDDEN void Share(const occ::handle<StepRepr_QuantifiedNextAssemblyUsageOccurrence>& theEnt,
++                             Interface_EntityIterator& theIter) const;
++};
++
++#endif // _RWStepRepr_RWQuantifiedNextAssemblyUsageOccurrence_HeaderFile
+diff --git a/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx b/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx
+index 16041bbe..e1120d72 100644
+--- a/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx
++++ b/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx
+@@ -1733,7 +1733,7 @@ bool STEPCAFControl_Reader::ReadNames(
+     occ::handle<Standard_Transient> enti = Model->Value(i);
+ 
+     // get description of NAUO
+-    if (enti->DynamicType() == tNAUO)
++    if (enti->IsKind(tNAUO))
+     {
+       L.Nullify();
+       occ::handle<StepRepr_NextAssemblyUsageOccurrence> NAUO =
+diff --git a/src/DataExchange/TKDESTEP/StepAP214/StepAP214_Protocol.cxx b/src/DataExchange/TKDESTEP/StepAP214/StepAP214_Protocol.cxx
+index aa0712f6..b26f2621 100644
+--- a/src/DataExchange/TKDESTEP/StepAP214/StepAP214_Protocol.cxx
++++ b/src/DataExchange/TKDESTEP/StepAP214/StepAP214_Protocol.cxx
+@@ -368,6 +368,7 @@ static const char* schemaAP242DIS =
+ #include <StepRepr_NextAssemblyUsageOccurrence.hxx>
+ #include <StepRepr_PromissoryUsageOccurrence.hxx>
+ #include <StepRepr_QuantifiedAssemblyComponentUsage.hxx>
++#include <StepRepr_QuantifiedNextAssemblyUsageOccurrence.hxx>
+ #include <StepRepr_SpecifiedHigherUsageOccurrence.hxx>
+ #include <StepRepr_AssemblyComponentUsageSubstitute.hxx>
+ #include <StepRepr_SuppliedPartRelationship.hxx>
+@@ -1155,6 +1156,7 @@ StepAP214_Protocol::StepAP214_Protocol()
+   types.Bind(STANDARD_TYPE(StepRepr_NextAssemblyUsageOccurrence), 380);
+   types.Bind(STANDARD_TYPE(StepRepr_PromissoryUsageOccurrence), 381);
+   types.Bind(STANDARD_TYPE(StepRepr_QuantifiedAssemblyComponentUsage), 382);
++  types.Bind(STANDARD_TYPE(StepRepr_QuantifiedNextAssemblyUsageOccurrence), 835);
+   types.Bind(STANDARD_TYPE(StepRepr_SpecifiedHigherUsageOccurrence), 383);
+   types.Bind(STANDARD_TYPE(StepRepr_AssemblyComponentUsageSubstitute), 384);
+   types.Bind(STANDARD_TYPE(StepRepr_SuppliedPartRelationship), 385);
+diff --git a/src/DataExchange/TKDESTEP/StepRepr/FILES.cmake b/src/DataExchange/TKDESTEP/StepRepr/FILES.cmake
+index f26b6748..57aa7e51 100644
+--- a/src/DataExchange/TKDESTEP/StepRepr/FILES.cmake
++++ b/src/DataExchange/TKDESTEP/StepRepr/FILES.cmake
+@@ -183,4 +183,6 @@ set(OCCT_StepRepr_FILES
+   StepRepr_ValueRange.hxx
+   StepRepr_ValueRepresentationItem.cxx
+   StepRepr_ValueRepresentationItem.hxx
++  StepRepr_QuantifiedNextAssemblyUsageOccurrence.cxx
++  StepRepr_QuantifiedNextAssemblyUsageOccurrence.hxx
+ )
+diff --git a/src/DataExchange/TKDESTEP/StepRepr/StepRepr_QuantifiedNextAssemblyUsageOccurrence.cxx b/src/DataExchange/TKDESTEP/StepRepr/StepRepr_QuantifiedNextAssemblyUsageOccurrence.cxx
+new file mode 100644
+index 00000000..605326a1
+--- /dev/null
++++ b/src/DataExchange/TKDESTEP/StepRepr/StepRepr_QuantifiedNextAssemblyUsageOccurrence.cxx
+@@ -0,0 +1,20 @@
++// This file is part of Open CASCADE Technology software library.
++//
++// This library is free software; you can redistribute it and/or modify it under
++// the terms of the GNU Lesser General Public License version 2.1 as published
++// by the Free Software Foundation, with special exception defined in the file
++// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
++// distribution for complete text of the license and disclaimer of any warranty.
++//
++// Alternatively, this file may be used under the terms of Open CASCADE
++// commercial license or contractual agreement.
++
++#include <StepRepr_QuantifiedNextAssemblyUsageOccurrence.hxx>
++
++IMPLEMENT_STANDARD_RTTIEXT(StepRepr_QuantifiedNextAssemblyUsageOccurrence,
++                           StepRepr_NextAssemblyUsageOccurrence)
++
++//=================================================================================================
++
++StepRepr_QuantifiedNextAssemblyUsageOccurrence::StepRepr_QuantifiedNextAssemblyUsageOccurrence() =
++  default;
+diff --git a/src/DataExchange/TKDESTEP/StepRepr/StepRepr_QuantifiedNextAssemblyUsageOccurrence.hxx b/src/DataExchange/TKDESTEP/StepRepr/StepRepr_QuantifiedNextAssemblyUsageOccurrence.hxx
+new file mode 100644
+index 00000000..011b4455
+--- /dev/null
++++ b/src/DataExchange/TKDESTEP/StepRepr/StepRepr_QuantifiedNextAssemblyUsageOccurrence.hxx
+@@ -0,0 +1,42 @@
++// This file is part of Open CASCADE Technology software library.
++//
++// This library is free software; you can redistribute it and/or modify it under
++// the terms of the GNU Lesser General Public License version 2.1 as published
++// by the Free Software Foundation, with special exception defined in the file
++// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
++// distribution for complete text of the license and disclaimer of any warranty.
++//
++// Alternatively, this file may be used under the terms of Open CASCADE
++// commercial license or contractual agreement.
++
++#ifndef _StepRepr_QuantifiedNextAssemblyUsageOccurrence_HeaderFile
++#define _StepRepr_QuantifiedNextAssemblyUsageOccurrence_HeaderFile
++
++#include <Standard.hxx>
++#include <Standard_Type.hxx>
++
++#include <StepRepr_NextAssemblyUsageOccurrence.hxx>
++
++//! Representation of the complex instance of next_assembly_usage_occurrence and
++//! quantified_assembly_component_usage (PDM Schema Usage Guide 4.3, 4.1.2): a usage of a component
++//! that stands for Quantity occurrences of it, which are not told apart.
++class StepRepr_QuantifiedNextAssemblyUsageOccurrence : public StepRepr_NextAssemblyUsageOccurrence
++{
++public:
++  //! Empty constructor
++  Standard_EXPORT StepRepr_QuantifiedNextAssemblyUsageOccurrence();
++
++  //! Returns field Quantity (quantified_assembly_component_usage.quantity, a measure_with_unit)
++  const occ::handle<Standard_Transient>& Quantity() const { return myQuantity; }
++
++  //! Set field Quantity
++  void SetQuantity(const occ::handle<Standard_Transient>& theQuantity) { myQuantity = theQuantity; }
++
++  DEFINE_STANDARD_RTTIEXT(StepRepr_QuantifiedNextAssemblyUsageOccurrence,
++                          StepRepr_NextAssemblyUsageOccurrence)
++
++private:
++  occ::handle<Standard_Transient> myQuantity;
++};
++
++#endif // _StepRepr_QuantifiedNextAssemblyUsageOccurrence_HeaderFile

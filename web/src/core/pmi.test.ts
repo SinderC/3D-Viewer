@@ -58,4 +58,9 @@ describe('pmiInfo', () => {
       ['Faces', '2'],
     ]);
   });
+
+  it('counts the faces of assembly PMI on one instance of its assembly', () => {
+    const p = item({ nodes: [0, 7], nodeFaces: [[2, 5], [4, 5], [9, 5], [11, 5]] });
+    expect(pmiInfo(p, 'mm')).toContainEqual(['Faces', '2']);
+  });
 });

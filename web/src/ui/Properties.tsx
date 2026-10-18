@@ -71,8 +71,10 @@ export function Properties({ state }: { state: State }) {
     <>
       {pmi && section('PMI', pmiInfo(pmi, unit))}
       {node && section('Part', [['Name', node.name], ...size(node.id), ...(product?.props ?? [])])}
+      {node?.occurrence && section('Occurrence', node.occurrence)}
       {product && section('Validation', validationInfo(product, unit))}
       {product && section('Attributes', product.attributes, true)}
+      {node?.attributes && section('Occurrence attributes', node.attributes, true)}
       {section('File', file)}
     </>
   );

@@ -1,0 +1,191 @@
+Changes to OCCT (V8_0_1) for the Open CAD Viewer. Applied by wasm/scripts/build-occt.sh.
+
+- STEP external references: read the document format from where the CAx-IF practice (External
+  References 3.1, 6.3.2) and OCCT's own writer put it, a 'document format' REPRESENTATION with a
+  'data format' item; OCCT looked in SHAPE_REPRESENTATIONs only, so for those files the format was
+  never read and every reference was followed as a STEP file.
+- Follow every STEP Part 21 format name of the practices ('STEP AP242', 'STEP AP203E2',
+  'STEP AP214 CC06', 'ISO 10303-242', ...), not only 'STEP AP203' and 'STEP AP214', and not the
+  AP242 XML one. New public STEPCAFControl_Reader::IsStepExternFormat, so applications that stage
+  the files themselves use the same rule.
+
+diff --git a/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx b/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx
+index b6e3c85c..a0825c8b 100644
+--- a/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx
++++ b/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx
+@@ -448,6 +448,45 @@ bool STEPCAFControl_Reader::Perform(const TCollection_AsciiString&       filenam
+ 
+ //=================================================================================================
+ 
++bool STEPCAFControl_Reader::IsStepExternFormat(
++  const occ::handle<TCollection_HAsciiString>& theFormat)
++{
++  if (theFormat.IsNull())
++  {
++    return true;
++  }
++  TCollection_AsciiString aFormat = theFormat->String();
++  aFormat.LeftAdjust();
++  aFormat.RightAdjust();
++  aFormat.LowerCase();
++  if (aFormat.IsEmpty())
++  {
++    return true;
++  }
++  // Recommended values: CAx-IF External References 3.1, Table 2, and STEP File Compression 1.3,
++  // Figure 4. 'ISO 10303-242 Domain Model XML' is not a Part 21 file.
++  if (aFormat.Search("xml") > 0)
++  {
++    return false;
++  }
++  static const char* const THE_PREFIXES[] = {"step ap203",
++                                             "step ap214",
++                                             "step ap242",
++                                             "iso 10303-203",
++                                             "iso 10303-214",
++                                             "iso 10303-242"};
++  for (const char* const aPrefix : THE_PREFIXES)
++  {
++    if (aFormat.StartsWith(aPrefix))
++    {
++      return true;
++    }
++  }
++  return false;
++}
++
++//=================================================================================================
++
+ const NCollection_DataMap<TCollection_AsciiString, occ::handle<STEPCAFControl_ExternFile>>&
+   STEPCAFControl_Reader::ExternFiles() const
+ {
+@@ -659,29 +698,15 @@ bool STEPCAFControl_Reader::Transfer(STEPControl_Reader&                  reader
+   {
+     Message_ProgressRange aRange = aPSE.Next();
+     // check extern ref format
+-    occ::handle<TCollection_HAsciiString> format = ExtRefs.Format(i);
+-    if (!format.IsNull())
++    if (!IsStepExternFormat(ExtRefs.Format(i)))
+     {
+-      static occ::handle<TCollection_HAsciiString> ap203 =
+-        new TCollection_HAsciiString("STEP AP203");
+-      static occ::handle<TCollection_HAsciiString> ap214 =
+-        new TCollection_HAsciiString("STEP AP214");
+-      if (!format->IsSameString(ap203, false) && !format->IsSameString(ap214, false))
+-      {
+ #ifdef OCCT_DEBUG
+-        std::cout << "Warning: STEPCAFControl_Reader::Transfer: Extern document is neither STEP "
+-                     "AP203 nor AP214"
+-                  << std::endl;
+-#else
+-        continue;
+-#endif
+-      }
+-    }
+-#ifdef OCCT_DEBUG
+-    else
+-      std::cout << "Warning: STEPCAFControl_Reader::Transfer: Extern document format not defined"
++      std::cout << "Warning: STEPCAFControl_Reader::Transfer: Extern document is not a STEP "
++                   "AP203, AP214 or AP242 file"
+                 << std::endl;
+ #endif
++      continue;
++    }
+ 
+     // get and check filename of the current extern ref
+     const char* const filename = ExtRefs.FileName(i);
+diff --git a/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.hxx b/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.hxx
+index 7cfdecdc..3ad75e89 100644
+--- a/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.hxx
++++ b/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.hxx
+@@ -37,6 +37,7 @@ class XSControl_WorkSession;
+ class TDataStd_NamedData;
+ class TDocStd_Document;
+ class STEPCAFControl_ExternFile;
++class TCollection_HAsciiString;
+ class TopoDS_Shape;
+ class XCAFDoc_ShapeTool;
+ class StepRepr_RepresentationItem;
+@@ -164,6 +165,13 @@ public:
+   //! Returns basic reader as const
+   Standard_EXPORT const STEPControl_Reader& Reader() const;
+ 
++  //! Returns true if an external reference with the given document format ('data format'
++  //! property) is a STEP Part 21 file the reader follows: AP203, AP214 or AP242, named either
++  //! 'STEP APnnn' or 'ISO 10303-nnn', with any edition suffix ('STEP AP203E2', 'STEP AP214 CC06').
++  //! A null or empty format is accepted.
++  Standard_EXPORT static bool IsStepExternFormat(
++    const occ::handle<TCollection_HAsciiString>& theFormat);
++
+   //! Returns label of instance of an assembly component
+   //! corresponding to a given NAUO
+   Standard_EXPORT static TDF_Label FindInstance(
+diff --git a/src/DataExchange/TKDESTEP/STEPConstruct/STEPConstruct_ExternRefs.cxx b/src/DataExchange/TKDESTEP/STEPConstruct/STEPConstruct_ExternRefs.cxx
+index b42a0e89..4e2c7f2c 100644
+--- a/src/DataExchange/TKDESTEP/STEPConstruct/STEPConstruct_ExternRefs.cxx
++++ b/src/DataExchange/TKDESTEP/STEPConstruct/STEPConstruct_ExternRefs.cxx
+@@ -98,6 +98,27 @@ void STEPConstruct_ExternRefs::Clear()
+ 
+ //=================================================================================================
+ 
++// Returns the 'data format' item of a document format representation, or null.
++static occ::handle<StepRepr_DescriptiveRepresentationItem> dataFormatItem(
++  const occ::handle<StepRepr_Representation>& theRep)
++{
++  static const occ::handle<TCollection_HAsciiString> THE_DATA_FORMAT =
++    new TCollection_HAsciiString("data format");
++  for (int i = 1; !theRep.IsNull() && i <= theRep->NbItems(); i++)
++  {
++    occ::handle<StepRepr_DescriptiveRepresentationItem> aDRI =
++      occ::down_cast<StepRepr_DescriptiveRepresentationItem>(theRep->ItemsValue(i));
++    if (!aDRI.IsNull() && !aDRI->Name().IsNull()
++        && aDRI->Name()->IsSameString(THE_DATA_FORMAT, false))
++    {
++      return aDRI;
++    }
++  }
++  return nullptr;
++}
++
++//=================================================================================================
++
+ static bool findPDWADandExcludeExcess(
+   occ::handle<StepAP214_AppliedDocumentReference>&                 ADR,
+   NCollection_Sequence<occ::handle<Standard_Transient>>&           aSeqOfPDWAD,
+@@ -267,7 +288,10 @@ bool STEPConstruct_ExternRefs::LoadExternRefs()
+             {
+               continue;
+             }
+-            if (PDR->UsedRepresentation()->IsKind(STANDARD_TYPE(StepShape_ShapeRepresentation)))
++            // CAx-IF External References 3.1, 6.3.2: a 'document format' REPRESENTATION with a
++            // 'data format' item; older files use a SHAPE_REPRESENTATION.
++            if (PDR->UsedRepresentation()->IsKind(STANDARD_TYPE(StepShape_ShapeRepresentation))
++                || !dataFormatItem(PDR->UsedRepresentation()).IsNull())
+             {
+               Format = PDR;
+             }
+@@ -566,16 +590,15 @@ occ::handle<TCollection_HAsciiString> STEPConstruct_ExternRefs::Format(const int
+     return Format;
+   }
+ 
+-  occ::handle<StepRepr_Representation> rep = PDR->UsedRepresentation();
+-  for (int i = 1; i <= rep->NbItems(); i++)
++  occ::handle<StepRepr_Representation>                rep = PDR->UsedRepresentation();
++  occ::handle<StepRepr_DescriptiveRepresentationItem> DRI = dataFormatItem(rep);
++  for (int i = 1; DRI.IsNull() && i <= rep->NbItems(); i++)
+   {
+-    if (rep->ItemsValue(i)->IsKind(STANDARD_TYPE(StepRepr_DescriptiveRepresentationItem)))
+-    {
+-      occ::handle<StepRepr_DescriptiveRepresentationItem> DRI =
+-        occ::down_cast<StepRepr_DescriptiveRepresentationItem>(rep->ItemsValue(i));
+-      Format = DRI->Description();
+-      break;
+-    }
++    DRI = occ::down_cast<StepRepr_DescriptiveRepresentationItem>(rep->ItemsValue(i));
++  }
++  if (!DRI.IsNull())
++  {
++    Format = DRI->Description();
+   }
+ 
+   return Format;

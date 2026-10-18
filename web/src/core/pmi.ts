@@ -51,6 +51,10 @@ export function pmiLabel(p: PmiItem, unit: UnitId): string {
   return parts.filter(Boolean).join(' ');
 }
 
+/** Faces the item refers to; for assembly PMI, on one instance of its assembly. */
+const faceCount = (p: PmiItem) =>
+  p.nodeFaces ? p.nodeFaces.reduce((n, [, ...faces]) => n + faces.length, 0) / Math.max(p.nodes?.length ?? 1, 1) : p.faces.length;
+
 /** Label/value rows for the info panel. */
 export function pmiInfo(p: PmiItem, unit: UnitId): [string, string][] {
   const rows: [string, string | undefined][] = [
@@ -61,7 +65,7 @@ export function pmiInfo(p: PmiItem, unit: UnitId): [string, string][] {
     ['Deviation', deviation(p, unit)],
     ['Per unit', p.perUnit && `${perUnit(p, unit)} ${p.unitArea ? 'area' : 'length'}`],
     ['Datums', p.datums?.join(', ') || undefined],
-    ['Faces', p.faces.length ? String(p.faces.length) : undefined],
+    ['Faces', faceCount(p) ? String(faceCount(p)) : undefined],
   ];
   return rows.filter((r): r is [string, string] => r[1] !== undefined);
 }

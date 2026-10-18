@@ -59,7 +59,12 @@
 #include <StepBasic_DateTimeSelect.hxx>
 #include <StepBasic_DateTimeRole.hxx>
 #include <StepBasic_DerivedUnit.hxx>
+#include <StepAP214_AppliedExternalIdentificationAssignment.hxx>
 #include <StepBasic_DerivedUnitElement.hxx>
+#include <StepBasic_DocumentFile.hxx>
+#include <StepBasic_DocumentRepresentationType.hxx>
+#include <StepBasic_ExternalSource.hxx>
+#include <StepData_SelectNamed.hxx>
 #include <StepBasic_LocalTime.hxx>
 #include <StepBasic_MeasureValueMember.hxx>
 #include <StepBasic_MeasureWithUnit.hxx>
@@ -80,6 +85,10 @@
 #include <StepBasic_SecurityClassificationLevel.hxx>
 #include <StepBasic_VolumeUnit.hxx>
 #include <StepData_StepModel.hxx>
+#include <STEPConstruct_Tool.hxx>
+#include <StepBasic_ProductDefinitionReferenceWithLocalRepresentation.hxx>
+#include <StepRepr_QuantifiedNextAssemblyUsageOccurrence.hxx>
+#include <StepRepr_PromissoryUsageOccurrence.hxx>
 #include <StepGeom_GeomRepContextAndGlobUnitAssCtxAndGlobUncertaintyAssCtx.hxx>
 #include <StepGeom_GeometricRepresentationContextAndGlobalUnitAssignedContext.hxx>
 #include <StepRepr_GlobalUnitAssignedContext.hxx>
@@ -116,6 +125,7 @@
 #include <XCAFDoc_DimTolTool.hxx>
 #include <XCAFDoc_Dimension.hxx>
 #include <XCAFDoc_DocumentTool.hxx>
+#include <XCAFDoc_Editor.hxx>
 #include <XCAFDoc_GeomTolerance.hxx>
 #include <XCAFDoc_GraphNode.hxx>
 #include <XCAFDoc_LayerTool.hxx>
@@ -143,6 +153,7 @@
 #include <cstdio>
 #include <fstream>
 #include <map>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -209,6 +220,10 @@ struct Pmi
   Range                    segments;   // presentation lines (x0 y0 z0 x1 y1 z1 ...), float32
   Range                    triangles;  // filled presentation areas such as text glyphs, float32 xyz x3
   std::vector<int>         faces;      // referenced faces of the owning part (faceStarts indices)
+  // Assembly PMI: drawn in each of these nodes (the instances of the assembly it is defined in),
+  // with its faces on the instances it refers to: per instance node, its faces
+  std::vector<int>                           nodes;
+  std::vector<std::pair<int, std::vector<int>>> nodeFaces;
   std::vector<double>      value;      // nominal value (dimension, tolerance), if any
   std::vector<double>      plusMinus;  // lower and upper tolerance, if any
   std::vector<double>      range;      // lower and upper limit, if any
@@ -226,6 +241,9 @@ struct SavedView
   gp_Dir           direction, up; // direction the camera looks
   std::vector<int> pmi;
 };
+
+// Assembly PMI: per GD&T label entry, the component instances it refers to.
+using AssemblyRefs = std::map<std::string, std::vector<STEPCAFControl_Reader::AssemblyShapeReference>>;
 
 // Name/value pairs in display order.
 using Props = std::vector<std::pair<std::string, std::string>>;
@@ -261,6 +279,8 @@ struct Node
   int         color = -1;
   int         product = -1;
   bool        hidden  = false; // invisible in the file (STEP invisibility, hidden layers)
+  Props       attributes;      // user-defined attributes of this occurrence (not of its definition)
+  Props       occurrence;      // what identifies this occurrence in its assembly, and its quantity
 };
 
 std::vector<uint8_t> gGeometry;
@@ -345,6 +365,13 @@ private:
   char*                   myEnd;
   Progress&               myProgress;
 };
+
+std::string entryOf(const TDF_Label& l)
+{
+  TCollection_AsciiString entry;
+  TDF_Tool::Entry(l, entry);
+  return entry.ToCString();
+}
 
 std::string labelName(const TDF_Label& l)
 {
@@ -446,8 +473,11 @@ public:
   {
   }
 
-  void build(const JtPmi& jtPmi, const ProductProps& productProps, const ValidationProps& validation)
+  void build(const JtPmi& jtPmi, const ProductProps& productProps, const ValidationProps& validation, const AssemblyRefs& assemblyRefs,
+             const ProductProps& occurrences)
   {
+    myOccurrences  = &occurrences;
+    myAssemblyRefs = &assemblyRefs;
     myProductProps = &productProps;
     myValidation   = &validation;
 
@@ -534,6 +564,9 @@ private:
     {
       path.Append(label);
       occurrenceStyle(path, node);
+      node.attributes = occurrenceAttributes(path);
+      if (const auto o = myOccurrences->find(entryOf(label)); o != myOccurrences->end())
+        node.occurrence = o->second;
     }
 
     const bool assembly = XCAFDoc_ShapeTool::IsAssembly(def);
@@ -547,6 +580,7 @@ private:
 
     const int id = int(myNodes.size());
     myNodes.push_back(node);
+    myNodeLabels.push_back({entryOf(def), XCAFDoc_ShapeTool::IsComponent(label) ? entryOf(label) : std::string()});
 
     if (assembly)
     {
@@ -555,6 +589,24 @@ private:
       for (const TDF_Label& c : comps)
         visit(c, id, path);
     }
+  }
+
+  // User-defined attributes of this occurrence: set on its component (a STEP NAUO), or through a
+  // higher-level one (SHUO; a STEP multi_level_reference_designator).
+  Props occurrenceAttributes(const LabelSequence& path) const
+  {
+    Props out = namedData(path.Last());
+    for (int first = 1; first < path.Length(); ++first)
+    {
+      LabelSequence chain;
+      for (int i = first; i <= path.Length(); ++i)
+        chain.Append(path(i));
+      Handle(XCAFDoc_GraphNode) shuo;
+      if (myShapes->FindSHUO(chain, shuo))
+        for (auto& attribute : namedData(shuo->Label()))
+          out.push_back(std::move(attribute));
+    }
+    return out;
   }
 
   // Colour and visibility set on this occurrence through a higher-level one (SHUO). The longest
@@ -999,13 +1051,6 @@ private:
   // -------------------------------------------------------------------------
   // PMI and saved views (STEP AP242 GD&T)
 
-  static std::string entryOf(const TDF_Label& l)
-  {
-    TCollection_AsciiString entry;
-    TDF_Tool::Entry(l, entry);
-    return entry.ToCString();
-  }
-
   static std::string str(const Handle(TCollection_HAsciiString)& s) { return s.IsNull() ? std::string() : s->ToCString(); }
 
   void collectPmi()
@@ -1096,12 +1141,18 @@ private:
   {
     p.name = str(name);
 
-    // The owning part and its faces, from the shapes the PMI refers to.
-    LabelSequence first, second;
-    XCAFDoc_DimTolTool::GetRefShapeLabel(label, first, second);
-    for (const LabelSequence* refs : {&first, &second})
-      for (const TDF_Label& ref : *refs)
-        addFaces(ref, p);
+    // The owning part and its faces, from the shapes the PMI refers to; or, for assembly PMI, the
+    // assembly and the faces on the instances it refers to.
+    if (const auto refs = myAssemblyRefs->find(entryOf(label)); refs != myAssemblyRefs->end())
+      addInstanceFaces(refs->second, p);
+    else
+    {
+      LabelSequence first, second;
+      XCAFDoc_DimTolTool::GetRefShapeLabel(label, first, second);
+      for (const LabelSequence* refs : {&first, &second})
+        for (const TDF_Label& ref : *refs)
+          addFaces(ref, p);
+    }
 
     // OCCT makes a datum for each tolerance that references it: keep the first of each.
     if (p.kind == "datum")
@@ -1166,6 +1217,45 @@ private:
       if (const int* i = faces.Seek(ex.Current()))
         if (std::find(p.faces.begin(), p.faces.end(), *i) == p.faces.end())
           p.faces.push_back(*i);
+  }
+
+  // Assembly PMI: drawn with every instance of the assembly it is defined in, and its faces on the
+  // instances (paths of component labels from that assembly) it refers to.
+  void addInstanceFaces(const std::vector<STEPCAFControl_Reader::AssemblyShapeReference>& refs, Pmi& p) const
+  {
+    for (const auto& ref : refs)
+    {
+      const std::string assembly = entryOf(ref.Assembly);
+      for (int owner = 0; owner < int(myNodes.size()); ++owner)
+      {
+        if (myNodeLabels[size_t(owner)].first != assembly)
+          continue;
+        if (std::find(p.nodes.begin(), p.nodes.end(), owner) == p.nodes.end())
+          p.nodes.push_back(owner);
+        int node = owner;
+        for (const TDF_Label& component : ref.Path)
+        {
+          const std::string entry = entryOf(component);
+          int               child = -1;
+          for (int n = node + 1; n < int(myNodes.size()) && child < 0; ++n)
+            if (myNodes[size_t(n)].parent == node && myNodeLabels[size_t(n)].second == entry)
+              child = n;
+          node = child;
+          if (node < 0)
+            break;
+        }
+        if (node < 0 || myNodes[size_t(node)].proto < 0)
+          continue;
+        const auto&      faceIndex = myProtos[size_t(myNodes[size_t(node)].proto)].faceIndex;
+        std::vector<int> faces;
+        for (const TDF_Label& shape : ref.Shapes)
+          for (TopExp_Explorer ex(XCAFDoc_ShapeTool::GetShape(shape), TopAbs_FACE); ex.More(); ex.Next())
+            if (const int* i = faceIndex.Seek(ex.Current()); i && std::find(faces.begin(), faces.end(), *i) == faces.end())
+              faces.push_back(*i);
+        if (!faces.empty())
+          p.nodeFaces.emplace_back(node, std::move(faces));
+      }
+    }
   }
 
   void collectViews()
@@ -1282,10 +1372,23 @@ private:
   std::vector<Product>       myProducts;
   std::map<std::string, int> myProductByEntry;
   const ProductProps*        myProductProps = nullptr;
+  const AssemblyRefs*        myAssemblyRefs = nullptr;
+  const ProductProps*        myOccurrences  = nullptr;
+  // Per node: its definition label entry, and its component label entry (empty for a root)
+  std::vector<std::pair<std::string, std::string>> myNodeLabels;
   const ValidationProps*     myValidation   = nullptr;
 };
 
 // Readers: each fills the XCAF document and describes the source.
+
+// A file a STEP assembly references, whether it was opened with it, and where the file says it is
+// (a folder relative to the assembly, or a URL; empty when not stated).
+struct ExternalRef
+{
+  std::string name;
+  bool        loaded = false;
+  std::string location;
+};
 
 struct Source
 {
@@ -1296,10 +1399,12 @@ struct Source
   // STEP only:
   ProductProps    products;
   ValidationProps validation;
+  AssemblyRefs    assemblyRefs;
+  ProductProps    occurrences; // occurrence identification and quantity, by component label entry
   // Counts the file states for validation; -1 = not stated.
   int annotations = -1, views = -1;
-  // Files the assembly references (external references), and whether they were opened with it.
-  std::vector<std::pair<std::string, bool>> externalFiles;
+  // Files the assembly references (external references).
+  std::vector<ExternalRef> externalFiles;
 };
 
 // Files opened together with the main one: name and bytes (Uint8Array).
@@ -1318,9 +1423,55 @@ std::string baseName(const std::string& path)
   return slash == std::string::npos ? path : path.substr(slash + 1);
 }
 
+std::string lowerExtension(const std::string& fileName);
+Source      readDoc(std::string&                    bytes,
+                    const std::string&              fileName,
+                    const ExtraFiles&               extra,
+                    const Handle(TDocStd_Document)& doc,
+                    Progress&                       progress);
+
+// Formats other than STEP that readDoc reads, for parts a STEP assembly keeps in such files.
+bool isOtherPartFormat(const std::string& fileName)
+{
+  static const std::set<std::string> kExts = {".jt", ".igs", ".iges", ".stl", ".brep", ".brp", ".obj", ".wrl", ".vrml"};
+  return kExts.count(lowerExtension(fileName)) > 0;
+}
+
+// ExtRef RP 5.2.1.2: a document on paper (or other media), not a file.
+bool isPhysical(const Interface_Graph& graph, const Handle(StepBasic_DocumentFile)& file)
+{
+  if (file.IsNull())
+    return false;
+  for (Interface_EntityIterator it = graph.Sharings(file); it.More(); it.Next())
+    if (const auto type = Handle(StepBasic_DocumentRepresentationType)::DownCast(it.Value());
+        !type.IsNull() && lowercase(stepText(type->Name())) == "physical")
+      return true;
+  return false;
+}
+
+// ExtRef RP 5.2.3: the path in a referenced file's 'external document id and location'
+// (external_source), unless it is only the name.
+std::string fileLocation(const Interface_Graph& graph, const Handle(StepBasic_DocumentFile)& file, const std::string& name)
+{
+  if (file.IsNull())
+    return {};
+  for (Interface_EntityIterator it = graph.Sharings(file); it.More(); it.Next())
+  {
+    const auto aeia = Handle(StepAP214_AppliedExternalIdentificationAssignment)::DownCast(it.Value());
+    const auto id   = aeia.IsNull() || aeia->Source().IsNull()
+                        ? Handle(StepData_SelectNamed)()
+                        : Handle(StepData_SelectNamed)::DownCast(aeia->Source()->SourceId().Value());
+    if (!id.IsNull() && id->Kind() == 6 && id->String() && *id->String() && baseName(id->String()) != name)
+      return id->String();
+  }
+  return {};
+}
+
 // Puts the files a STEP assembly references where OCCT looks for them (relative to the main
-// file), from those opened with it, matched by name without folders or case. All of them also go
+// file), from those opened with it, matched by name without folders or case. All STEP ones also go
 // next to the main file, for references from referenced files. Removed when done.
+// Parts in other formats readDoc reads (JT, IGES, ...) are not for OCCT: insertOtherParts reads
+// them after the transfer and puts them into their parts.
 class ExternalFiles
 {
 public:
@@ -1329,7 +1480,8 @@ public:
   ExternalFiles(STEPCAFControl_Reader& reader, const std::string& mainPath, const ExtraFiles& extra)
   {
     for (const auto& [name, bytes] : extra)
-      write(kDir + baseName(name), bytes);
+      if (!isOtherPartFormat(name))
+        write(kDir + baseName(name), bytes);
 
     OSD_Path main(mainPath.c_str());
     main.SetName("");
@@ -1338,18 +1490,30 @@ public:
     main.SystemName(dir);
     STEPConstruct_ExternRefs refs(reader.ChangeReader().WS());
     refs.LoadExternRefs();
+    const Interface_Graph& graph = reader.ChangeReader().WS()->Graph();
     for (int i = 1; i <= refs.NbExternRefs(); ++i)
     {
-      // As OCCT: STEP documents only, by a path relative to the main file.
-      const std::string format = lowercase(stepText(refs.Format(i)));
-      const char*       file   = refs.FileName(i);
-      if ((!format.empty() && format != "step ap203" && format != "step ap214") || !file || !*file)
+      // As OCCT: STEP documents, by a path relative to the main file; and parts in other formats.
+      // Without a format, a name with an extension of neither (a PDF, a native CAD file) is not a
+      // part file either.
+      const char* file = refs.FileName(i);
+      if (!file || !*file || isPhysical(graph, refs.DocFile(i)))
         continue;
-      const std::string name = baseName(file);
-      if (std::any_of(myRefs.begin(), myRefs.end(), [&](const auto& r) { return r.first == name; }))
+      const std::string name  = baseName(file);
+      const std::string ext   = lowerExtension(name);
+      const bool        other = isOtherPartFormat(name);
+      const auto        fmt   = refs.Format(i);
+      if (!other && (!STEPCAFControl_Reader::IsStepExternFormat(fmt)
+                     || ((fmt.IsNull() || fmt->IsEmpty()) && !ext.empty() && ext != ".stp" && ext != ".step" && ext != ".p21")))
         continue;
       const auto match = std::find_if(extra.begin(), extra.end(), [&](const auto& e) { return lowercase(baseName(e.first)) == lowercase(name); });
-      myRefs.emplace_back(name, match != extra.end());
+      if (other && !refs.ProdDef(i).IsNull())
+        myOthers.push_back({refs.ProdDef(i), name, match != extra.end() ? &match->second : nullptr});
+      if (std::any_of(myRefs.begin(), myRefs.end(), [&](const auto& r) { return r.name == name; }))
+        continue;
+      myRefs.push_back({name, match != extra.end(), fileLocation(graph, refs.DocFile(i), name)});
+      if (other)
+        continue;
       TCollection_AsciiString path = OSD_Path::AbsolutePath(dir, file);
       if (match != extra.end() && path.Length() > 0 && path.ToCString() != kDir + baseName(match->first))
         write(path.ToCString(), match->second);
@@ -1363,9 +1527,46 @@ public:
   ExternalFiles(const ExternalFiles&)            = delete;
   ExternalFiles& operator=(const ExternalFiles&) = delete;
 
-  const std::vector<std::pair<std::string, bool>>& references() const { return myRefs; }
+  const std::vector<ExternalRef>& references() const { return myRefs; }
+
+  // Reads the parts in other formats into their (empty) parts of the transferred document: the
+  // file's shapes become components of the part, with their names and colours.
+  void insertOtherParts(STEPCAFControl_Reader& reader, const Handle(TDocStd_Document)& doc, Progress& progress) const
+  {
+    const Handle(Transfer_TransientProcess)& tp = reader.ChangeReader().WS()->TransferReader()->TransientProcess();
+    const auto& labels = reader.GetShapeLabelMap();
+    std::map<std::string, Handle(TDocStd_Document)> read; // by name: a file used by several parts is read once
+    for (const OtherPart& part : myOthers)
+    {
+      const int    index = part.bytes ? tp->MapIndex(part.pd) : 0;
+      TopoDS_Shape shape = index > 0 ? TransferBRep::ShapeResult(tp->MapItem(index)) : TopoDS_Shape();
+      shape.Location(TopLoc_Location());
+      if (shape.IsNull() || !labels.IsBound(shape))
+        continue;
+      Handle(TDocStd_Document)& from = read[lowercase(part.name)];
+      if (from.IsNull())
+      {
+        XCAFApp_Application::GetApplication()->NewDocument("BinXCAF", from);
+        std::string bytes((*part.bytes)["length"].as<size_t>(), '\0');
+        val(emscripten::typed_memory_view(bytes.size(), bytes.data())).call<void>("set", *part.bytes);
+        readDoc(bytes, part.name, {}, from, progress); // a file that cannot be read fails the whole model, as when opened alone
+      }
+      NCollection_Sequence<TDF_Label> roots;
+      XCAFDoc_DocumentTool::ShapeTool(from->Main())->GetFreeShapes(roots);
+      XCAFDoc_Editor::Extract(roots, labels.Find(shape));
+    }
+    for (auto& [name, from] : read)
+      XCAFApp_Application::GetApplication()->Close(from);
+  }
 
 private:
+  struct OtherPart
+  {
+    Handle(StepBasic_ProductDefinition) pd;
+    std::string                         name;
+    const val*                          bytes; // null: not opened with the assembly
+  };
+
   void write(const std::string& path, const val& bytes)
   {
     for (size_t slash = path.find('/', 1); slash != std::string::npos; slash = path.find('/', slash + 1))
@@ -1377,7 +1578,8 @@ private:
   }
 
   std::vector<std::string>                  myWritten;
-  std::vector<std::pair<std::string, bool>> myRefs;
+  std::vector<ExternalRef>                  myRefs;
+  std::vector<OtherPart>                    myOthers;
 };
 
 // OCCT's IGES and mesh readers and TKJT need a real file: MEMFS.
@@ -1479,6 +1681,58 @@ std::string pdEntry(STEPCAFControl_Reader& reader, const Handle(StepBasic_Produc
   TCollection_AsciiString entry;
   TDF_Tool::Entry(*label, entry);
   return entry.ToCString();
+}
+
+// What identifies each component occurrence (PDM UG 4.1.1.2: id, name, which may hold the item find
+// number, description, reference designator) and its quantity (4.1.2), by component label entry.
+// And, as product data of the assembly, the usages that cannot be placed: promissory ones (4.1.4:
+// somewhere below, the structure in between not given) and ones without a placement.
+void readUsages(STEPCAFControl_Reader& reader, const Handle(TDocStd_Document)& doc, ProductProps& props, ProductProps& occurrences)
+{
+  const Handle(XSControl_WorkSession)    ws    = reader.ChangeReader().WS();
+  const Handle(Interface_InterfaceModel) model = ws->Model();
+  const STEPConstruct_Tool               tool(ws);
+  const Handle(XCAFDoc_ShapeTool)        shapes = XCAFDoc_DocumentTool::ShapeTool(doc->Main());
+  for (int i = 1; i <= model->NbEntities(); ++i)
+  {
+    const auto nauo       = Handle(StepRepr_NextAssemblyUsageOccurrence)::DownCast(model->Value(i));
+    const auto promissory = Handle(StepRepr_PromissoryUsageOccurrence)::DownCast(model->Value(i));
+    const Handle(StepRepr_AssemblyComponentUsage) usage = nauo.IsNull() ? Handle(StepRepr_AssemblyComponentUsage)(promissory) : nauo;
+    // Usages between parts in other files are references for navigating there (ExtRef RP 7.4.1)
+    const Handle(StepBasic_ProductDefinition) parent = usage.IsNull() ? nullptr : usage->RelatingProductDefinition();
+    const Handle(StepBasic_ProductDefinition) child  = usage.IsNull() ? nullptr : usage->RelatedProductDefinition();
+    if (parent.IsNull() || child.IsNull() || parent->IsKind(STANDARD_TYPE(StepBasic_ProductDefinitionReferenceWithLocalRepresentation)))
+      continue;
+    std::string quantity;
+    if (const auto quantified = Handle(StepRepr_QuantifiedNextAssemblyUsageOccurrence)::DownCast(usage))
+      if (const auto measure = Handle(StepBasic_MeasureWithUnit)::DownCast(quantified->Quantity()); !measure.IsNull())
+      {
+        std::ostringstream q;
+        q << measure->ValueComponent();
+        quantity = q.str();
+      }
+    if (!nauo.IsNull())
+      if (const TDF_Label instance = STEPCAFControl_Reader::FindInstance(nauo, shapes, tool, reader.GetShapeLabelMap()); !instance.IsNull())
+      {
+        Props& rows = occurrences[entryOf(instance)];
+        for (const auto& [label, value] : {std::pair<const char*, Handle(TCollection_HAsciiString)>{"Id", nauo->Id()},
+                                           {"Name", nauo->Name()},
+                                           {"Description", nauo->HasDescription() ? nauo->Description() : nullptr},
+                                           {"Reference designator", nauo->HasReferenceDesignator() ? nauo->ReferenceDesignator() : nullptr}})
+          if (const std::string text = stepText(value); !text.empty())
+            rows.emplace_back(label, text);
+        if (!quantity.empty())
+          rows.emplace_back("Quantity", quantity);
+        continue;
+      }
+    const auto  product = child->Formation().IsNull() ? nullptr : child->Formation()->OfProduct();
+    std::string name    = product.IsNull() ? stepText(child->Id()) : stepText(product->Name());
+    if (name.empty() && !product.IsNull())
+      name = stepText(product->Id());
+    const std::string entry = pdEntry(reader, parent);
+    if (!entry.empty())
+      props[entry].emplace_back(nauo.IsNull() ? "Somewhere below" : "Not placed", quantity.empty() ? name : name + " × " + quantity);
+  }
 }
 
 // Configuration management data of each product (ISO 10303-203 part, version and their approvals,
@@ -1772,15 +2026,20 @@ Source readStepDoc(std::string&                    bytes,
   if (!reader.Transfer(doc))
   {
     std::string missing;
-    for (const auto& [name, loaded] : src.externalFiles)
-      if (!loaded)
-        missing += (missing.empty() ? "" : ", ") + name;
+    for (const ExternalRef& ref : src.externalFiles)
+      if (!ref.loaded)
+        missing += (missing.empty() ? "" : ", ") + ref.name;
     throw std::runtime_error(missing.empty() ? "STEP transfer failed"
                                              : "This assembly is in other files too. Open them together with it: " + missing);
   }
+  external.insertOtherParts(reader, doc, progress);
   progress.mark("transferred");
   src.products   = readProductProps(reader);
+  readUsages(reader, doc, src.products, src.occurrences);
   src.validation = readValidationProps(reader);
+  using GDTAssemblyRefs = std::decay_t<decltype(reader.GetGDTAssemblyReferences())>;
+  for (GDTAssemblyRefs::Iterator it(reader.GetGDTAssemblyReferences()); it.More(); it.Next())
+    src.assemblyRefs[entryOf(it.Key())] = {it.Value().begin(), it.Value().end()};
   readValidationCounts(reader.ChangeReader().Model(), src);
   return src;
 }
@@ -2011,6 +2270,12 @@ std::string toJson(const Source& src, const Builder& b)
     const auto& c = b.colors()[i];
     o << (i ? "," : "") << '[' << c[0] << ',' << c[1] << ',' << c[2] << ',' << c[3] << ']';
   }
+  auto pairs = [&o](const Props& props) {
+    o << '[';
+    for (size_t k = 0; k < props.size(); ++k)
+      o << (k ? "," : "") << "[\"" << jsonEscape(props[k].first) << "\",\"" << jsonEscape(props[k].second) << "\"]";
+    o << ']';
+  };
   o << "],\"nodes\":[";
   for (size_t i = 0; i < b.nodes().size(); ++i)
   {
@@ -2021,6 +2286,16 @@ std::string toJson(const Source& src, const Builder& b)
       o << ",\"product\":" << n.product;
     if (n.hidden)
       o << ",\"hidden\":true";
+    if (!n.occurrence.empty())
+    {
+      o << ",\"occurrence\":";
+      pairs(n.occurrence);
+    }
+    if (!n.attributes.empty())
+    {
+      o << ",\"attributes\":";
+      pairs(n.attributes);
+    }
     if (n.hasMatrix)
     {
       o << ",\"matrix\":[";
@@ -2080,6 +2355,21 @@ std::string toJson(const Source& src, const Builder& b)
     for (size_t k = 0; k < p.faces.size(); ++k)
       o << (k ? "," : "") << p.faces[k];
     o << ']';
+    if (!p.nodes.empty())
+    {
+      o << ",\"nodes\":[";
+      for (size_t k = 0; k < p.nodes.size(); ++k)
+        o << (k ? "," : "") << p.nodes[k];
+      o << "],\"nodeFaces\":[";
+      for (size_t k = 0; k < p.nodeFaces.size(); ++k)
+      {
+        o << (k ? "," : "") << '[' << p.nodeFaces[k].first;
+        for (int f : p.nodeFaces[k].second)
+          o << ',' << f;
+        o << ']';
+      }
+      o << ']';
+    }
     numbers("value", p.value);
     numbers("plusMinus", p.plusMinus);
     numbers("range", p.range);
@@ -2110,12 +2400,6 @@ std::string toJson(const Source& src, const Builder& b)
     o << "]}";
   }
   o << "],\"products\":[";
-  auto pairs = [&o](const Props& props) {
-    o << '[';
-    for (size_t k = 0; k < props.size(); ++k)
-      o << (k ? "," : "") << "[\"" << jsonEscape(props[k].first) << "\",\"" << jsonEscape(props[k].second) << "\"]";
-    o << ']';
-  };
   for (size_t i = 0; i < b.products().size(); ++i)
   {
     const Product& p = b.products()[i];
@@ -2141,8 +2425,13 @@ std::string toJson(const Source& src, const Builder& b)
   {
     o << ",\"externalFiles\":[";
     for (size_t i = 0; i < src.externalFiles.size(); ++i)
-      o << (i ? "," : "") << "{\"name\":\"" << jsonEscape(src.externalFiles[i].first)
-        << "\",\"loaded\":" << (src.externalFiles[i].second ? "true" : "false") << '}';
+    {
+      const ExternalRef& ref = src.externalFiles[i];
+      o << (i ? "," : "") << "{\"name\":\"" << jsonEscape(ref.name) << "\",\"loaded\":" << (ref.loaded ? "true" : "false");
+      if (!ref.location.empty())
+        o << ",\"location\":\"" << jsonEscape(ref.location) << '"';
+      o << '}';
+    }
     o << ']';
   }
   o << '}';
@@ -2194,7 +2483,7 @@ val readModel(val jsBytes, const std::string& fileName, val jsOptions, val onPro
     std::string().swap(bytes); // the other readers are done with it too
 
     Builder builder(doc, opts, progress);
-    builder.build(src.jtPmi, src.products, src.validation);
+    builder.build(src.jtPmi, src.products, src.validation, src.assemblyRefs, src.occurrences);
     progress.mark("built");
 
     result.set("json", toJson(src, builder));

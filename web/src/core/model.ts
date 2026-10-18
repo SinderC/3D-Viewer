@@ -9,7 +9,17 @@ export interface RawModel {
   schema: string; // STEP only
   fileUnit: string;
   colors: [number, number, number, number][];
-  nodes: { name: string; parent: number; proto: number; color: number; product?: number; hidden?: boolean; matrix?: number[] }[];
+  nodes: {
+    name: string;
+    parent: number;
+    proto: number;
+    color: number;
+    product?: number;
+    hidden?: boolean;
+    matrix?: number[];
+    attributes?: [string, string][];
+    occurrence?: [string, string][];
+  }[];
   protos: {
     positions: Range;
     normals: Range;
@@ -32,6 +42,8 @@ export interface RawModel {
 export interface ExternalFile {
   name: string;
   loaded: boolean;
+  /** Where the assembly says the file is: a folder relative to it, or a URL. */
+  location?: string;
 }
 
 /** What a file says about a part or assembly beyond its shape. Lengths in mm. */
@@ -68,6 +80,10 @@ export interface PmiItem {
   triangles: Float32Array;
   /** Referenced faces of the owning prototype (indices into its faceStarts). */
   faces: number[];
+  /** Assembly PMI: the nodes it is drawn in (instances of the assembly it is defined in), instead of `proto`. */
+  nodes?: number[];
+  /** Assembly PMI: referenced faces per component instance, as [node, ...faces of the node's prototype]. */
+  nodeFaces?: number[][];
   value?: [number];
   plusMinus?: [lower: number, upper: number];
   range?: [lower: number, upper: number];
@@ -124,6 +140,11 @@ export interface ModelNode {
   /** Hidden in the file (STEP invisibility or a hidden layer): starts hidden. */
   hidden?: boolean;
   matrix?: number[];
+  /** User-defined attributes of this occurrence, not of its part (see Product.attributes). */
+  attributes?: [string, string][];
+  /** What identifies this occurrence in its assembly (STEP NAUO id, name, description, reference
+   * designator), and for a quantified usage how many occurrences of the part it stands for. */
+  occurrence?: [string, string][];
 }
 
 export interface Model {

@@ -1,0 +1,2513 @@
+Changes to OCCT (V8_0_1) for the Open CAD Viewer. Applied by wasm/scripts/build-occt.sh.
+
+- STEP AP242 external element references and assembly instance paths (CAx-IF External (Element)
+  References 3.1, section 7; PMI 4.1, section 9.3.4; User Defined Attributes 1.8, section 6.2):
+  - Read MULTI_LEVEL_REFERENCE_DESIGNATOR (830), COMPONENT_PATH_SHAPE_ASPECT (831),
+    EXTERNALLY_DEFINED_REPRESENTATION_ITEM (832), EXTERNALLY_DEFINED_ITEM_WITH_MULTIPLE_REFERENCES
+    (833) and SHAPE_REPRESENTATION_REFERENCE (834) with new classes, and register the existing
+    StepBasic_ProductDefinitionReference (828) and ..WithLocalRepresentation (829) classes, which
+    had read/write tools but were never recognised: an assembly whose externally defined part is a
+    PRODUCT_DEFINITION_REFERENCE_WITH_LOCAL_REPRESENTATION lost that part.
+  - EXTERNALLY_DEFINED_REPRESENTATION was read as a plain representation (3 parameters) and failed
+    on its 5; it now reads, writes and keeps item_id and source.
+  - Assembly PMI: a GD&T object (or a presentation) whose shape aspect is a
+    component_path_shape_aspect references the faces of the component's shape aspect, in this
+    file or, through an EXTERNAL_ANCHOR in the header of the component's file, in another. Usages
+    whose parent is a part in another file are resolved there by reference designator. The
+    instance each reference is on is kept: STEPCAFControl_Reader::GetGDTAssemblyReferences (the
+    assembly, the component labels down to the instance, the sub-shape labels).
+  - User-defined attributes on a multi_level_reference_designator go on the SHUO of the instance.
+
+diff --git a/src/DataExchange/TKDESTEP/RWStepAP214/RWStepAP214_GeneralModule.cxx b/src/DataExchange/TKDESTEP/RWStepAP214/RWStepAP214_GeneralModule.cxx
+index 0a7c1e69..9dc6864f 100644
+--- a/src/DataExchange/TKDESTEP/RWStepAP214/RWStepAP214_GeneralModule.cxx
++++ b/src/DataExchange/TKDESTEP/RWStepAP214/RWStepAP214_GeneralModule.cxx
+@@ -338,6 +338,20 @@
+ #include "../RWStepRepr/RWStepRepr_RWRepresentation.pxx"
+ #include "../RWStepRepr/RWStepRepr_RWRepresentationContextReference.pxx"
+ #include "../RWStepRepr/RWStepRepr_RWRepresentationReference.pxx"
++#include "../RWStepBasic/RWStepBasic_RWProductDefinitionReference.pxx"
++#include <StepBasic_ProductDefinitionReference.hxx>
++#include "../RWStepBasic/RWStepBasic_RWProductDefinitionReferenceWithLocalRepresentation.pxx"
++#include <StepBasic_ProductDefinitionReferenceWithLocalRepresentation.hxx>
++#include "../RWStepRepr/RWStepRepr_RWMultiLevelReferenceDesignator.pxx"
++#include <StepRepr_MultiLevelReferenceDesignator.hxx>
++#include "../RWStepRepr/RWStepRepr_RWComponentPathShapeAspect.pxx"
++#include <StepRepr_ComponentPathShapeAspect.hxx>
++#include "../RWStepRepr/RWStepRepr_RWExternallyDefinedRepresentationItem.pxx"
++#include <StepRepr_ExternallyDefinedRepresentationItem.hxx>
++#include "../RWStepBasic/RWStepBasic_RWExternallyDefinedItemWithMultipleReferences.pxx"
++#include <StepBasic_ExternallyDefinedItemWithMultipleReferences.hxx>
++#include <StepRepr_ShapeRepresentationReference.hxx>
++#include "../RWStepRepr/RWStepRepr_RWExternallyDefinedRepresentation.pxx"
+ #include "../RWStepRepr/RWStepRepr_RWRepresentationMap.pxx"
+ #include "../RWStepRepr/RWStepRepr_RWRepresentationRelationship.pxx"
+ #include "../RWStepRepr/RWStepRepr_RWRepresentationRelationshipWithTransformation.pxx"
+@@ -3074,7 +3088,7 @@ void RWStepAP214_GeneralModule::FillSharedCase(const int
+     break;
+     case 386: {
+       DeclareAndCast(StepRepr_ExternallyDefinedRepresentation, anent, ent);
+-      RWStepRepr_RWRepresentation tool;
++      RWStepRepr_RWExternallyDefinedRepresentation tool;
+       tool.Share(anent, iter);
+     }
+     break;
+@@ -5296,6 +5310,48 @@ void RWStepAP214_GeneralModule::FillSharedCase(const int
+       aTool.Share(anEnt, iter);
+     }
+     break;
++    case 828: {
++      DeclareAndCast(StepBasic_ProductDefinitionReference, anEnt, ent);
++      RWStepBasic_RWProductDefinitionReference aTool;
++      aTool.Share(anEnt, iter);
++    }
++    break;
++    case 829: {
++      DeclareAndCast(StepBasic_ProductDefinitionReferenceWithLocalRepresentation, anEnt, ent);
++      RWStepBasic_RWProductDefinitionReferenceWithLocalRepresentation aTool;
++      aTool.Share(anEnt, iter);
++    }
++    break;
++    case 830: {
++      DeclareAndCast(StepRepr_MultiLevelReferenceDesignator, anEnt, ent);
++      RWStepRepr_RWMultiLevelReferenceDesignator aTool;
++      aTool.Share(anEnt, iter);
++    }
++    break;
++    case 831: {
++      DeclareAndCast(StepRepr_ComponentPathShapeAspect, anEnt, ent);
++      RWStepRepr_RWComponentPathShapeAspect aTool;
++      aTool.Share(anEnt, iter);
++    }
++    break;
++    case 832: {
++      DeclareAndCast(StepRepr_ExternallyDefinedRepresentationItem, anEnt, ent);
++      RWStepRepr_RWExternallyDefinedRepresentationItem aTool;
++      aTool.Share(anEnt, iter);
++    }
++    break;
++    case 833: {
++      DeclareAndCast(StepBasic_ExternallyDefinedItemWithMultipleReferences, anEnt, ent);
++      RWStepBasic_RWExternallyDefinedItemWithMultipleReferences aTool;
++      aTool.Share(anEnt, iter);
++    }
++    break;
++    case 834: {
++      DeclareAndCast(StepRepr_ShapeRepresentationReference, anEnt, ent);
++      RWStepRepr_RWRepresentationReference aTool;
++      aTool.Share(anEnt, iter);
++    }
++    break;
+     case 825: {
+       DeclareAndCast(StepVisual_SurfaceStyleReflectanceAmbientDiffuse, anEnt, ent);
+       RWStepVisual_RWSurfaceStyleReflectanceAmbientDiffuse aTool;
+@@ -7616,6 +7672,27 @@ bool RWStepAP214_GeneralModule::NewVoid(const int CN, occ::handle<Standard_Trans
+     case 824:
+       ent = new StepRepr_MechanicalDesignAndDraughtingRelationship;
+       break;
++    case 828:
++      ent = new StepBasic_ProductDefinitionReference;
++      break;
++    case 829:
++      ent = new StepBasic_ProductDefinitionReferenceWithLocalRepresentation;
++      break;
++    case 830:
++      ent = new StepRepr_MultiLevelReferenceDesignator;
++      break;
++    case 831:
++      ent = new StepRepr_ComponentPathShapeAspect;
++      break;
++    case 832:
++      ent = new StepRepr_ExternallyDefinedRepresentationItem;
++      break;
++    case 833:
++      ent = new StepBasic_ExternallyDefinedItemWithMultipleReferences;
++      break;
++    case 834:
++      ent = new StepRepr_ShapeRepresentationReference;
++      break;
+     case 825:
+       ent = new StepVisual_SurfaceStyleReflectanceAmbientDiffuse;
+       break;
+@@ -8371,6 +8448,16 @@ int RWStepAP214_GeneralModule::CategoryNumber(const int CN,
+       return cataux;
+     case 725:
+       return cataux;
++    case 828:
++    case 829:
++    case 830:
++      return catstr;
++    case 831:
++      return catsh;
++    case 832:
++    case 833:
++    case 834:
++      return cataux;
+     case 726:
+       return cataux;
+     case 727:
+diff --git a/src/DataExchange/TKDESTEP/RWStepAP214/RWStepAP214_ReadWriteModule.cxx b/src/DataExchange/TKDESTEP/RWStepAP214/RWStepAP214_ReadWriteModule.cxx
+index bcbe7fea..8cc315ad 100644
+--- a/src/DataExchange/TKDESTEP/RWStepAP214/RWStepAP214_ReadWriteModule.cxx
++++ b/src/DataExchange/TKDESTEP/RWStepAP214/RWStepAP214_ReadWriteModule.cxx
+@@ -1616,6 +1616,20 @@ IMPLEMENT_STANDARD_RTTIEXT(RWStepAP214_ReadWriteModule, StepData_ReadWriteModule
+ #include <StepKinematics_UniversalPairWithRange.hxx>
+ #include <StepRepr_RepresentationContextReference.hxx>
+ #include <StepRepr_RepresentationReference.hxx>
++#include "../RWStepBasic/RWStepBasic_RWProductDefinitionReference.pxx"
++#include <StepBasic_ProductDefinitionReference.hxx>
++#include "../RWStepBasic/RWStepBasic_RWProductDefinitionReferenceWithLocalRepresentation.pxx"
++#include <StepBasic_ProductDefinitionReferenceWithLocalRepresentation.hxx>
++#include "../RWStepRepr/RWStepRepr_RWMultiLevelReferenceDesignator.pxx"
++#include <StepRepr_MultiLevelReferenceDesignator.hxx>
++#include "../RWStepRepr/RWStepRepr_RWComponentPathShapeAspect.pxx"
++#include <StepRepr_ComponentPathShapeAspect.hxx>
++#include "../RWStepRepr/RWStepRepr_RWExternallyDefinedRepresentationItem.pxx"
++#include <StepRepr_ExternallyDefinedRepresentationItem.hxx>
++#include "../RWStepBasic/RWStepBasic_RWExternallyDefinedItemWithMultipleReferences.pxx"
++#include <StepBasic_ExternallyDefinedItemWithMultipleReferences.hxx>
++#include <StepRepr_ShapeRepresentationReference.hxx>
++#include "../RWStepRepr/RWStepRepr_RWExternallyDefinedRepresentation.pxx"
+ 
+ #include <NCollection_IncAllocator.hxx>
+ 
+@@ -2415,6 +2429,14 @@ static constexpr std::string_view Reco_SurfaceStyleRenderingWithProperties(
+ static constexpr std::string_view Reco_RepresentationContextReference(
+   "REPRESENTATION_CONTEXT_REFERENCE");
+ static constexpr std::string_view Reco_RepresentationReference("REPRESENTATION_REFERENCE");
++// AP242 external element references and assembly instance paths
++static constexpr std::string_view Reco_ProductDefinitionReference("PRODUCT_DEFINITION_REFERENCE");
++static constexpr std::string_view Reco_ProductDefinitionReferenceWithLocalRepresentation("PRODUCT_DEFINITION_REFERENCE_WITH_LOCAL_REPRESENTATION");
++static constexpr std::string_view Reco_MultiLevelReferenceDesignator("MULTI_LEVEL_REFERENCE_DESIGNATOR");
++static constexpr std::string_view Reco_ComponentPathShapeAspect("COMPONENT_PATH_SHAPE_ASPECT");
++static constexpr std::string_view Reco_ExternallyDefinedRepresentationItem("EXTERNALLY_DEFINED_REPRESENTATION_ITEM");
++static constexpr std::string_view Reco_ExternallyDefinedItemWithMultipleReferences("EXTERNALLY_DEFINED_ITEM_WITH_MULTIPLE_REFERENCES");
++static constexpr std::string_view Reco_ShapeRepresentationReference("SHAPE_REPRESENTATION_REFERENCE");
+ static constexpr std::string_view Reco_SuParameters("SU_PARAMETERS");
+ static constexpr std::string_view Reco_RotationAboutDirection("ROTATION_ABOUT_DIRECTION");
+ static constexpr std::string_view Reco_KinematicJoint("KINEMATIC_JOINT");
+@@ -3768,6 +3790,13 @@ static void initializeTypenums(StringViewDataMap& theTypenums)
+   theTypenums.Bind(Reco_BooleanRepresentationItem, 822);
+   theTypenums.Bind(Reco_RealRepresentationItem, 823);
+   theTypenums.Bind(Reco_MechanicalDesignAndDraughtingRelationship, 824);
++  theTypenums.Bind(Reco_ProductDefinitionReference, 828);
++  theTypenums.Bind(Reco_ProductDefinitionReferenceWithLocalRepresentation, 829);
++  theTypenums.Bind(Reco_MultiLevelReferenceDesignator, 830);
++  theTypenums.Bind(Reco_ComponentPathShapeAspect, 831);
++  theTypenums.Bind(Reco_ExternallyDefinedRepresentationItem, 832);
++  theTypenums.Bind(Reco_ExternallyDefinedItemWithMultipleReferences, 833);
++  theTypenums.Bind(Reco_ShapeRepresentationReference, 834);
+ }
+ 
+ // Initialize theTypeshor map
+@@ -6445,6 +6474,20 @@ const std::string_view& RWStepAP214_ReadWriteModule::StepType(const int CN) cons
+       return Reco_RealRepresentationItem;
+     case 824:
+       return Reco_MechanicalDesignAndDraughtingRelationship;
++    case 828:
++      return Reco_ProductDefinitionReference;
++    case 829:
++      return Reco_ProductDefinitionReferenceWithLocalRepresentation;
++    case 830:
++      return Reco_MultiLevelReferenceDesignator;
++    case 831:
++      return Reco_ComponentPathShapeAspect;
++    case 832:
++      return Reco_ExternallyDefinedRepresentationItem;
++    case 833:
++      return Reco_ExternallyDefinedItemWithMultipleReferences;
++    case 834:
++      return Reco_ShapeRepresentationReference;
+     default:
+       return PasReco;
+   }
+@@ -9065,7 +9108,7 @@ void RWStepAP214_ReadWriteModule::ReadStep(const int
+     break;
+     case 386: {
+       DeclareAndCast(StepRepr_ExternallyDefinedRepresentation, anent, ent);
+-      RWStepRepr_RWRepresentation tool;
++      RWStepRepr_RWExternallyDefinedRepresentation tool;
+       tool.ReadStep(data, num, ach, anent);
+     }
+     break;
+@@ -11404,6 +11447,48 @@ void RWStepAP214_ReadWriteModule::ReadStep(const int
+       aTool.ReadStep(data, num, ach, anent);
+     }
+     break;
++    case 828: {
++      DeclareAndCast(StepBasic_ProductDefinitionReference, anent, ent);
++      RWStepBasic_RWProductDefinitionReference aTool;
++      aTool.ReadStep(data, num, ach, anent);
++    }
++    break;
++    case 829: {
++      DeclareAndCast(StepBasic_ProductDefinitionReferenceWithLocalRepresentation, anent, ent);
++      RWStepBasic_RWProductDefinitionReferenceWithLocalRepresentation aTool;
++      aTool.ReadStep(data, num, ach, anent);
++    }
++    break;
++    case 830: {
++      DeclareAndCast(StepRepr_MultiLevelReferenceDesignator, anent, ent);
++      RWStepRepr_RWMultiLevelReferenceDesignator aTool;
++      aTool.ReadStep(data, num, ach, anent);
++    }
++    break;
++    case 831: {
++      DeclareAndCast(StepRepr_ComponentPathShapeAspect, anent, ent);
++      RWStepRepr_RWComponentPathShapeAspect aTool;
++      aTool.ReadStep(data, num, ach, anent);
++    }
++    break;
++    case 832: {
++      DeclareAndCast(StepRepr_ExternallyDefinedRepresentationItem, anent, ent);
++      RWStepRepr_RWExternallyDefinedRepresentationItem aTool;
++      aTool.ReadStep(data, num, ach, anent);
++    }
++    break;
++    case 833: {
++      DeclareAndCast(StepBasic_ExternallyDefinedItemWithMultipleReferences, anent, ent);
++      RWStepBasic_RWExternallyDefinedItemWithMultipleReferences aTool;
++      aTool.ReadStep(data, num, ach, anent);
++    }
++    break;
++    case 834: {
++      DeclareAndCast(StepRepr_ShapeRepresentationReference, anent, ent);
++      RWStepRepr_RWRepresentationReference aTool;
++      aTool.ReadStep(data, num, ach, anent);
++    }
++    break;
+     case 825: {
+       DeclareAndCast(StepVisual_SurfaceStyleReflectanceAmbientDiffuse, anent, ent);
+       RWStepVisual_RWSurfaceStyleReflectanceAmbientDiffuse aTool;
+@@ -13973,7 +14058,7 @@ void RWStepAP214_ReadWriteModule::WriteStep(const int
+     break;
+     case 386: {
+       DeclareAndCast(StepRepr_ExternallyDefinedRepresentation, anent, ent);
+-      RWStepRepr_RWRepresentation tool;
++      RWStepRepr_RWExternallyDefinedRepresentation tool;
+       tool.WriteStep(SW, anent);
+     }
+     break;
+@@ -16314,6 +16399,48 @@ void RWStepAP214_ReadWriteModule::WriteStep(const int
+       aTool.WriteStep(SW, anent);
+     }
+     break;
++    case 828: {
++      DeclareAndCast(StepBasic_ProductDefinitionReference, anent, ent);
++      RWStepBasic_RWProductDefinitionReference aTool;
++      aTool.WriteStep(SW, anent);
++    }
++    break;
++    case 829: {
++      DeclareAndCast(StepBasic_ProductDefinitionReferenceWithLocalRepresentation, anent, ent);
++      RWStepBasic_RWProductDefinitionReferenceWithLocalRepresentation aTool;
++      aTool.WriteStep(SW, anent);
++    }
++    break;
++    case 830: {
++      DeclareAndCast(StepRepr_MultiLevelReferenceDesignator, anent, ent);
++      RWStepRepr_RWMultiLevelReferenceDesignator aTool;
++      aTool.WriteStep(SW, anent);
++    }
++    break;
++    case 831: {
++      DeclareAndCast(StepRepr_ComponentPathShapeAspect, anent, ent);
++      RWStepRepr_RWComponentPathShapeAspect aTool;
++      aTool.WriteStep(SW, anent);
++    }
++    break;
++    case 832: {
++      DeclareAndCast(StepRepr_ExternallyDefinedRepresentationItem, anent, ent);
++      RWStepRepr_RWExternallyDefinedRepresentationItem aTool;
++      aTool.WriteStep(SW, anent);
++    }
++    break;
++    case 833: {
++      DeclareAndCast(StepBasic_ExternallyDefinedItemWithMultipleReferences, anent, ent);
++      RWStepBasic_RWExternallyDefinedItemWithMultipleReferences aTool;
++      aTool.WriteStep(SW, anent);
++    }
++    break;
++    case 834: {
++      DeclareAndCast(StepRepr_ShapeRepresentationReference, anent, ent);
++      RWStepRepr_RWRepresentationReference aTool;
++      aTool.WriteStep(SW, anent);
++    }
++    break;
+     default:
+       return;
+   }
+diff --git a/src/DataExchange/TKDESTEP/RWStepBasic/FILES.cmake b/src/DataExchange/TKDESTEP/RWStepBasic/FILES.cmake
+index 8d28be96..9b91e7a4 100644
+--- a/src/DataExchange/TKDESTEP/RWStepBasic/FILES.cmake
++++ b/src/DataExchange/TKDESTEP/RWStepBasic/FILES.cmake
+@@ -2,6 +2,8 @@
+ set(OCCT_RWStepBasic_FILES_LOCATION "${CMAKE_CURRENT_LIST_DIR}")
+ 
+ set(OCCT_RWStepBasic_FILES
++  RWStepBasic_RWExternallyDefinedItemWithMultipleReferences.cxx
++  RWStepBasic_RWExternallyDefinedItemWithMultipleReferences.pxx
+   RWStepBasic_RWAction.cxx
+   RWStepBasic_RWAction.pxx
+   RWStepBasic_RWActionAssignment.cxx
+diff --git a/src/DataExchange/TKDESTEP/RWStepBasic/RWStepBasic_RWExternallyDefinedItemWithMultipleReferences.cxx b/src/DataExchange/TKDESTEP/RWStepBasic/RWStepBasic_RWExternallyDefinedItemWithMultipleReferences.cxx
+new file mode 100644
+index 00000000..9caffd15
+--- /dev/null
++++ b/src/DataExchange/TKDESTEP/RWStepBasic/RWStepBasic_RWExternallyDefinedItemWithMultipleReferences.cxx
+@@ -0,0 +1,79 @@
++// This file is part of Open CASCADE Technology software library.
++//
++// This library is free software; you can redistribute it and/or modify it under
++// the terms of the GNU Lesser General Public License version 2.1 as published
++// by the Free Software Foundation, with special exception defined in the file
++// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
++// distribution for complete text of the license and disclaimer of any warranty.
++//
++// Alternatively, this file may be used under the terms of Open CASCADE
++// commercial license or contractual agreement.
++
++#include "RWStepBasic_RWExternallyDefinedItemWithMultipleReferences.pxx"
++#include <Interface_EntityIterator.hxx>
++#include <StepBasic_ExternallyDefinedItemWithMultipleReferences.hxx>
++#include <StepBasic_ExternalSource.hxx>
++#include <StepData_StepReaderData.hxx>
++#include <StepData_StepWriter.hxx>
++
++//=================================================================================================
++
++RWStepBasic_RWExternallyDefinedItemWithMultipleReferences::
++  RWStepBasic_RWExternallyDefinedItemWithMultipleReferences() = default;
++
++//=================================================================================================
++
++void RWStepBasic_RWExternallyDefinedItemWithMultipleReferences::ReadStep(
++  const occ::handle<StepData_StepReaderData>&                               theData,
++  const int                                                                 theNum,
++  occ::handle<Interface_Check>&                                             theCheck,
++  const occ::handle<StepBasic_ExternallyDefinedItemWithMultipleReferences>& theEnt) const
++{
++  if (!theData->CheckNbParams(theNum, 3, theCheck, "externally_defined_item_with_multiple_references"))
++  {
++    return;
++  }
++  StepBasic_SourceItem anItemId;
++  theData->ReadEntity(theNum, 1, "item_id", theCheck, anItemId);
++  occ::handle<StepBasic_ExternalSource> aSource;
++  theData->ReadEntity(theNum, 2, "source", theCheck, STANDARD_TYPE(StepBasic_ExternalSource), aSource);
++  occ::handle<NCollection_HArray1<StepBasic_SourceItem>> aReferences;
++  int aSub = 0;
++  if (theData->ReadSubList(theNum, 3, "references", theCheck, aSub))
++  {
++    const int aNb = theData->NbParams(aSub);
++    aReferences   = new NCollection_HArray1<StepBasic_SourceItem>(1, aNb);
++    for (int i = 1; i <= aNb; i++)
++    {
++      StepBasic_SourceItem aReference;
++      theData->ReadEntity(aSub, i, "source_item", theCheck, aReference);
++      aReferences->SetValue(i, aReference);
++    }
++  }
++  theEnt->Init(anItemId, aSource, aReferences);
++}
++
++//=================================================================================================
++
++void RWStepBasic_RWExternallyDefinedItemWithMultipleReferences::WriteStep(
++  StepData_StepWriter&                                                      theSW,
++  const occ::handle<StepBasic_ExternallyDefinedItemWithMultipleReferences>& theEnt) const
++{
++  theSW.Send(theEnt->ItemId().Value());
++  theSW.Send(theEnt->Source());
++  theSW.OpenSub();
++  for (int i = 1; !theEnt->References().IsNull() && i <= theEnt->References()->Length(); i++)
++  {
++    theSW.Send(theEnt->References()->Value(i).Value());
++  }
++  theSW.CloseSub();
++}
++
++//=================================================================================================
++
++void RWStepBasic_RWExternallyDefinedItemWithMultipleReferences::Share(
++  const occ::handle<StepBasic_ExternallyDefinedItemWithMultipleReferences>& theEnt,
++  Interface_EntityIterator&                                                 theIter) const
++{
++  theIter.AddItem(theEnt->Source());
++}
+diff --git a/src/DataExchange/TKDESTEP/RWStepBasic/RWStepBasic_RWExternallyDefinedItemWithMultipleReferences.pxx b/src/DataExchange/TKDESTEP/RWStepBasic/RWStepBasic_RWExternallyDefinedItemWithMultipleReferences.pxx
+new file mode 100644
+index 00000000..8a1424ca
+--- /dev/null
++++ b/src/DataExchange/TKDESTEP/RWStepBasic/RWStepBasic_RWExternallyDefinedItemWithMultipleReferences.pxx
+@@ -0,0 +1,45 @@
++// This file is part of Open CASCADE Technology software library.
++//
++// This library is free software; you can redistribute it and/or modify it under
++// the terms of the GNU Lesser General Public License version 2.1 as published
++// by the Free Software Foundation, with special exception defined in the file
++// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
++// distribution for complete text of the license and disclaimer of any warranty.
++//
++// Alternatively, this file may be used under the terms of Open CASCADE
++// commercial license or contractual agreement.
++
++#ifndef _RWStepBasic_RWExternallyDefinedItemWithMultipleReferences_HeaderFile
++#define _RWStepBasic_RWExternallyDefinedItemWithMultipleReferences_HeaderFile
++
++#include <Standard.hxx>
++#include <Standard_DefineAlloc.hxx>
++#include <Standard_Handle.hxx>
++
++class StepData_StepReaderData;
++class Interface_Check;
++class StepBasic_ExternallyDefinedItemWithMultipleReferences;
++class StepData_StepWriter;
++class Interface_EntityIterator;
++
++//! Read & Write tool for ExternallyDefinedItemWithMultipleReferences
++class RWStepBasic_RWExternallyDefinedItemWithMultipleReferences
++{
++public:
++  DEFINE_STANDARD_ALLOC
++
++  Standard_HIDDEN RWStepBasic_RWExternallyDefinedItemWithMultipleReferences();
++
++  Standard_HIDDEN void ReadStep(const occ::handle<StepData_StepReaderData>& theData,
++                                const int                                   theNum,
++                                occ::handle<Interface_Check>&               theCheck,
++                                const occ::handle<StepBasic_ExternallyDefinedItemWithMultipleReferences>& theEnt) const;
++
++  Standard_HIDDEN void WriteStep(StepData_StepWriter& theSW,
++                                 const occ::handle<StepBasic_ExternallyDefinedItemWithMultipleReferences>& theEnt) const;
++
++  Standard_HIDDEN void Share(const occ::handle<StepBasic_ExternallyDefinedItemWithMultipleReferences>& theEnt,
++                             Interface_EntityIterator&       theIter) const;
++};
++
++#endif // _RWStepBasic_RWExternallyDefinedItemWithMultipleReferences_HeaderFile
+diff --git a/src/DataExchange/TKDESTEP/RWStepRepr/FILES.cmake b/src/DataExchange/TKDESTEP/RWStepRepr/FILES.cmake
+index cbf7e9bd..6cd497be 100644
+--- a/src/DataExchange/TKDESTEP/RWStepRepr/FILES.cmake
++++ b/src/DataExchange/TKDESTEP/RWStepRepr/FILES.cmake
+@@ -2,6 +2,14 @@
+ set(OCCT_RWStepRepr_FILES_LOCATION "${CMAKE_CURRENT_LIST_DIR}")
+ 
+ set(OCCT_RWStepRepr_FILES
++  RWStepRepr_RWMultiLevelReferenceDesignator.cxx
++  RWStepRepr_RWMultiLevelReferenceDesignator.pxx
++  RWStepRepr_RWComponentPathShapeAspect.cxx
++  RWStepRepr_RWComponentPathShapeAspect.pxx
++  RWStepRepr_RWExternallyDefinedRepresentationItem.cxx
++  RWStepRepr_RWExternallyDefinedRepresentationItem.pxx
++  RWStepRepr_RWExternallyDefinedRepresentation.cxx
++  RWStepRepr_RWExternallyDefinedRepresentation.pxx
+   RWStepRepr_RWAllAroundShapeAspect.cxx
+   RWStepRepr_RWAllAroundShapeAspect.pxx
+   RWStepRepr_RWApex.cxx
+diff --git a/src/DataExchange/TKDESTEP/RWStepRepr/RWStepRepr_RWComponentPathShapeAspect.cxx b/src/DataExchange/TKDESTEP/RWStepRepr/RWStepRepr_RWComponentPathShapeAspect.cxx
+new file mode 100644
+index 00000000..c0fc7cbe
+--- /dev/null
++++ b/src/DataExchange/TKDESTEP/RWStepRepr/RWStepRepr_RWComponentPathShapeAspect.cxx
+@@ -0,0 +1,131 @@
++// This file is part of Open CASCADE Technology software library.
++//
++// This library is free software; you can redistribute it and/or modify it under
++// the terms of the GNU Lesser General Public License version 2.1 as published
++// by the Free Software Foundation, with special exception defined in the file
++// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
++// distribution for complete text of the license and disclaimer of any warranty.
++//
++// Alternatively, this file may be used under the terms of Open CASCADE
++// commercial license or contractual agreement.
++
++#include "RWStepRepr_RWComponentPathShapeAspect.pxx"
++#include <Interface_EntityIterator.hxx>
++#include <StepData_SelectNamed.hxx>
++#include <StepData_StepReaderData.hxx>
++#include <StepData_StepWriter.hxx>
++#include <StepRepr_ComponentPathShapeAspect.hxx>
++#include <StepRepr_ProductDefinitionShape.hxx>
++#include <TCollection_HAsciiString.hxx>
++
++//=================================================================================================
++
++RWStepRepr_RWComponentPathShapeAspect::RWStepRepr_RWComponentPathShapeAspect() = default;
++
++//=================================================================================================
++
++void RWStepRepr_RWComponentPathShapeAspect::ReadStep(
++  const occ::handle<StepData_StepReaderData>&           theData,
++  const int                                             theNum,
++  occ::handle<Interface_Check>&                         theCheck,
++  const occ::handle<StepRepr_ComponentPathShapeAspect>& theEnt) const
++{
++  if (!theData->CheckNbParams(theNum, 6, theCheck, "component_path_shape_aspect"))
++  {
++    return;
++  }
++
++  occ::handle<TCollection_HAsciiString> aName, aDescription;
++  theData->ReadString(theNum, 1, "shape_aspect.name", theCheck, aName);
++  if (theData->IsParamDefined(theNum, 2))
++  {
++    theData->ReadString(theNum, 2, "shape_aspect.description", theCheck, aDescription);
++  }
++  occ::handle<StepRepr_ProductDefinitionShape> anOfShape;
++  theData->ReadEntity(theNum,
++                      3,
++                      "shape_aspect.of_shape",
++                      theCheck,
++                      STANDARD_TYPE(StepRepr_ProductDefinitionShape),
++                      anOfShape);
++  StepData_Logical aProductDefinitional = StepData_LUnknown;
++  theData->ReadLogical(theNum, 4, "shape_aspect.product_definitional", theCheck, aProductDefinitional);
++
++  occ::handle<StepRepr_AssemblyComponentUsage> aLocation;
++  theData->ReadEntity(theNum,
++                      5,
++                      "location",
++                      theCheck,
++                      STANDARD_TYPE(StepRepr_AssemblyComponentUsage),
++                      aLocation);
++
++  // internal_or_reflected_shape_aspect: a shape_aspect, or an identifier (typed or not)
++  occ::handle<StepRepr_ShapeAspect>     aComponentShapeAspect;
++  occ::handle<TCollection_HAsciiString> aComponentShapeAspectId;
++  if (theData->ParamType(theNum, 6) == Interface_ParamIdent)
++  {
++    theData->ReadEntity(theNum,
++                        6,
++                        "component_shape_aspect",
++                        theCheck,
++                        STANDARD_TYPE(StepRepr_ShapeAspect),
++                        aComponentShapeAspect);
++  }
++  else
++  {
++    occ::handle<StepData_SelectNamed> anId = new StepData_SelectNamed;
++    if (theData->ReadMember(theNum, 6, "component_shape_aspect", theCheck, anId) && anId->Kind() == 6)
++    {
++      aComponentShapeAspectId = new TCollection_HAsciiString(anId->String());
++    }
++  }
++
++  theEnt->Init(aName,
++               aDescription,
++               anOfShape,
++               aProductDefinitional,
++               aLocation,
++               aComponentShapeAspect,
++               aComponentShapeAspectId);
++}
++
++//=================================================================================================
++
++void RWStepRepr_RWComponentPathShapeAspect::WriteStep(
++  StepData_StepWriter&                                  theSW,
++  const occ::handle<StepRepr_ComponentPathShapeAspect>& theEnt) const
++{
++  theSW.Send(theEnt->Name());
++  if (!theEnt->Description().IsNull())
++  {
++    theSW.Send(theEnt->Description());
++  }
++  else
++  {
++    theSW.SendUndef();
++  }
++  theSW.Send(theEnt->OfShape());
++  theSW.SendLogical(theEnt->ProductDefinitional());
++  theSW.Send(theEnt->Location());
++  if (!theEnt->ComponentShapeAspect().IsNull())
++  {
++    theSW.Send(theEnt->ComponentShapeAspect());
++  }
++  else
++  {
++    theSW.OpenTypedSub("IDENTIFIER");
++    theSW.Send(theEnt->ComponentShapeAspectId());
++    theSW.CloseSub();
++  }
++}
++
++//=================================================================================================
++
++void RWStepRepr_RWComponentPathShapeAspect::Share(
++  const occ::handle<StepRepr_ComponentPathShapeAspect>& theEnt,
++  Interface_EntityIterator&                             theIter) const
++{
++  theIter.AddItem(theEnt->OfShape());
++  theIter.AddItem(theEnt->Location());
++  theIter.AddItem(theEnt->ComponentShapeAspect());
++}
+diff --git a/src/DataExchange/TKDESTEP/RWStepRepr/RWStepRepr_RWComponentPathShapeAspect.pxx b/src/DataExchange/TKDESTEP/RWStepRepr/RWStepRepr_RWComponentPathShapeAspect.pxx
+new file mode 100644
+index 00000000..d1928965
+--- /dev/null
++++ b/src/DataExchange/TKDESTEP/RWStepRepr/RWStepRepr_RWComponentPathShapeAspect.pxx
+@@ -0,0 +1,45 @@
++// This file is part of Open CASCADE Technology software library.
++//
++// This library is free software; you can redistribute it and/or modify it under
++// the terms of the GNU Lesser General Public License version 2.1 as published
++// by the Free Software Foundation, with special exception defined in the file
++// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
++// distribution for complete text of the license and disclaimer of any warranty.
++//
++// Alternatively, this file may be used under the terms of Open CASCADE
++// commercial license or contractual agreement.
++
++#ifndef _RWStepRepr_RWComponentPathShapeAspect_HeaderFile
++#define _RWStepRepr_RWComponentPathShapeAspect_HeaderFile
++
++#include <Standard.hxx>
++#include <Standard_DefineAlloc.hxx>
++#include <Standard_Handle.hxx>
++
++class StepData_StepReaderData;
++class Interface_Check;
++class StepRepr_ComponentPathShapeAspect;
++class StepData_StepWriter;
++class Interface_EntityIterator;
++
++//! Read & Write tool for ComponentPathShapeAspect
++class RWStepRepr_RWComponentPathShapeAspect
++{
++public:
++  DEFINE_STANDARD_ALLOC
++
++  Standard_HIDDEN RWStepRepr_RWComponentPathShapeAspect();
++
++  Standard_HIDDEN void ReadStep(const occ::handle<StepData_StepReaderData>& theData,
++                                const int                                   theNum,
++                                occ::handle<Interface_Check>&               theCheck,
++                                const occ::handle<StepRepr_ComponentPathShapeAspect>& theEnt) const;
++
++  Standard_HIDDEN void WriteStep(StepData_StepWriter& theSW,
++                                 const occ::handle<StepRepr_ComponentPathShapeAspect>& theEnt) const;
++
++  Standard_HIDDEN void Share(const occ::handle<StepRepr_ComponentPathShapeAspect>& theEnt,
++                             Interface_EntityIterator&       theIter) const;
++};
++
++#endif // _RWStepRepr_RWComponentPathShapeAspect_HeaderFile
+diff --git a/src/DataExchange/TKDESTEP/RWStepRepr/RWStepRepr_RWExternallyDefinedRepresentation.cxx b/src/DataExchange/TKDESTEP/RWStepRepr/RWStepRepr_RWExternallyDefinedRepresentation.cxx
+new file mode 100644
+index 00000000..63c3cf0a
+--- /dev/null
++++ b/src/DataExchange/TKDESTEP/RWStepRepr/RWStepRepr_RWExternallyDefinedRepresentation.cxx
+@@ -0,0 +1,115 @@
++// This file is part of Open CASCADE Technology software library.
++//
++// This library is free software; you can redistribute it and/or modify it under
++// the terms of the GNU Lesser General Public License version 2.1 as published
++// by the Free Software Foundation, with special exception defined in the file
++// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
++// distribution for complete text of the license and disclaimer of any warranty.
++//
++// Alternatively, this file may be used under the terms of Open CASCADE
++// commercial license or contractual agreement.
++
++#include "RWStepRepr_RWExternallyDefinedRepresentation.pxx"
++#include <Interface_EntityIterator.hxx>
++#include <StepData_StepReaderData.hxx>
++#include <StepData_StepWriter.hxx>
++#include <StepRepr_ExternallyDefinedRepresentation.hxx>
++#include <StepRepr_RepresentationContext.hxx>
++#include <StepRepr_RepresentationItem.hxx>
++#include <TCollection_HAsciiString.hxx>
++
++//=================================================================================================
++
++RWStepRepr_RWExternallyDefinedRepresentation::RWStepRepr_RWExternallyDefinedRepresentation() =
++  default;
++
++//=================================================================================================
++
++void RWStepRepr_RWExternallyDefinedRepresentation::ReadStep(
++  const occ::handle<StepData_StepReaderData>&                  theData,
++  const int                                                    theNum,
++  occ::handle<Interface_Check>&                                theCheck,
++  const occ::handle<StepRepr_ExternallyDefinedRepresentation>& theEnt) const
++{
++  // representation (name, items, context_of_items), then externally_defined_item (item_id,
++  // source); files written by OCCT before have the first three only
++  if (theData->NbParams(theNum) != 3
++      && !theData->CheckNbParams(theNum, 5, theCheck, "externally_defined_representation"))
++  {
++    return;
++  }
++  occ::handle<TCollection_HAsciiString> aName;
++  theData->ReadString(theNum, 1, "representation.name", theCheck, aName);
++  occ::handle<NCollection_HArray1<occ::handle<StepRepr_RepresentationItem>>> anItems;
++  int aSub = 0;
++  if (theData->ReadSubList(theNum, 2, "representation.items", theCheck, aSub))
++  {
++    const int aNb = theData->NbParams(aSub);
++    anItems       = new NCollection_HArray1<occ::handle<StepRepr_RepresentationItem>>(1, aNb);
++    for (int i = 1; i <= aNb; i++)
++    {
++      occ::handle<StepRepr_RepresentationItem> anItem;
++      theData->ReadEntity(aSub,
++                          i,
++                          "representation_item",
++                          theCheck,
++                          STANDARD_TYPE(StepRepr_RepresentationItem),
++                          anItem);
++      anItems->SetValue(i, anItem);
++    }
++  }
++  occ::handle<StepRepr_RepresentationContext> aContext;
++  theData->ReadEntity(theNum,
++                      3,
++                      "representation.context_of_items",
++                      theCheck,
++                      STANDARD_TYPE(StepRepr_RepresentationContext),
++                      aContext);
++  StepBasic_SourceItem                  anItemId;
++  occ::handle<StepBasic_ExternalSource> aSource;
++  if (theData->NbParams(theNum) == 5)
++  {
++    theData->ReadEntity(theNum, 4, "externally_defined_item.item_id", theCheck, anItemId);
++    theData->ReadEntity(theNum,
++                        5,
++                        "externally_defined_item.source",
++                        theCheck,
++                        STANDARD_TYPE(StepBasic_ExternalSource),
++                        aSource);
++  }
++  theEnt->Init(aName, anItems, aContext);
++  theEnt->SetItemId(anItemId);
++  theEnt->SetSource(aSource);
++}
++
++//=================================================================================================
++
++void RWStepRepr_RWExternallyDefinedRepresentation::WriteStep(
++  StepData_StepWriter&                                         theSW,
++  const occ::handle<StepRepr_ExternallyDefinedRepresentation>& theEnt) const
++{
++  theSW.Send(theEnt->Name());
++  theSW.OpenSub();
++  for (int i = 1; i <= theEnt->NbItems(); i++)
++  {
++    theSW.Send(theEnt->ItemsValue(i));
++  }
++  theSW.CloseSub();
++  theSW.Send(theEnt->ContextOfItems());
++  theSW.Send(theEnt->ItemId().Value());
++  theSW.Send(theEnt->Source());
++}
++
++//=================================================================================================
++
++void RWStepRepr_RWExternallyDefinedRepresentation::Share(
++  const occ::handle<StepRepr_ExternallyDefinedRepresentation>& theEnt,
++  Interface_EntityIterator&                                    theIter) const
++{
++  for (int i = 1; i <= theEnt->NbItems(); i++)
++  {
++    theIter.AddItem(theEnt->ItemsValue(i));
++  }
++  theIter.AddItem(theEnt->ContextOfItems());
++  theIter.AddItem(theEnt->Source());
++}
+diff --git a/src/DataExchange/TKDESTEP/RWStepRepr/RWStepRepr_RWExternallyDefinedRepresentation.pxx b/src/DataExchange/TKDESTEP/RWStepRepr/RWStepRepr_RWExternallyDefinedRepresentation.pxx
+new file mode 100644
+index 00000000..a707b3fa
+--- /dev/null
++++ b/src/DataExchange/TKDESTEP/RWStepRepr/RWStepRepr_RWExternallyDefinedRepresentation.pxx
+@@ -0,0 +1,45 @@
++// This file is part of Open CASCADE Technology software library.
++//
++// This library is free software; you can redistribute it and/or modify it under
++// the terms of the GNU Lesser General Public License version 2.1 as published
++// by the Free Software Foundation, with special exception defined in the file
++// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
++// distribution for complete text of the license and disclaimer of any warranty.
++//
++// Alternatively, this file may be used under the terms of Open CASCADE
++// commercial license or contractual agreement.
++
++#ifndef _RWStepRepr_RWExternallyDefinedRepresentation_HeaderFile
++#define _RWStepRepr_RWExternallyDefinedRepresentation_HeaderFile
++
++#include <Standard.hxx>
++#include <Standard_DefineAlloc.hxx>
++#include <Standard_Handle.hxx>
++
++class StepData_StepReaderData;
++class Interface_Check;
++class StepRepr_ExternallyDefinedRepresentation;
++class StepData_StepWriter;
++class Interface_EntityIterator;
++
++//! Read & Write tool for ExternallyDefinedRepresentation
++class RWStepRepr_RWExternallyDefinedRepresentation
++{
++public:
++  DEFINE_STANDARD_ALLOC
++
++  Standard_HIDDEN RWStepRepr_RWExternallyDefinedRepresentation();
++
++  Standard_HIDDEN void ReadStep(const occ::handle<StepData_StepReaderData>& theData,
++                                const int                                   theNum,
++                                occ::handle<Interface_Check>&               theCheck,
++                                const occ::handle<StepRepr_ExternallyDefinedRepresentation>& theEnt) const;
++
++  Standard_HIDDEN void WriteStep(StepData_StepWriter& theSW,
++                                 const occ::handle<StepRepr_ExternallyDefinedRepresentation>& theEnt) const;
++
++  Standard_HIDDEN void Share(const occ::handle<StepRepr_ExternallyDefinedRepresentation>& theEnt,
++                             Interface_EntityIterator&       theIter) const;
++};
++
++#endif // _RWStepRepr_RWExternallyDefinedRepresentation_HeaderFile
+diff --git a/src/DataExchange/TKDESTEP/RWStepRepr/RWStepRepr_RWExternallyDefinedRepresentationItem.cxx b/src/DataExchange/TKDESTEP/RWStepRepr/RWStepRepr_RWExternallyDefinedRepresentationItem.cxx
+new file mode 100644
+index 00000000..52c91535
+--- /dev/null
++++ b/src/DataExchange/TKDESTEP/RWStepRepr/RWStepRepr_RWExternallyDefinedRepresentationItem.cxx
+@@ -0,0 +1,68 @@
++// This file is part of Open CASCADE Technology software library.
++//
++// This library is free software; you can redistribute it and/or modify it under
++// the terms of the GNU Lesser General Public License version 2.1 as published
++// by the Free Software Foundation, with special exception defined in the file
++// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
++// distribution for complete text of the license and disclaimer of any warranty.
++//
++// Alternatively, this file may be used under the terms of Open CASCADE
++// commercial license or contractual agreement.
++
++#include "RWStepRepr_RWExternallyDefinedRepresentationItem.pxx"
++#include <Interface_EntityIterator.hxx>
++#include <StepData_StepReaderData.hxx>
++#include <StepData_StepWriter.hxx>
++#include <StepRepr_ExternallyDefinedRepresentationItem.hxx>
++#include <TCollection_HAsciiString.hxx>
++
++//=================================================================================================
++
++RWStepRepr_RWExternallyDefinedRepresentationItem::RWStepRepr_RWExternallyDefinedRepresentationItem() =
++  default;
++
++//=================================================================================================
++
++void RWStepRepr_RWExternallyDefinedRepresentationItem::ReadStep(
++  const occ::handle<StepData_StepReaderData>&                      theData,
++  const int                                                        theNum,
++  occ::handle<Interface_Check>&                                    theCheck,
++  const occ::handle<StepRepr_ExternallyDefinedRepresentationItem>& theEnt) const
++{
++  if (!theData->CheckNbParams(theNum, 3, theCheck, "externally_defined_representation_item"))
++  {
++    return;
++  }
++  occ::handle<TCollection_HAsciiString> aName;
++  theData->ReadString(theNum, 1, "representation_item.name", theCheck, aName);
++  StepBasic_SourceItem anItemId;
++  theData->ReadEntity(theNum, 2, "externally_defined_item.item_id", theCheck, anItemId);
++  occ::handle<StepBasic_ExternalSource> aSource;
++  theData->ReadEntity(theNum,
++                      3,
++                      "externally_defined_item.source",
++                      theCheck,
++                      STANDARD_TYPE(StepBasic_ExternalSource),
++                      aSource);
++  theEnt->Init(aName, anItemId, aSource);
++}
++
++//=================================================================================================
++
++void RWStepRepr_RWExternallyDefinedRepresentationItem::WriteStep(
++  StepData_StepWriter&                                             theSW,
++  const occ::handle<StepRepr_ExternallyDefinedRepresentationItem>& theEnt) const
++{
++  theSW.Send(theEnt->Name());
++  theSW.Send(theEnt->ItemId().Value());
++  theSW.Send(theEnt->Source());
++}
++
++//=================================================================================================
++
++void RWStepRepr_RWExternallyDefinedRepresentationItem::Share(
++  const occ::handle<StepRepr_ExternallyDefinedRepresentationItem>& theEnt,
++  Interface_EntityIterator&                                        theIter) const
++{
++  theIter.AddItem(theEnt->Source());
++}
+diff --git a/src/DataExchange/TKDESTEP/RWStepRepr/RWStepRepr_RWExternallyDefinedRepresentationItem.pxx b/src/DataExchange/TKDESTEP/RWStepRepr/RWStepRepr_RWExternallyDefinedRepresentationItem.pxx
+new file mode 100644
+index 00000000..b9932516
+--- /dev/null
++++ b/src/DataExchange/TKDESTEP/RWStepRepr/RWStepRepr_RWExternallyDefinedRepresentationItem.pxx
+@@ -0,0 +1,45 @@
++// This file is part of Open CASCADE Technology software library.
++//
++// This library is free software; you can redistribute it and/or modify it under
++// the terms of the GNU Lesser General Public License version 2.1 as published
++// by the Free Software Foundation, with special exception defined in the file
++// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
++// distribution for complete text of the license and disclaimer of any warranty.
++//
++// Alternatively, this file may be used under the terms of Open CASCADE
++// commercial license or contractual agreement.
++
++#ifndef _RWStepRepr_RWExternallyDefinedRepresentationItem_HeaderFile
++#define _RWStepRepr_RWExternallyDefinedRepresentationItem_HeaderFile
++
++#include <Standard.hxx>
++#include <Standard_DefineAlloc.hxx>
++#include <Standard_Handle.hxx>
++
++class StepData_StepReaderData;
++class Interface_Check;
++class StepRepr_ExternallyDefinedRepresentationItem;
++class StepData_StepWriter;
++class Interface_EntityIterator;
++
++//! Read & Write tool for ExternallyDefinedRepresentationItem
++class RWStepRepr_RWExternallyDefinedRepresentationItem
++{
++public:
++  DEFINE_STANDARD_ALLOC
++
++  Standard_HIDDEN RWStepRepr_RWExternallyDefinedRepresentationItem();
++
++  Standard_HIDDEN void ReadStep(const occ::handle<StepData_StepReaderData>& theData,
++                                const int                                   theNum,
++                                occ::handle<Interface_Check>&               theCheck,
++                                const occ::handle<StepRepr_ExternallyDefinedRepresentationItem>& theEnt) const;
++
++  Standard_HIDDEN void WriteStep(StepData_StepWriter& theSW,
++                                 const occ::handle<StepRepr_ExternallyDefinedRepresentationItem>& theEnt) const;
++
++  Standard_HIDDEN void Share(const occ::handle<StepRepr_ExternallyDefinedRepresentationItem>& theEnt,
++                             Interface_EntityIterator&       theIter) const;
++};
++
++#endif // _RWStepRepr_RWExternallyDefinedRepresentationItem_HeaderFile
+diff --git a/src/DataExchange/TKDESTEP/RWStepRepr/RWStepRepr_RWMultiLevelReferenceDesignator.cxx b/src/DataExchange/TKDESTEP/RWStepRepr/RWStepRepr_RWMultiLevelReferenceDesignator.cxx
+new file mode 100644
+index 00000000..773fb2b5
+--- /dev/null
++++ b/src/DataExchange/TKDESTEP/RWStepRepr/RWStepRepr_RWMultiLevelReferenceDesignator.cxx
+@@ -0,0 +1,123 @@
++// This file is part of Open CASCADE Technology software library.
++//
++// This library is free software; you can redistribute it and/or modify it under
++// the terms of the GNU Lesser General Public License version 2.1 as published
++// by the Free Software Foundation, with special exception defined in the file
++// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
++// distribution for complete text of the license and disclaimer of any warranty.
++//
++// Alternatively, this file may be used under the terms of Open CASCADE
++// commercial license or contractual agreement.
++
++#include "RWStepRepr_RWMultiLevelReferenceDesignator.pxx"
++#include <Interface_EntityIterator.hxx>
++#include <StepData_StepReaderData.hxx>
++#include <StepData_StepWriter.hxx>
++#include <StepRepr_MultiLevelReferenceDesignator.hxx>
++#include <TCollection_HAsciiString.hxx>
++
++//=================================================================================================
++
++RWStepRepr_RWMultiLevelReferenceDesignator::RWStepRepr_RWMultiLevelReferenceDesignator() = default;
++
++//=================================================================================================
++
++void RWStepRepr_RWMultiLevelReferenceDesignator::ReadStep(
++  const occ::handle<StepData_StepReaderData>&                theData,
++  const int                                                  theNum,
++  occ::handle<Interface_Check>&                              theCheck,
++  const occ::handle<StepRepr_MultiLevelReferenceDesignator>& theEnt) const
++{
++  if (!theData->CheckNbParams(theNum, 7, theCheck, "multi_level_reference_designator"))
++  {
++    return;
++  }
++
++  occ::handle<TCollection_HAsciiString> anId, aName, aDescription, aReferenceDesignator;
++  theData->ReadString(theNum, 1, "product_definition_relationship.id", theCheck, anId);
++  theData->ReadString(theNum, 2, "product_definition_relationship.name", theCheck, aName);
++  const bool hasDescription = theData->IsParamDefined(theNum, 3);
++  if (hasDescription)
++  {
++    theData->ReadString(theNum, 3, "product_definition_relationship.description", theCheck, aDescription);
++  }
++  // 4 and 5, relating and related product definitions, are derived from the location
++  const bool hasReferenceDesignator = theData->IsParamDefined(theNum, 6);
++  if (hasReferenceDesignator)
++  {
++    theData->ReadString(theNum, 6, "reference_designator", theCheck, aReferenceDesignator);
++  }
++
++  occ::handle<NCollection_HArray1<occ::handle<StepRepr_NextAssemblyUsageOccurrence>>> aLocation;
++  int aSub = 0;
++  if (theData->ReadSubList(theNum, 7, "location", theCheck, aSub))
++  {
++    const int aNb = theData->NbParams(aSub);
++    aLocation     = new NCollection_HArray1<occ::handle<StepRepr_NextAssemblyUsageOccurrence>>(1, aNb);
++    for (int i = 1; i <= aNb; i++)
++    {
++      occ::handle<StepRepr_NextAssemblyUsageOccurrence> anUsage;
++      theData->ReadEntity(aSub,
++                          i,
++                          "next_assembly_usage_occurrence",
++                          theCheck,
++                          STANDARD_TYPE(StepRepr_NextAssemblyUsageOccurrence),
++                          anUsage);
++      aLocation->SetValue(i, anUsage);
++    }
++  }
++
++  theEnt->Init(anId,
++               aName,
++               hasDescription,
++               aDescription,
++               hasReferenceDesignator,
++               aReferenceDesignator,
++               aLocation);
++}
++
++//=================================================================================================
++
++void RWStepRepr_RWMultiLevelReferenceDesignator::WriteStep(
++  StepData_StepWriter&                                       theSW,
++  const occ::handle<StepRepr_MultiLevelReferenceDesignator>& theEnt) const
++{
++  theSW.Send(theEnt->Id());
++  theSW.Send(theEnt->Name());
++  if (theEnt->HasDescription())
++  {
++    theSW.Send(theEnt->Description());
++  }
++  else
++  {
++    theSW.SendUndef();
++  }
++  theSW.SendDerived();
++  theSW.SendDerived();
++  if (theEnt->HasReferenceDesignator())
++  {
++    theSW.Send(theEnt->ReferenceDesignator());
++  }
++  else
++  {
++    theSW.SendUndef();
++  }
++  theSW.OpenSub();
++  for (int i = 1; i <= theEnt->NbLocation(); i++)
++  {
++    theSW.Send(theEnt->Location()->Value(i));
++  }
++  theSW.CloseSub();
++}
++
++//=================================================================================================
++
++void RWStepRepr_RWMultiLevelReferenceDesignator::Share(
++  const occ::handle<StepRepr_MultiLevelReferenceDesignator>& theEnt,
++  Interface_EntityIterator&                                  theIter) const
++{
++  for (int i = 1; i <= theEnt->NbLocation(); i++)
++  {
++    theIter.AddItem(theEnt->Location()->Value(i));
++  }
++}
+diff --git a/src/DataExchange/TKDESTEP/RWStepRepr/RWStepRepr_RWMultiLevelReferenceDesignator.pxx b/src/DataExchange/TKDESTEP/RWStepRepr/RWStepRepr_RWMultiLevelReferenceDesignator.pxx
+new file mode 100644
+index 00000000..ed111266
+--- /dev/null
++++ b/src/DataExchange/TKDESTEP/RWStepRepr/RWStepRepr_RWMultiLevelReferenceDesignator.pxx
+@@ -0,0 +1,45 @@
++// This file is part of Open CASCADE Technology software library.
++//
++// This library is free software; you can redistribute it and/or modify it under
++// the terms of the GNU Lesser General Public License version 2.1 as published
++// by the Free Software Foundation, with special exception defined in the file
++// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
++// distribution for complete text of the license and disclaimer of any warranty.
++//
++// Alternatively, this file may be used under the terms of Open CASCADE
++// commercial license or contractual agreement.
++
++#ifndef _RWStepRepr_RWMultiLevelReferenceDesignator_HeaderFile
++#define _RWStepRepr_RWMultiLevelReferenceDesignator_HeaderFile
++
++#include <Standard.hxx>
++#include <Standard_DefineAlloc.hxx>
++#include <Standard_Handle.hxx>
++
++class StepData_StepReaderData;
++class Interface_Check;
++class StepRepr_MultiLevelReferenceDesignator;
++class StepData_StepWriter;
++class Interface_EntityIterator;
++
++//! Read & Write tool for MultiLevelReferenceDesignator
++class RWStepRepr_RWMultiLevelReferenceDesignator
++{
++public:
++  DEFINE_STANDARD_ALLOC
++
++  Standard_HIDDEN RWStepRepr_RWMultiLevelReferenceDesignator();
++
++  Standard_HIDDEN void ReadStep(const occ::handle<StepData_StepReaderData>& theData,
++                                const int                                   theNum,
++                                occ::handle<Interface_Check>&               theCheck,
++                                const occ::handle<StepRepr_MultiLevelReferenceDesignator>& theEnt) const;
++
++  Standard_HIDDEN void WriteStep(StepData_StepWriter& theSW,
++                                 const occ::handle<StepRepr_MultiLevelReferenceDesignator>& theEnt) const;
++
++  Standard_HIDDEN void Share(const occ::handle<StepRepr_MultiLevelReferenceDesignator>& theEnt,
++                             Interface_EntityIterator&       theIter) const;
++};
++
++#endif // _RWStepRepr_RWMultiLevelReferenceDesignator_HeaderFile
+diff --git a/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx b/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx
+index a0825c8b..16041bbe 100644
+--- a/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx
++++ b/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx
+@@ -233,7 +233,39 @@
+ #include <StepVisual_ContextDependentOverRidingStyledItem.hxx>
+ #include <StepRepr_ShapeRepresentationRelationshipWithTransformation.hxx>
+ #include <StepRepr_BooleanRepresentationItem.hxx>
++#include <Interface_UndefinedContent.hxx>
++#include <StepAP214_AppliedExternalIdentificationAssignment.hxx>
++#include <StepBasic_ExternalSource.hxx>
++#include <StepBasic_ProductDefinitionReference.hxx>
++#include <StepBasic_ProductDefinitionReferenceWithLocalRepresentation.hxx>
++#include <StepData_SelectNamed.hxx>
++#include <StepRepr_ComponentPathShapeAspect.hxx>
+ #include <StepRepr_IntegerRepresentationItem.hxx>
++#include <StepRepr_MultiLevelReferenceDesignator.hxx>
++
++// Collects the shape aspects a shape aspect stands for. theContexts, if given, gets for each the
++// component_path_shape_aspect it was reached through (assembly PMI), or null. A
++// component_path_shape_aspect stands for the shape aspect of its component; one whose shape aspect
++// is in another file (an external anchor) is collected itself, and only when theContexts is given.
++static void collectShapeAspect(
++  const occ::handle<StepRepr_ShapeAspect>&                              theSA,
++  const occ::handle<XSControl_WorkSession>&                             theWS,
++  NCollection_Sequence<occ::handle<StepRepr_ShapeAspect>>&              theSAs,
++  NCollection_Sequence<occ::handle<StepRepr_ComponentPathShapeAspect>>* theContexts,
++  const occ::handle<StepRepr_ComponentPathShapeAspect>&                 theContext);
++
++// Appends a label to a sequence unless it is in it
++static void appendUnique(NCollection_Sequence<TDF_Label>& theLabels, const TDF_Label& theLabel)
++{
++  for (const TDF_Label& aLabel : theLabels)
++  {
++    if (aLabel == theLabel)
++    {
++      return;
++    }
++  }
++  theLabels.Append(theLabel);
++}
+ #include <StepRepr_ItemDefinedTransformation.hxx>
+ #include <StepRepr_PropertyDefinitionRelationship.hxx>
+ #include <StepRepr_RealRepresentationItem.hxx>
+@@ -328,6 +360,8 @@ void STEPCAFControl_Reader::Init(const occ::handle<XSControl_WorkSession>& WS, c
+   myReader.SetWS(WS, scratch);
+   myFiles.Clear();
+   myMap.Clear();
++  myGDTAssemblyRefs.Clear();
++  myPDFiles.Clear();
+ }
+ 
+ //=================================================================================================
+@@ -765,6 +799,7 @@ bool STEPCAFControl_Reader::Transfer(STEPControl_Reader&                  reader
+     occ::handle<STEPCAFControl_ExternFile> EF =
+       ReadExternFile(filename, fullname.ToCString(), doc, aRange);
+     PDFileMap.Bind(PD, EF);
++    myPDFiles.Bind(PD, EF);
+   }
+ 
+   // and insert them to the document
+@@ -3324,11 +3359,37 @@ static occ::handle<StepAP242_ItemIdentifiedRepresentationUsage> geometryUsage(
+ static void collectShapeAspect(const occ::handle<StepRepr_ShapeAspect>&                 theSA,
+                                const occ::handle<XSControl_WorkSession>&                theWS,
+                                NCollection_Sequence<occ::handle<StepRepr_ShapeAspect>>& theSAs)
++{
++  collectShapeAspect(theSA, theWS, theSAs, nullptr, nullptr);
++}
++
++//=================================================================================================
++
++static void collectShapeAspect(
++  const occ::handle<StepRepr_ShapeAspect>&                              theSA,
++  const occ::handle<XSControl_WorkSession>&                             theWS,
++  NCollection_Sequence<occ::handle<StepRepr_ShapeAspect>>&              theSAs,
++  NCollection_Sequence<occ::handle<StepRepr_ComponentPathShapeAspect>>* theContexts,
++  const occ::handle<StepRepr_ComponentPathShapeAspect>&                 theContext)
+ {
+   if (theSA.IsNull())
+   {
+     return;
+   }
++  if (const occ::handle<StepRepr_ComponentPathShapeAspect> aCPSA =
++        occ::down_cast<StepRepr_ComponentPathShapeAspect>(theSA))
++  {
++    if (!aCPSA->ComponentShapeAspect().IsNull())
++    {
++      collectShapeAspect(aCPSA->ComponentShapeAspect(), theWS, theSAs, theContexts, aCPSA);
++    }
++    else if (theContexts != nullptr)
++    {
++      theSAs.Append(theSA);
++      theContexts->Append(aCPSA);
++    }
++    return;
++  }
+   occ::handle<XSControl_TransferReader>  aTR    = theWS->TransferReader();
+   occ::handle<Transfer_TransientProcess> aTP    = aTR->TransientProcess();
+   const Interface_Graph&                 aGraph = aTP->Graph();
+@@ -3343,13 +3404,17 @@ static void collectShapeAspect(const occ::handle<StepRepr_ShapeAspect>&
+     }
+     if (!aSADR.IsNull())
+     {
+-      collectShapeAspect(aSADR->RelatedShapeAspect(), theWS, theSAs);
++      collectShapeAspect(aSADR->RelatedShapeAspect(), theWS, theSAs, theContexts, theContext);
+     }
+   }
+   else if (theSA->IsKind(STANDARD_TYPE(StepDimTol_DatumFeature))
+            || theSA->IsKind(STANDARD_TYPE(StepDimTol_DatumTarget)))
+   {
+     theSAs.Append(theSA);
++    if (theContexts != nullptr)
++    {
++      theContexts->Append(theContext);
++    }
+     return;
+   }
+   else
+@@ -3367,7 +3432,7 @@ static void collectShapeAspect(const occ::handle<StepRepr_ShapeAspect>&
+         if (aSAR->RelatingShapeAspect() == theSA && !aSAR->RelatedShapeAspect().IsNull()
+             && !aSAR->RelatedShapeAspect()->IsKind(STANDARD_TYPE(StepDimTol_Datum)))
+         {
+-          collectShapeAspect(aSAR->RelatedShapeAspect(), theWS, theSAs);
++          collectShapeAspect(aSAR->RelatedShapeAspect(), theWS, theSAs, theContexts, theContext);
+           isSimple = false;
+         }
+       }
+@@ -3376,6 +3441,10 @@ static void collectShapeAspect(const occ::handle<StepRepr_ShapeAspect>&
+     if (isSimple)
+     {
+       theSAs.Append(theSA);
++      if (theContexts != nullptr)
++      {
++        theContexts->Append(theContext);
++      }
+     }
+   }
+ }
+@@ -4479,7 +4548,10 @@ TDF_Label STEPCAFControl_Reader::createGDTObjectInXCAF(
+       }
+     }
+   }
+-  if (aSeqRI1.IsEmpty())
++  // Assembly PMI: the instances it refers to; shapes in other files are not among the items
++  const NCollection_Sequence<AssemblyShapeReference> anAssemblyRefs =
++    readAssemblyReferences(theEnt, theWS, aSTool);
++  if (aSeqRI1.IsEmpty() && anAssemblyRefs.IsEmpty())
+   {
+     return aGDTL;
+   }
+@@ -4562,6 +4634,14 @@ TDF_Label STEPCAFControl_Reader::createGDTObjectInXCAF(
+     }
+   }
+ 
++  for (const AssemblyShapeReference& aRef : anAssemblyRefs)
++  {
++    for (const TDF_Label& aShape : aRef.Shapes)
++    {
++      appendUnique(aRef.IsSecond ? aShLS2 : aShLS1, aShape);
++    }
++  }
++
+   if (!aShLS1.IsEmpty())
+   {
+     // add to XCAF
+@@ -4620,6 +4700,10 @@ TDF_Label STEPCAFControl_Reader::createGDTObjectInXCAF(
+     }
+ 
+     readDatumsAP242(theEnt, aGDTL, theDoc, theWS, theLocalFactors);
++    if (!anAssemblyRefs.IsEmpty())
++    {
++      myGDTAssemblyRefs.Bind(aGDTL, anAssemblyRefs);
++    }
+   }
+   return aGDTL;
+ }
+@@ -5730,6 +5814,19 @@ bool STEPCAFControl_Reader::ReadGDTs(const occ::handle<XSControl_WorkSession>& t
+           }
+         }
+       }
++      // Assembly PMI: the instances the presentation's shape aspect is on
++      NCollection_Sequence<AssemblyShapeReference> anAssemblyRefs;
++      if (!aDMIA.IsNull() && !aDMIA->Definition().ShapeAspect().IsNull())
++      {
++        anAssemblyRefs = readAssemblyReferences(aDMIA->Definition().ShapeAspect(), theWS, aSTool);
++        for (const AssemblyShapeReference& aRef : anAssemblyRefs)
++        {
++          for (const TDF_Label& aShape : aRef.Shapes)
++          {
++            appendUnique(aShapesL, aShape);
++          }
++        }
++      }
+       bool isCommonLabel = (aShapesL.Length() == 0);
+ 
+       // Calculate unit
+@@ -5792,6 +5889,10 @@ bool STEPCAFControl_Reader::ReadGDTs(const occ::handle<XSControl_WorkSession>& t
+       }
+       aDimObj->SetPresentation(aPresentation, aPresentName);
+       aDim->SetObject(aDimObj);
++      if (!anAssemblyRefs.IsEmpty())
++      {
++        myGDTAssemblyRefs.Bind(aGDTL, anAssemblyRefs);
++      }
+     }
+   }
+   return true;
+@@ -7147,8 +7248,25 @@ bool STEPCAFControl_Reader::ReadMetadata(const occ::handle<XSControl_WorkSession
+         collectRelatedPropertyDefinitions(theWS, aPropertyDefinition);
+ 
+       // Collect all the shapes labels.
+-      const NCollection_LinearVector<TDF_Label> aLabels =
++      NCollection_LinearVector<TDF_Label> aLabels =
+         collectShapeLabels(theWS, aTransientProcess, aPropertyDefinition);
++      // An instance deep in an assembly (UDA RP 6.2): the occurrence of its path (SHUO)
++      if (const occ::handle<StepRepr_MultiLevelReferenceDesignator> aMLRD =
++            occ::down_cast<StepRepr_MultiLevelReferenceDesignator>(
++              aPropertyDefinition->Definition().Value()))
++      {
++        const occ::handle<XCAFDoc_ShapeTool> aSTool =
++          XCAFDoc_DocumentTool::ShapeTool(theDoc->Main());
++        NCollection_Sequence<TDF_Label>    aPath;
++        occ::handle<XSControl_WorkSession> aLeafWS;
++        occ::handle<XCAFDoc_GraphNode>     aSHUO;
++        if (readInstancePath(aMLRD, theWS, aSTool, aPath, aLeafWS)
++            && (aPath.Length() == 1 || aSTool->FindSHUO(aPath, aSHUO)
++                || aSTool->SetSHUO(aPath, aSHUO)))
++        {
++          aLabels.Append(aPath.Length() == 1 ? aPath.First() : aSHUO->Label());
++        }
++      }
+ 
+       // Fill all attributes for each shape label.
+       for (const auto& aLabel : aLabels)
+@@ -7485,3 +7603,383 @@ bool STEPCAFControl_Reader::fillAttributes(
+   }
+   return true;
+ }
++
++//=================================================================================================
++// Assembly PMI (AP242): component_path_shape_aspect with a next_assembly_usage_occurrence or a
++// multi_level_reference_designator, in one file or across files (CAx-IF External Element
++// References 3.1, section 7; PMI 4.1, section 9.3.4)
++
++// The usages from the root node down to the instance: a NAUO, or the location of a MLRD
++static NCollection_Sequence<occ::handle<StepRepr_NextAssemblyUsageOccurrence>> componentPath(
++  const occ::handle<StepRepr_AssemblyComponentUsage>& theLocation)
++{
++  NCollection_Sequence<occ::handle<StepRepr_NextAssemblyUsageOccurrence>> aPath;
++  if (const occ::handle<StepRepr_NextAssemblyUsageOccurrence> aNAUO =
++        occ::down_cast<StepRepr_NextAssemblyUsageOccurrence>(theLocation))
++  {
++    aPath.Append(aNAUO);
++  }
++  else if (const occ::handle<StepRepr_MultiLevelReferenceDesignator> aMLRD =
++             occ::down_cast<StepRepr_MultiLevelReferenceDesignator>(theLocation))
++  {
++    for (int i = 1; i <= aMLRD->NbLocation(); i++)
++    {
++      aPath.Append(aMLRD->Location()->Value(i));
++    }
++  }
++  return aPath;
++}
++
++// The entity an EXTERNAL_ANCHOR in the header of the model names (ExtRef RP 7.3.1), or null
++static occ::handle<Standard_Transient> findExternalAnchor(
++  const occ::handle<Interface_InterfaceModel>& theModel,
++  const TCollection_AsciiString&               theId)
++{
++  const occ::handle<StepData_StepModel> aModel = occ::down_cast<StepData_StepModel>(theModel);
++  for (Interface_EntityIterator anIter = aModel.IsNull() ? Interface_EntityIterator() : aModel->Header();
++       anIter.More();
++       anIter.Next())
++  {
++    const occ::handle<StepData_UndefinedEntity> anAnchor =
++      occ::down_cast<StepData_UndefinedEntity>(anIter.Value());
++    if (anAnchor.IsNull())
++    {
++      continue;
++    }
++    TCollection_AsciiString aType(anAnchor->StepType());
++    if (!aType.IsEqual("!EXTERNAL_ANCHOR") && !aType.IsEqual("EXTERNAL_ANCHOR"))
++    {
++      continue;
++    }
++    const occ::handle<Interface_UndefinedContent> aContent = anAnchor->UndefinedContent();
++    if (aContent->NbParams() < 2 || aContent->IsParamEntity(1) || !aContent->IsParamEntity(2))
++    {
++      continue;
++    }
++    TCollection_AsciiString anId = aContent->ParamValue(1)->String();
++    if (anId.Length() >= 2 && anId.Value(1) == '\'' && anId.Value(anId.Length()) == '\'')
++    {
++      anId = anId.SubString(2, anId.Length() - 1);
++    }
++    if (anId.IsEqual(theId))
++    {
++      return aContent->ParamEntity(2);
++    }
++  }
++  return nullptr;
++}
++
++// The product definition with the given product, version and definition ids in the model
++static occ::handle<StepBasic_ProductDefinition> findProductDefinition(
++  const occ::handle<Interface_InterfaceModel>& theModel,
++  const occ::handle<TCollection_HAsciiString>& theProductId,
++  const occ::handle<TCollection_HAsciiString>& theFormationId,
++  const occ::handle<TCollection_HAsciiString>& theDefinitionId)
++{
++  const auto isSame = [](const occ::handle<TCollection_HAsciiString>& theA,
++                         const occ::handle<TCollection_HAsciiString>& theB) {
++    return theA.IsNull() || theB.IsNull() ? theA.IsNull() == theB.IsNull() : theA->IsSameString(theB);
++  };
++  for (int i = 1; i <= theModel->NbEntities(); i++)
++  {
++    const occ::handle<StepBasic_ProductDefinition> aPD =
++      occ::down_cast<StepBasic_ProductDefinition>(theModel->Value(i));
++    if (aPD.IsNull() || aPD->Formation().IsNull() || aPD->Formation()->OfProduct().IsNull())
++    {
++      continue;
++    }
++    if (isSame(aPD->Id(), theDefinitionId) && isSame(aPD->Formation()->Id(), theFormationId)
++        && isSame(aPD->Formation()->OfProduct()->Id(), theProductId))
++    {
++      return aPD;
++    }
++  }
++  return nullptr;
++}
++
++// The usage in theGraph of a component in theParent with the given reference designator
++static occ::handle<StepRepr_NextAssemblyUsageOccurrence> findUsage(
++  const Interface_Graph&                          theGraph,
++  const occ::handle<StepBasic_ProductDefinition>& theParent,
++  const occ::handle<TCollection_HAsciiString>&    theReferenceDesignator)
++{
++  for (Interface_EntityIterator anIter = theGraph.Sharings(theParent); anIter.More(); anIter.Next())
++  {
++    const occ::handle<StepRepr_NextAssemblyUsageOccurrence> aNAUO =
++      occ::down_cast<StepRepr_NextAssemblyUsageOccurrence>(anIter.Value());
++    if (!aNAUO.IsNull() && aNAUO->RelatingProductDefinitionAP242().Value() == theParent
++        && aNAUO->HasReferenceDesignator() && !theReferenceDesignator.IsNull()
++        && aNAUO->ReferenceDesignator()->IsSameString(theReferenceDesignator))
++    {
++      return aNAUO;
++    }
++  }
++  return nullptr;
++}
++
++//=================================================================================================
++
++occ::handle<STEPCAFControl_ExternFile> STEPCAFControl_Reader::externFileOf(
++  const occ::handle<Standard_Transient>&    theDefinition,
++  const occ::handle<XSControl_WorkSession>& theWS) const
++{
++  // A local representation of a part in another file: the file of its external reference
++  occ::handle<STEPCAFControl_ExternFile> aFile;
++  if (myPDFiles.Find(theDefinition, aFile))
++  {
++    return aFile;
++  }
++  // A product definition reference: its source names the file (ExtRef RP 7.4.1, Table 3), or is
++  // the location of a file reference whose assigned id is the name (5.2.3)
++  occ::handle<StepBasic_ExternalSource> aSource;
++  if (const occ::handle<StepBasic_ProductDefinitionReference> aPDR =
++        occ::down_cast<StepBasic_ProductDefinitionReference>(theDefinition))
++  {
++    aSource = aPDR->Source();
++  }
++  else if (const occ::handle<StepBasic_ProductDefinitionReferenceWithLocalRepresentation> aPDRLR =
++             occ::down_cast<StepBasic_ProductDefinitionReferenceWithLocalRepresentation>(theDefinition))
++  {
++    aSource = aPDRLR->Source();
++  }
++  if (aSource.IsNull())
++  {
++    return nullptr;
++  }
++  NCollection_Sequence<TCollection_AsciiString> aNames;
++  if (const occ::handle<StepData_SelectNamed> anId =
++        occ::down_cast<StepData_SelectNamed>(aSource->SourceId().Value());
++      !anId.IsNull() && anId->Kind() == 6 && anId->String() != nullptr)
++  {
++    aNames.Append(anId->String());
++  }
++  for (Interface_EntityIterator anIter = theWS->Graph().Sharings(aSource); anIter.More(); anIter.Next())
++  {
++    const occ::handle<StepAP214_AppliedExternalIdentificationAssignment> anAEIA =
++      occ::down_cast<StepAP214_AppliedExternalIdentificationAssignment>(anIter.Value());
++    if (!anAEIA.IsNull() && !anAEIA->AssignedId().IsNull())
++    {
++      aNames.Append(anAEIA->AssignedId()->String());
++    }
++  }
++  for (TCollection_AsciiString aName : aNames)
++  {
++    OSD_Path aPath(aName);
++    aName = aPath.Name() + aPath.Extension();
++    for (NCollection_DataMap<TCollection_AsciiString, occ::handle<STEPCAFControl_ExternFile>>::Iterator
++           anIter(myFiles);
++         anIter.More();
++         anIter.Next())
++    {
++      OSD_Path aFilePath(anIter.Key());
++      if (TCollection_AsciiString::IsSameString(aName, aFilePath.Name() + aFilePath.Extension(), false))
++      {
++        return anIter.Value();
++      }
++    }
++  }
++  return nullptr;
++}
++
++//=================================================================================================
++
++bool STEPCAFControl_Reader::readInstancePath(
++  const occ::handle<StepRepr_AssemblyComponentUsage>& theLocation,
++  const occ::handle<XSControl_WorkSession>&           theWS,
++  const occ::handle<XCAFDoc_ShapeTool>&               theSTool,
++  NCollection_Sequence<TDF_Label>&                    thePath,
++  occ::handle<XSControl_WorkSession>&                 theLeafWS) const
++{
++  thePath.Clear();
++  theLeafWS                                                                     = theWS;
++  const NCollection_Sequence<occ::handle<StepRepr_NextAssemblyUsageOccurrence>> aPath =
++    componentPath(theLocation);
++  if (aPath.IsEmpty())
++  {
++    return false;
++  }
++  // A component label per level. A usage whose parent is a part in another file is a reference to
++  // the usage there with the same reference designator (ExtRef RP 7.4.1).
++  for (const occ::handle<StepRepr_NextAssemblyUsageOccurrence>& aNAUO : aPath)
++  {
++    if (aNAUO.IsNull())
++    {
++      return false;
++    }
++    occ::handle<StepRepr_NextAssemblyUsageOccurrence> anUsage   = aNAUO;
++    occ::handle<XSControl_WorkSession>                anUsageWS = theWS;
++    const occ::handle<Standard_Transient> aParent = aNAUO->RelatingProductDefinitionAP242().Value();
++    if (const occ::handle<STEPCAFControl_ExternFile> aFile = externFileOf(aParent, theWS))
++    {
++      if (aFile->GetWS().IsNull())
++      {
++        return false;
++      }
++      anUsageWS = aFile->GetWS();
++      occ::handle<StepBasic_ProductDefinition> aDefinition;
++      if (const occ::handle<StepBasic_ProductDefinitionReference> aPDR =
++            occ::down_cast<StepBasic_ProductDefinitionReference>(aParent))
++      {
++        aDefinition = findProductDefinition(anUsageWS->Model(),
++                                            aPDR->ProductId(),
++                                            aPDR->ProductDefinitionFormationId(),
++                                            aPDR->ProductDefinitionId());
++      }
++      else if (const occ::handle<StepBasic_ProductDefinition> aLocal =
++                 occ::down_cast<StepBasic_ProductDefinition>(aParent);
++               !aLocal.IsNull() && !aLocal->Formation().IsNull()
++               && !aLocal->Formation()->OfProduct().IsNull())
++      {
++        aDefinition = findProductDefinition(anUsageWS->Model(),
++                                            aLocal->Formation()->OfProduct()->Id(),
++                                            aLocal->Formation()->Id(),
++                                            aLocal->Id());
++      }
++      anUsage = aDefinition.IsNull()
++                  ? nullptr
++                  : findUsage(anUsageWS->Graph(), aDefinition, aNAUO->ReferenceDesignator());
++      if (anUsage.IsNull())
++      {
++        return false;
++      }
++    }
++    const TDF_Label aComponent =
++      FindInstance(anUsage, theSTool, STEPConstruct_Tool(anUsageWS), myMap);
++    if (aComponent.IsNull())
++    {
++      return false;
++    }
++    thePath.Append(aComponent);
++    theLeafWS = anUsageWS;
++  }
++  return true;
++}
++
++//=================================================================================================
++
++bool STEPCAFControl_Reader::readAssemblyReference(
++  const occ::handle<StepRepr_ComponentPathShapeAspect>& theCPSA,
++  const occ::handle<XSControl_WorkSession>&             theWS,
++  const occ::handle<XCAFDoc_ShapeTool>&                 theSTool,
++  AssemblyShapeReference&                               theRef) const
++{
++  occ::handle<XSControl_WorkSession> aLeafWS;
++  if (!readInstancePath(theCPSA->Location(), theWS, theSTool, theRef.Path, aLeafWS))
++  {
++    return false;
++  }
++  const NCollection_Sequence<occ::handle<StepRepr_NextAssemblyUsageOccurrence>> aPath =
++    componentPath(theCPSA->Location());
++  theRef.Assembly = theRef.Path.First().Father();
++
++  // The shapes: the component's shape aspect, here or (an external anchor) in the leaf's file
++  occ::handle<StepRepr_ShapeAspect> aShapeAspect = theCPSA->ComponentShapeAspect();
++  if (aShapeAspect.IsNull() && !theCPSA->ComponentShapeAspectId().IsNull())
++  {
++    const occ::handle<Standard_Transient> aLeaf = aPath.Last()->RelatedProductDefinitionAP242().Value();
++    if (const occ::handle<STEPCAFControl_ExternFile> aFile = externFileOf(aLeaf, theWS))
++    {
++      aLeafWS = aFile->GetWS();
++    }
++    aShapeAspect = aLeafWS.IsNull()
++                     ? nullptr
++                     : occ::down_cast<StepRepr_ShapeAspect>(findExternalAnchor(
++                         aLeafWS->Model(),
++                         theCPSA->ComponentShapeAspectId()->String()));
++  }
++  else
++  {
++    aLeafWS = theWS;
++  }
++  if (aShapeAspect.IsNull())
++  {
++    return false;
++  }
++  NCollection_Sequence<occ::handle<StepRepr_ShapeAspect>> aSAs;
++  collectShapeAspect(aShapeAspect, aLeafWS, aSAs);
++  for (const occ::handle<StepRepr_ShapeAspect>& aSA : aSAs)
++  {
++    for (Interface_EntityIterator anIter = aLeafWS->Graph().Sharings(aSA); anIter.More(); anIter.Next())
++    {
++      const occ::handle<StepAP242_ItemIdentifiedRepresentationUsage> anUsage =
++        geometryUsage(anIter.Value());
++      for (int i = 1; !anUsage.IsNull() && i <= anUsage->NbIdentifiedItem(); i++)
++      {
++        const TDF_Label aShape = getShapeLabel(anUsage->IdentifiedItemValue(i), aLeafWS, theSTool);
++        if (!aShape.IsNull())
++        {
++          appendUnique(theRef.Shapes, aShape);
++        }
++      }
++    }
++  }
++  return true;
++}
++
++//=================================================================================================
++
++NCollection_Sequence<STEPCAFControl_Reader::AssemblyShapeReference> STEPCAFControl_Reader::
++  readAssemblyReferences(const occ::handle<Standard_Transient>&    theEnt,
++                         const occ::handle<XSControl_WorkSession>& theWS,
++                         const occ::handle<XCAFDoc_ShapeTool>&     theSTool) const
++{
++  NCollection_Sequence<AssemblyShapeReference> aRefs;
++  const Interface_Graph&                       aGraph = theWS->Graph();
++  // The shape aspects the entity refers to, as createGDTObjectInXCAF finds them; for a dimensional
++  // location, which side each is on
++  NCollection_Sequence<occ::handle<StepRepr_ShapeAspect>> aStarts;
++  NCollection_Sequence<bool>                              aSides;
++  const auto addStarts = [&](const occ::handle<Standard_Transient>& theOf) {
++    const occ::handle<StepShape_DimensionalLocation> aLocation =
++      occ::down_cast<StepShape_DimensionalLocation>(theOf);
++    for (Interface_EntityIterator anIter = aGraph.Shareds(theOf); anIter.More(); anIter.Next())
++    {
++      if (const occ::handle<StepRepr_ShapeAspect> aSA =
++            occ::down_cast<StepRepr_ShapeAspect>(anIter.Value()))
++      {
++        aStarts.Append(aSA);
++        aSides.Append(!aLocation.IsNull() && aLocation->RelatedShapeAspect() == aSA);
++      }
++    }
++  };
++  if (const occ::handle<StepRepr_ShapeAspect> aSA = occ::down_cast<StepRepr_ShapeAspect>(theEnt))
++  {
++    aStarts.Append(aSA);
++    aSides.Append(false);
++  }
++  else
++  {
++    addStarts(theEnt);
++    // a tolerance applied to a dimension
++    for (Interface_EntityIterator anIter = aGraph.Shareds(theEnt); anIter.More(); anIter.Next())
++    {
++      if (anIter.Value()->IsKind(STANDARD_TYPE(StepShape_DimensionalLocation))
++          || anIter.Value()->IsKind(STANDARD_TYPE(StepShape_DimensionalSize)))
++      {
++        addStarts(anIter.Value());
++      }
++    }
++  }
++
++  NCollection_Map<occ::handle<Standard_Transient>> aDone;
++  for (int i = 1; i <= aStarts.Length(); i++)
++  {
++    NCollection_Sequence<occ::handle<StepRepr_ShapeAspect>>              aSAs;
++    NCollection_Sequence<occ::handle<StepRepr_ComponentPathShapeAspect>> aContexts;
++    collectShapeAspect(aStarts(i), theWS, aSAs, &aContexts, nullptr);
++    for (const occ::handle<StepRepr_ComponentPathShapeAspect>& aCPSA : aContexts)
++    {
++      if (aCPSA.IsNull() || !aDone.Add(aCPSA))
++      {
++        continue;
++      }
++      AssemblyShapeReference aRef;
++      aRef.IsSecond = aSides(i);
++      if (readAssemblyReference(aCPSA, theWS, theSTool, aRef))
++      {
++        aRefs.Append(aRef);
++      }
++    }
++  }
++  return aRefs;
++}
+diff --git a/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.hxx b/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.hxx
+index 3ad75e89..826c0f14 100644
+--- a/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.hxx
++++ b/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.hxx
+@@ -47,6 +47,8 @@ class StepBasic_Product;
+ class StepShape_ConnectedFaceSet;
+ class StepShape_ShapeDefinitionRepresentation;
+ class StepRepr_NextAssemblyUsageOccurrence;
++class StepRepr_ComponentPathShapeAspect;
++class StepRepr_AssemblyComponentUsage;
+ class StepRepr_PropertyDefinition;
+ class STEPConstruct_Tool;
+ class StepDimTol_Datum;
+@@ -237,6 +239,25 @@ public:
+     return myMap;
+   }
+ 
++  //! A shape that a GD&T object references on one component instance of an assembly (AP242
++  //! assembly PMI: component_path_shape_aspect, with a next_assembly_usage_occurrence or a
++  //! multi_level_reference_designator; the component may be in another file). The GD&T object
++  //! references Shapes too, as for part PMI; this says which instance they are on.
++  struct AssemblyShapeReference
++  {
++    TDF_Label                       Assembly; //!< the assembly the GD&T object is defined in
++    NCollection_Sequence<TDF_Label> Path;     //!< component labels from Assembly down to the instance
++    NCollection_Sequence<TDF_Label> Shapes;   //!< sub-shape labels of the instance's part
++    bool                            IsSecond = false; //!< the related side of a dimensional location
++  };
++
++  //! Returns the references to component instances of the GD&T labels that have any
++  const NCollection_DataMap<TDF_Label, NCollection_Sequence<AssemblyShapeReference>>&
++    GetGDTAssemblyReferences() const
++  {
++    return myGDTAssemblyRefs;
++  }
++
+   //! Sets parameters for shape processing.
+   //! @param theParameters the parameters for shape processing.
+   Standard_EXPORT void SetShapeFixParameters(
+@@ -537,6 +558,38 @@ private:
+   bool                                                            myMatMode;
+   bool                                                            myViewMode;
+   NCollection_DataMap<occ::handle<Standard_Transient>, TDF_Label> myGDTMap;
++
++  //! Assembly PMI: resolves the component_path_shape_aspects that a GD&T entity (or the shape
++  //! aspect a presentation is linked to) refers to
++  NCollection_Sequence<AssemblyShapeReference> readAssemblyReferences(
++    const occ::handle<Standard_Transient>&    theEnt,
++    const occ::handle<XSControl_WorkSession>& theWS,
++    const occ::handle<XCAFDoc_ShapeTool>&     theSTool) const;
++
++  //! The component labels of an instance (a next_assembly_usage_occurrence or a
++  //! multi_level_reference_designator), from its root down; theLeafWS gets the session of the file
++  //! the last usage is in
++  bool readInstancePath(const occ::handle<StepRepr_AssemblyComponentUsage>& theLocation,
++                        const occ::handle<XSControl_WorkSession>&           theWS,
++                        const occ::handle<XCAFDoc_ShapeTool>&               theSTool,
++                        NCollection_Sequence<TDF_Label>&                    thePath,
++                        occ::handle<XSControl_WorkSession>&                 theLeafWS) const;
++
++  //! The instance and shapes of one component_path_shape_aspect
++  bool readAssemblyReference(const occ::handle<StepRepr_ComponentPathShapeAspect>& theCPSA,
++                             const occ::handle<XSControl_WorkSession>&             theWS,
++                             const occ::handle<XCAFDoc_ShapeTool>&                 theSTool,
++                             AssemblyShapeReference&                               theRef) const;
++
++  //! The external file a product definition (reference) in theWS is defined in, or null
++  occ::handle<STEPCAFControl_ExternFile> externFileOf(
++    const occ::handle<Standard_Transient>&    theDefinition,
++    const occ::handle<XSControl_WorkSession>& theWS) const;
++
++  NCollection_DataMap<TDF_Label, NCollection_Sequence<AssemblyShapeReference>> myGDTAssemblyRefs;
++  //! Product definitions of external references, and the files read for them
++  NCollection_DataMap<occ::handle<Standard_Transient>, occ::handle<STEPCAFControl_ExternFile>>
++    myPDFiles;
+ };
+ 
+ #endif // _STEPCAFControl_Reader_HeaderFile
+diff --git a/src/DataExchange/TKDESTEP/StepAP214/StepAP214_Protocol.cxx b/src/DataExchange/TKDESTEP/StepAP214/StepAP214_Protocol.cxx
+index 00b27efe..aa0712f6 100644
+--- a/src/DataExchange/TKDESTEP/StepAP214/StepAP214_Protocol.cxx
++++ b/src/DataExchange/TKDESTEP/StepAP214/StepAP214_Protocol.cxx
+@@ -673,6 +673,13 @@ static const char* schemaAP242DIS =
+ 
+ // Added for kinematics implementation
+ #include <StepRepr_RepresentationReference.hxx>
++#include <StepBasic_ProductDefinitionReference.hxx>
++#include <StepBasic_ProductDefinitionReferenceWithLocalRepresentation.hxx>
++#include <StepRepr_MultiLevelReferenceDesignator.hxx>
++#include <StepRepr_ComponentPathShapeAspect.hxx>
++#include <StepRepr_ExternallyDefinedRepresentationItem.hxx>
++#include <StepBasic_ExternallyDefinedItemWithMultipleReferences.hxx>
++#include <StepRepr_ShapeRepresentationReference.hxx>
+ #include <StepGeom_SuParameters.hxx>
+ #include <StepKinematics_RotationAboutDirection.hxx>
+ #include <StepKinematics_ActuatedKinematicPair.hxx>
+@@ -1474,6 +1481,14 @@ StepAP214_Protocol::StepAP214_Protocol()
+   // Added for kinematics implementation
+   types.Bind(STANDARD_TYPE(StepRepr_RepresentationContextReference), 724);
+   types.Bind(STANDARD_TYPE(StepRepr_RepresentationReference), 725);
++  // AP242 external element references and assembly instance paths (after 827)
++  types.Bind(STANDARD_TYPE(StepBasic_ProductDefinitionReference), 828);
++  types.Bind(STANDARD_TYPE(StepBasic_ProductDefinitionReferenceWithLocalRepresentation), 829);
++  types.Bind(STANDARD_TYPE(StepRepr_MultiLevelReferenceDesignator), 830);
++  types.Bind(STANDARD_TYPE(StepRepr_ComponentPathShapeAspect), 831);
++  types.Bind(STANDARD_TYPE(StepRepr_ExternallyDefinedRepresentationItem), 832);
++  types.Bind(STANDARD_TYPE(StepBasic_ExternallyDefinedItemWithMultipleReferences), 833);
++  types.Bind(STANDARD_TYPE(StepRepr_ShapeRepresentationReference), 834);
+   types.Bind(STANDARD_TYPE(StepGeom_SuParameters), 726);
+   types.Bind(STANDARD_TYPE(StepKinematics_RotationAboutDirection), 727);
+   types.Bind(STANDARD_TYPE(StepKinematics_KinematicJoint), 728);
+diff --git a/src/DataExchange/TKDESTEP/StepBasic/FILES.cmake b/src/DataExchange/TKDESTEP/StepBasic/FILES.cmake
+index f79b40c2..0f96544d 100644
+--- a/src/DataExchange/TKDESTEP/StepBasic/FILES.cmake
++++ b/src/DataExchange/TKDESTEP/StepBasic/FILES.cmake
+@@ -2,6 +2,8 @@
+ set(OCCT_StepBasic_FILES_LOCATION "${CMAKE_CURRENT_LIST_DIR}")
+ 
+ set(OCCT_StepBasic_FILES
++  StepBasic_ExternallyDefinedItemWithMultipleReferences.cxx
++  StepBasic_ExternallyDefinedItemWithMultipleReferences.hxx
+   StepBasic_Action.cxx
+   StepBasic_Action.hxx
+   StepBasic_ActionAssignment.cxx
+diff --git a/src/DataExchange/TKDESTEP/StepBasic/StepBasic_ExternallyDefinedItemWithMultipleReferences.cxx b/src/DataExchange/TKDESTEP/StepBasic/StepBasic_ExternallyDefinedItemWithMultipleReferences.cxx
+new file mode 100644
+index 00000000..f954030e
+--- /dev/null
++++ b/src/DataExchange/TKDESTEP/StepBasic/StepBasic_ExternallyDefinedItemWithMultipleReferences.cxx
+@@ -0,0 +1,31 @@
++// This file is part of Open CASCADE Technology software library.
++//
++// This library is free software; you can redistribute it and/or modify it under
++// the terms of the GNU Lesser General Public License version 2.1 as published
++// by the Free Software Foundation, with special exception defined in the file
++// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
++// distribution for complete text of the license and disclaimer of any warranty.
++//
++// Alternatively, this file may be used under the terms of Open CASCADE
++// commercial license or contractual agreement.
++
++#include <StepBasic_ExternallyDefinedItemWithMultipleReferences.hxx>
++
++IMPLEMENT_STANDARD_RTTIEXT(StepBasic_ExternallyDefinedItemWithMultipleReferences,
++                           StepBasic_ExternallyDefinedItem)
++
++//=================================================================================================
++
++StepBasic_ExternallyDefinedItemWithMultipleReferences::
++  StepBasic_ExternallyDefinedItemWithMultipleReferences() = default;
++
++//=================================================================================================
++
++void StepBasic_ExternallyDefinedItemWithMultipleReferences::Init(
++  const StepBasic_SourceItem&                                   theItemId,
++  const occ::handle<StepBasic_ExternalSource>&                  theSource,
++  const occ::handle<NCollection_HArray1<StepBasic_SourceItem>>& theReferences)
++{
++  StepBasic_ExternallyDefinedItem::Init(theItemId, theSource);
++  myReferences = theReferences;
++}
+diff --git a/src/DataExchange/TKDESTEP/StepBasic/StepBasic_ExternallyDefinedItemWithMultipleReferences.hxx b/src/DataExchange/TKDESTEP/StepBasic/StepBasic_ExternallyDefinedItemWithMultipleReferences.hxx
+new file mode 100644
+index 00000000..14ed3d6e
+--- /dev/null
++++ b/src/DataExchange/TKDESTEP/StepBasic/StepBasic_ExternallyDefinedItemWithMultipleReferences.hxx
+@@ -0,0 +1,54 @@
++// This file is part of Open CASCADE Technology software library.
++//
++// This library is free software; you can redistribute it and/or modify it under
++// the terms of the GNU Lesser General Public License version 2.1 as published
++// by the Free Software Foundation, with special exception defined in the file
++// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
++// distribution for complete text of the license and disclaimer of any warranty.
++//
++// Alternatively, this file may be used under the terms of Open CASCADE
++// commercial license or contractual agreement.
++
++#ifndef _StepBasic_ExternallyDefinedItemWithMultipleReferences_HeaderFile
++#define _StepBasic_ExternallyDefinedItemWithMultipleReferences_HeaderFile
++
++#include <Standard.hxx>
++#include <Standard_Type.hxx>
++
++#include <NCollection_HArray1.hxx>
++#include <StepBasic_ExternallyDefinedItem.hxx>
++#include <StepBasic_SourceItem.hxx>
++
++//! Representation of STEP entity Externally_Defined_Item_With_Multiple_References (AP242): an
++//! item in another file, with the chain of identifiers leading to it from the root of that file.
++class StepBasic_ExternallyDefinedItemWithMultipleReferences : public StepBasic_ExternallyDefinedItem
++{
++public:
++  //! Empty constructor
++  Standard_EXPORT StepBasic_ExternallyDefinedItemWithMultipleReferences();
++
++  //! Initialize all fields
++  Standard_EXPORT void Init(const StepBasic_SourceItem&                  theItemId,
++                            const occ::handle<StepBasic_ExternalSource>& theSource,
++                            const occ::handle<NCollection_HArray1<StepBasic_SourceItem>>& theReferences);
++
++  //! Returns field References
++  const occ::handle<NCollection_HArray1<StepBasic_SourceItem>>& References() const
++  {
++    return myReferences;
++  }
++
++  //! Set field References
++  void SetReferences(const occ::handle<NCollection_HArray1<StepBasic_SourceItem>>& theReferences)
++  {
++    myReferences = theReferences;
++  }
++
++  DEFINE_STANDARD_RTTIEXT(StepBasic_ExternallyDefinedItemWithMultipleReferences,
++                          StepBasic_ExternallyDefinedItem)
++
++private:
++  occ::handle<NCollection_HArray1<StepBasic_SourceItem>> myReferences;
++};
++
++#endif // _StepBasic_ExternallyDefinedItemWithMultipleReferences_HeaderFile
+diff --git a/src/DataExchange/TKDESTEP/StepRepr/FILES.cmake b/src/DataExchange/TKDESTEP/StepRepr/FILES.cmake
+index 597d229c..f26b6748 100644
+--- a/src/DataExchange/TKDESTEP/StepRepr/FILES.cmake
++++ b/src/DataExchange/TKDESTEP/StepRepr/FILES.cmake
+@@ -2,6 +2,14 @@
+ set(OCCT_StepRepr_FILES_LOCATION "${CMAKE_CURRENT_LIST_DIR}")
+ 
+ set(OCCT_StepRepr_FILES
++  StepRepr_MultiLevelReferenceDesignator.cxx
++  StepRepr_MultiLevelReferenceDesignator.hxx
++  StepRepr_ComponentPathShapeAspect.cxx
++  StepRepr_ComponentPathShapeAspect.hxx
++  StepRepr_ExternallyDefinedRepresentationItem.cxx
++  StepRepr_ExternallyDefinedRepresentationItem.hxx
++  StepRepr_ShapeRepresentationReference.cxx
++  StepRepr_ShapeRepresentationReference.hxx
+   StepRepr_AllAroundShapeAspect.cxx
+   StepRepr_AllAroundShapeAspect.hxx
+   StepRepr_Apex.cxx
+diff --git a/src/DataExchange/TKDESTEP/StepRepr/StepRepr_ComponentPathShapeAspect.cxx b/src/DataExchange/TKDESTEP/StepRepr/StepRepr_ComponentPathShapeAspect.cxx
+new file mode 100644
+index 00000000..f5115cfc
+--- /dev/null
++++ b/src/DataExchange/TKDESTEP/StepRepr/StepRepr_ComponentPathShapeAspect.cxx
+@@ -0,0 +1,37 @@
++// This file is part of Open CASCADE Technology software library.
++//
++// This library is free software; you can redistribute it and/or modify it under
++// the terms of the GNU Lesser General Public License version 2.1 as published
++// by the Free Software Foundation, with special exception defined in the file
++// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
++// distribution for complete text of the license and disclaimer of any warranty.
++//
++// Alternatively, this file may be used under the terms of Open CASCADE
++// commercial license or contractual agreement.
++
++#include <StepRepr_ComponentPathShapeAspect.hxx>
++#include <StepRepr_ProductDefinitionShape.hxx>
++#include <TCollection_HAsciiString.hxx>
++
++IMPLEMENT_STANDARD_RTTIEXT(StepRepr_ComponentPathShapeAspect, StepRepr_ShapeAspect)
++
++//=================================================================================================
++
++StepRepr_ComponentPathShapeAspect::StepRepr_ComponentPathShapeAspect() = default;
++
++//=================================================================================================
++
++void StepRepr_ComponentPathShapeAspect::Init(
++  const occ::handle<TCollection_HAsciiString>&        theName,
++  const occ::handle<TCollection_HAsciiString>&        theDescription,
++  const occ::handle<StepRepr_ProductDefinitionShape>& theOfShape,
++  const StepData_Logical                              theProductDefinitional,
++  const occ::handle<StepRepr_AssemblyComponentUsage>& theLocation,
++  const occ::handle<StepRepr_ShapeAspect>&            theComponentShapeAspect,
++  const occ::handle<TCollection_HAsciiString>&        theComponentShapeAspectId)
++{
++  StepRepr_ShapeAspect::Init(theName, theDescription, theOfShape, theProductDefinitional);
++  myLocation               = theLocation;
++  myComponentShapeAspect   = theComponentShapeAspect;
++  myComponentShapeAspectId = theComponentShapeAspectId;
++}
+diff --git a/src/DataExchange/TKDESTEP/StepRepr/StepRepr_ComponentPathShapeAspect.hxx b/src/DataExchange/TKDESTEP/StepRepr/StepRepr_ComponentPathShapeAspect.hxx
+new file mode 100644
+index 00000000..e94969c8
+--- /dev/null
++++ b/src/DataExchange/TKDESTEP/StepRepr/StepRepr_ComponentPathShapeAspect.hxx
+@@ -0,0 +1,84 @@
++// This file is part of Open CASCADE Technology software library.
++//
++// This library is free software; you can redistribute it and/or modify it under
++// the terms of the GNU Lesser General Public License version 2.1 as published
++// by the Free Software Foundation, with special exception defined in the file
++// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
++// distribution for complete text of the license and disclaimer of any warranty.
++//
++// Alternatively, this file may be used under the terms of Open CASCADE
++// commercial license or contractual agreement.
++
++#ifndef _StepRepr_ComponentPathShapeAspect_HeaderFile
++#define _StepRepr_ComponentPathShapeAspect_HeaderFile
++
++#include <Standard.hxx>
++#include <Standard_Type.hxx>
++
++#include <StepRepr_AssemblyComponentUsage.hxx>
++#include <StepRepr_ShapeAspect.hxx>
++
++//! Representation of STEP entity Component_Path_Shape_Aspect (AP242): a shape aspect of one
++//! component instance, in the context of an assembly (of_shape). The instance is a
++//! next_assembly_usage_occurrence or a multi_level_reference_designator (Location); the shape
++//! aspect on the component is either an entity in this file or, as an external element reference,
++//! the identifier of an EXTERNAL_ANCHOR in the component's file (ComponentShapeAspectId).
++class StepRepr_ComponentPathShapeAspect : public StepRepr_ShapeAspect
++{
++public:
++  //! Empty constructor
++  Standard_EXPORT StepRepr_ComponentPathShapeAspect();
++
++  //! Initialize all fields; one of theComponentShapeAspect and theComponentShapeAspectId is null
++  Standard_EXPORT void Init(const occ::handle<TCollection_HAsciiString>&        theName,
++                            const occ::handle<TCollection_HAsciiString>&        theDescription,
++                            const occ::handle<StepRepr_ProductDefinitionShape>& theOfShape,
++                            const StepData_Logical                              theProductDefinitional,
++                            const occ::handle<StepRepr_AssemblyComponentUsage>& theLocation,
++                            const occ::handle<StepRepr_ShapeAspect>& theComponentShapeAspect,
++                            const occ::handle<TCollection_HAsciiString>& theComponentShapeAspectId);
++
++  //! Returns field Location: a next_assembly_usage_occurrence or multi_level_reference_designator
++  const occ::handle<StepRepr_AssemblyComponentUsage>& Location() const { return myLocation; }
++
++  //! Set field Location
++  void SetLocation(const occ::handle<StepRepr_AssemblyComponentUsage>& theLocation)
++  {
++    myLocation = theLocation;
++  }
++
++  //! Returns field ComponentShapeAspect when it is a shape aspect in this file, else null
++  const occ::handle<StepRepr_ShapeAspect>& ComponentShapeAspect() const
++  {
++    return myComponentShapeAspect;
++  }
++
++  //! Set field ComponentShapeAspect to a shape aspect in this file
++  void SetComponentShapeAspect(const occ::handle<StepRepr_ShapeAspect>& theShapeAspect)
++  {
++    myComponentShapeAspect = theShapeAspect;
++    myComponentShapeAspectId.Nullify();
++  }
++
++  //! Returns field ComponentShapeAspect when it is an identifier (an external anchor), else null
++  const occ::handle<TCollection_HAsciiString>& ComponentShapeAspectId() const
++  {
++    return myComponentShapeAspectId;
++  }
++
++  //! Set field ComponentShapeAspect to an identifier (an external anchor)
++  void SetComponentShapeAspectId(const occ::handle<TCollection_HAsciiString>& theId)
++  {
++    myComponentShapeAspectId = theId;
++    myComponentShapeAspect.Nullify();
++  }
++
++  DEFINE_STANDARD_RTTIEXT(StepRepr_ComponentPathShapeAspect, StepRepr_ShapeAspect)
++
++private:
++  occ::handle<StepRepr_AssemblyComponentUsage> myLocation;
++  occ::handle<StepRepr_ShapeAspect>            myComponentShapeAspect;
++  occ::handle<TCollection_HAsciiString>        myComponentShapeAspectId;
++};
++
++#endif // _StepRepr_ComponentPathShapeAspect_HeaderFile
+diff --git a/src/DataExchange/TKDESTEP/StepRepr/StepRepr_ExternallyDefinedRepresentation.hxx b/src/DataExchange/TKDESTEP/StepRepr/StepRepr_ExternallyDefinedRepresentation.hxx
+index 9d15de32..f1917840 100644
+--- a/src/DataExchange/TKDESTEP/StepRepr/StepRepr_ExternallyDefinedRepresentation.hxx
++++ b/src/DataExchange/TKDESTEP/StepRepr/StepRepr_ExternallyDefinedRepresentation.hxx
+@@ -20,15 +20,36 @@
+ #include <Standard.hxx>
+ #include <Standard_Type.hxx>
+ 
++#include <StepBasic_ExternalSource.hxx>
++#include <StepBasic_SourceItem.hxx>
+ #include <StepRepr_Representation.hxx>
+ 
++//! Representation of STEP entity Externally_Defined_Representation: a representation in another
++//! file (an external element reference), with the externally_defined_item attributes ItemId (the
++//! EXTERNAL_ANCHOR of the representation) and Source (the file).
+ class StepRepr_ExternallyDefinedRepresentation : public StepRepr_Representation
+ {
+ 
+ public:
+   Standard_EXPORT StepRepr_ExternallyDefinedRepresentation();
+ 
++  //! Returns field ItemId (externally_defined_item.item_id)
++  const StepBasic_SourceItem& ItemId() const { return myItemId; }
++
++  //! Set field ItemId
++  void SetItemId(const StepBasic_SourceItem& theItemId) { myItemId = theItemId; }
++
++  //! Returns field Source (externally_defined_item.source)
++  const occ::handle<StepBasic_ExternalSource>& Source() const { return mySource; }
++
++  //! Set field Source
++  void SetSource(const occ::handle<StepBasic_ExternalSource>& theSource) { mySource = theSource; }
++
+   DEFINE_STANDARD_RTTIEXT(StepRepr_ExternallyDefinedRepresentation, StepRepr_Representation)
++
++private:
++  StepBasic_SourceItem                  myItemId;
++  occ::handle<StepBasic_ExternalSource> mySource;
+ };
+ 
+ #endif // _StepRepr_ExternallyDefinedRepresentation_HeaderFile
+diff --git a/src/DataExchange/TKDESTEP/StepRepr/StepRepr_ExternallyDefinedRepresentationItem.cxx b/src/DataExchange/TKDESTEP/StepRepr/StepRepr_ExternallyDefinedRepresentationItem.cxx
+new file mode 100644
+index 00000000..90ffb4ee
+--- /dev/null
++++ b/src/DataExchange/TKDESTEP/StepRepr/StepRepr_ExternallyDefinedRepresentationItem.cxx
+@@ -0,0 +1,32 @@
++// This file is part of Open CASCADE Technology software library.
++//
++// This library is free software; you can redistribute it and/or modify it under
++// the terms of the GNU Lesser General Public License version 2.1 as published
++// by the Free Software Foundation, with special exception defined in the file
++// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
++// distribution for complete text of the license and disclaimer of any warranty.
++//
++// Alternatively, this file may be used under the terms of Open CASCADE
++// commercial license or contractual agreement.
++
++#include <StepRepr_ExternallyDefinedRepresentationItem.hxx>
++#include <TCollection_HAsciiString.hxx>
++
++IMPLEMENT_STANDARD_RTTIEXT(StepRepr_ExternallyDefinedRepresentationItem, StepRepr_RepresentationItem)
++
++//=================================================================================================
++
++StepRepr_ExternallyDefinedRepresentationItem::StepRepr_ExternallyDefinedRepresentationItem() =
++  default;
++
++//=================================================================================================
++
++void StepRepr_ExternallyDefinedRepresentationItem::Init(
++  const occ::handle<TCollection_HAsciiString>& theName,
++  const StepBasic_SourceItem&                  theItemId,
++  const occ::handle<StepBasic_ExternalSource>& theSource)
++{
++  StepRepr_RepresentationItem::Init(theName);
++  myItemId = theItemId;
++  mySource = theSource;
++}
+diff --git a/src/DataExchange/TKDESTEP/StepRepr/StepRepr_ExternallyDefinedRepresentationItem.hxx b/src/DataExchange/TKDESTEP/StepRepr/StepRepr_ExternallyDefinedRepresentationItem.hxx
+new file mode 100644
+index 00000000..79ef6bfb
+--- /dev/null
++++ b/src/DataExchange/TKDESTEP/StepRepr/StepRepr_ExternallyDefinedRepresentationItem.hxx
+@@ -0,0 +1,55 @@
++// This file is part of Open CASCADE Technology software library.
++//
++// This library is free software; you can redistribute it and/or modify it under
++// the terms of the GNU Lesser General Public License version 2.1 as published
++// by the Free Software Foundation, with special exception defined in the file
++// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
++// distribution for complete text of the license and disclaimer of any warranty.
++//
++// Alternatively, this file may be used under the terms of Open CASCADE
++// commercial license or contractual agreement.
++
++#ifndef _StepRepr_ExternallyDefinedRepresentationItem_HeaderFile
++#define _StepRepr_ExternallyDefinedRepresentationItem_HeaderFile
++
++#include <Standard.hxx>
++#include <Standard_Type.hxx>
++
++#include <StepBasic_ExternalSource.hxx>
++#include <StepBasic_SourceItem.hxx>
++#include <StepRepr_RepresentationItem.hxx>
++
++//! Representation of STEP entity Externally_Defined_Representation_Item (AP242): a placeholder for
++//! a representation item in another file (an external element reference). ItemId names the
++//! EXTERNAL_ANCHOR of the item in the file given by Source.
++class StepRepr_ExternallyDefinedRepresentationItem : public StepRepr_RepresentationItem
++{
++public:
++  //! Empty constructor
++  Standard_EXPORT StepRepr_ExternallyDefinedRepresentationItem();
++
++  //! Initialize all fields
++  Standard_EXPORT void Init(const occ::handle<TCollection_HAsciiString>& theName,
++                            const StepBasic_SourceItem&                  theItemId,
++                            const occ::handle<StepBasic_ExternalSource>& theSource);
++
++  //! Returns field ItemId (externally_defined_item.item_id)
++  const StepBasic_SourceItem& ItemId() const { return myItemId; }
++
++  //! Set field ItemId
++  void SetItemId(const StepBasic_SourceItem& theItemId) { myItemId = theItemId; }
++
++  //! Returns field Source (externally_defined_item.source)
++  const occ::handle<StepBasic_ExternalSource>& Source() const { return mySource; }
++
++  //! Set field Source
++  void SetSource(const occ::handle<StepBasic_ExternalSource>& theSource) { mySource = theSource; }
++
++  DEFINE_STANDARD_RTTIEXT(StepRepr_ExternallyDefinedRepresentationItem, StepRepr_RepresentationItem)
++
++private:
++  StepBasic_SourceItem                  myItemId;
++  occ::handle<StepBasic_ExternalSource> mySource;
++};
++
++#endif // _StepRepr_ExternallyDefinedRepresentationItem_HeaderFile
+diff --git a/src/DataExchange/TKDESTEP/StepRepr/StepRepr_MultiLevelReferenceDesignator.cxx b/src/DataExchange/TKDESTEP/StepRepr/StepRepr_MultiLevelReferenceDesignator.cxx
+new file mode 100644
+index 00000000..fa25c406
+--- /dev/null
++++ b/src/DataExchange/TKDESTEP/StepRepr/StepRepr_MultiLevelReferenceDesignator.cxx
+@@ -0,0 +1,64 @@
++// This file is part of Open CASCADE Technology software library.
++//
++// This library is free software; you can redistribute it and/or modify it under
++// the terms of the GNU Lesser General Public License version 2.1 as published
++// by the Free Software Foundation, with special exception defined in the file
++// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
++// distribution for complete text of the license and disclaimer of any warranty.
++//
++// Alternatively, this file may be used under the terms of Open CASCADE
++// commercial license or contractual agreement.
++
++#include <StepRepr_MultiLevelReferenceDesignator.hxx>
++#include <TCollection_HAsciiString.hxx>
++
++IMPLEMENT_STANDARD_RTTIEXT(StepRepr_MultiLevelReferenceDesignator, StepRepr_AssemblyComponentUsage)
++
++//=================================================================================================
++
++StepRepr_MultiLevelReferenceDesignator::StepRepr_MultiLevelReferenceDesignator() = default;
++
++//=================================================================================================
++
++void StepRepr_MultiLevelReferenceDesignator::Init(
++  const occ::handle<TCollection_HAsciiString>& theId,
++  const occ::handle<TCollection_HAsciiString>& theName,
++  const bool                                   theHasDescription,
++  const occ::handle<TCollection_HAsciiString>& theDescription,
++  const bool                                   theHasReferenceDesignator,
++  const occ::handle<TCollection_HAsciiString>& theReferenceDesignator,
++  const occ::handle<NCollection_HArray1<occ::handle<StepRepr_NextAssemblyUsageOccurrence>>>&
++    theLocation)
++{
++  StepRepr_AssemblyComponentUsage::Init(theId,
++                                        theName,
++                                        theHasDescription,
++                                        theDescription,
++                                        StepBasic_ProductDefinitionOrReference(),
++                                        StepBasic_ProductDefinitionOrReference(),
++                                        theHasReferenceDesignator,
++                                        theReferenceDesignator);
++  myLocation = theLocation;
++}
++
++//=================================================================================================
++
++StepBasic_ProductDefinitionOrReference StepRepr_MultiLevelReferenceDesignator::Root() const
++{
++  if (NbLocation() == 0 || myLocation->First().IsNull())
++  {
++    return StepBasic_ProductDefinitionOrReference();
++  }
++  return myLocation->First()->RelatingProductDefinitionAP242();
++}
++
++//=================================================================================================
++
++StepBasic_ProductDefinitionOrReference StepRepr_MultiLevelReferenceDesignator::Leaf() const
++{
++  if (NbLocation() == 0 || myLocation->Last().IsNull())
++  {
++    return StepBasic_ProductDefinitionOrReference();
++  }
++  return myLocation->Last()->RelatedProductDefinitionAP242();
++}
+diff --git a/src/DataExchange/TKDESTEP/StepRepr/StepRepr_MultiLevelReferenceDesignator.hxx b/src/DataExchange/TKDESTEP/StepRepr/StepRepr_MultiLevelReferenceDesignator.hxx
+new file mode 100644
+index 00000000..8bb719a6
+--- /dev/null
++++ b/src/DataExchange/TKDESTEP/StepRepr/StepRepr_MultiLevelReferenceDesignator.hxx
+@@ -0,0 +1,73 @@
++// This file is part of Open CASCADE Technology software library.
++//
++// This library is free software; you can redistribute it and/or modify it under
++// the terms of the GNU Lesser General Public License version 2.1 as published
++// by the Free Software Foundation, with special exception defined in the file
++// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
++// distribution for complete text of the license and disclaimer of any warranty.
++//
++// Alternatively, this file may be used under the terms of Open CASCADE
++// commercial license or contractual agreement.
++
++#ifndef _StepRepr_MultiLevelReferenceDesignator_HeaderFile
++#define _StepRepr_MultiLevelReferenceDesignator_HeaderFile
++
++#include <Standard.hxx>
++#include <Standard_Type.hxx>
++
++#include <NCollection_HArray1.hxx>
++#include <StepRepr_AssemblyComponentUsage.hxx>
++#include <StepRepr_NextAssemblyUsageOccurrence.hxx>
++
++//! Representation of STEP entity Multi_Level_Reference_Designator (AP242): a component instance
++//! deep in an assembly, given as the top-down list of next_assembly_usage_occurrences from the
++//! root node to the leaf node. The relating and related product definitions are derived from the
++//! location (written as '*'); they are not set by the reader.
++class StepRepr_MultiLevelReferenceDesignator : public StepRepr_AssemblyComponentUsage
++{
++public:
++  //! Empty constructor
++  Standard_EXPORT StepRepr_MultiLevelReferenceDesignator();
++
++  //! Initialize all fields; the relating and related product definitions stay empty
++  Standard_EXPORT void Init(
++    const occ::handle<TCollection_HAsciiString>& theId,
++    const occ::handle<TCollection_HAsciiString>& theName,
++    const bool                                   theHasDescription,
++    const occ::handle<TCollection_HAsciiString>& theDescription,
++    const bool                                   theHasReferenceDesignator,
++    const occ::handle<TCollection_HAsciiString>& theReferenceDesignator,
++    const occ::handle<NCollection_HArray1<occ::handle<StepRepr_NextAssemblyUsageOccurrence>>>&
++      theLocation);
++
++  //! Returns field Location: the usages from the root node down to the leaf node
++  const occ::handle<NCollection_HArray1<occ::handle<StepRepr_NextAssemblyUsageOccurrence>>>&
++    Location() const
++  {
++    return myLocation;
++  }
++
++  //! Set field Location
++  void SetLocation(
++    const occ::handle<NCollection_HArray1<occ::handle<StepRepr_NextAssemblyUsageOccurrence>>>&
++      theLocation)
++  {
++    myLocation = theLocation;
++  }
++
++  //! Returns the number of usages in Location
++  int NbLocation() const { return myLocation.IsNull() ? 0 : myLocation->Length(); }
++
++  //! Returns the root node: the relating product definition of the first usage (derived)
++  Standard_EXPORT StepBasic_ProductDefinitionOrReference Root() const;
++
++  //! Returns the leaf node: the related product definition of the last usage (derived)
++  Standard_EXPORT StepBasic_ProductDefinitionOrReference Leaf() const;
++
++  DEFINE_STANDARD_RTTIEXT(StepRepr_MultiLevelReferenceDesignator, StepRepr_AssemblyComponentUsage)
++
++private:
++  occ::handle<NCollection_HArray1<occ::handle<StepRepr_NextAssemblyUsageOccurrence>>> myLocation;
++};
++
++#endif // _StepRepr_MultiLevelReferenceDesignator_HeaderFile
+diff --git a/src/DataExchange/TKDESTEP/StepRepr/StepRepr_ShapeRepresentationReference.cxx b/src/DataExchange/TKDESTEP/StepRepr/StepRepr_ShapeRepresentationReference.cxx
+new file mode 100644
+index 00000000..85fda9bd
+--- /dev/null
++++ b/src/DataExchange/TKDESTEP/StepRepr/StepRepr_ShapeRepresentationReference.cxx
+@@ -0,0 +1,18 @@
++// This file is part of Open CASCADE Technology software library.
++//
++// This library is free software; you can redistribute it and/or modify it under
++// the terms of the GNU Lesser General Public License version 2.1 as published
++// by the Free Software Foundation, with special exception defined in the file
++// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
++// distribution for complete text of the license and disclaimer of any warranty.
++//
++// Alternatively, this file may be used under the terms of Open CASCADE
++// commercial license or contractual agreement.
++
++#include <StepRepr_ShapeRepresentationReference.hxx>
++
++IMPLEMENT_STANDARD_RTTIEXT(StepRepr_ShapeRepresentationReference, StepRepr_RepresentationReference)
++
++//=================================================================================================
++
++StepRepr_ShapeRepresentationReference::StepRepr_ShapeRepresentationReference() = default;
+diff --git a/src/DataExchange/TKDESTEP/StepRepr/StepRepr_ShapeRepresentationReference.hxx b/src/DataExchange/TKDESTEP/StepRepr/StepRepr_ShapeRepresentationReference.hxx
+new file mode 100644
+index 00000000..005586ba
+--- /dev/null
++++ b/src/DataExchange/TKDESTEP/StepRepr/StepRepr_ShapeRepresentationReference.hxx
+@@ -0,0 +1,31 @@
++// This file is part of Open CASCADE Technology software library.
++//
++// This library is free software; you can redistribute it and/or modify it under
++// the terms of the GNU Lesser General Public License version 2.1 as published
++// by the Free Software Foundation, with special exception defined in the file
++// OCCT_LGPL_EXCEPTION.txt. Consult the file LICENSE_LGPL_21.txt included in OCCT
++// distribution for complete text of the license and disclaimer of any warranty.
++//
++// Alternatively, this file may be used under the terms of Open CASCADE
++// commercial license or contractual agreement.
++
++#ifndef _StepRepr_ShapeRepresentationReference_HeaderFile
++#define _StepRepr_ShapeRepresentationReference_HeaderFile
++
++#include <Standard.hxx>
++#include <Standard_Type.hxx>
++
++#include <StepRepr_RepresentationReference.hxx>
++
++//! Representation of STEP entity Shape_Representation_Reference (AP242): a shape representation
++//! defined in another file, for navigating a geometric assembly across files.
++class StepRepr_ShapeRepresentationReference : public StepRepr_RepresentationReference
++{
++public:
++  //! Empty constructor
++  Standard_EXPORT StepRepr_ShapeRepresentationReference();
++
++  DEFINE_STANDARD_RTTIEXT(StepRepr_ShapeRepresentationReference, StepRepr_RepresentationReference)
++};
++
++#endif // _StepRepr_ShapeRepresentationReference_HeaderFile

@@ -16,9 +16,9 @@ describe('externalFilesInfo', () => {
   it('fails when a referenced file was not opened, and names it', () => {
     const files = [
       { name: 'a.stp', loaded: true },
-      { name: 'b.stp', loaded: false },
+      { name: 'b.stp', loaded: false, location: './parts/' },
     ];
-    expect(externalFilesInfo(files)).toEqual(['✗ 1 of 2', 'Not opened: b.stp. Open them together with this file.']);
+    expect(externalFilesInfo(files)).toEqual(['✗ 1 of 2', 'Not opened: b.stp (./parts/). Open them together with this file.']);
     expect(externalFilesInfo(files.slice(0, 1))).toEqual(['✓ 1 of 1', 'a.stp']);
   });
 });

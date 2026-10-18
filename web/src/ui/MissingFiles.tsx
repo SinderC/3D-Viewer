@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { Model } from '../core/model';
+import { externalFileLabel } from '../core/product';
 import { CloseIcon } from './icons';
 
 // Shown over the view when an assembly keeps parts in files that were not opened with it
@@ -8,7 +9,8 @@ import { CloseIcon } from './icons';
 export function MissingFiles({ model, onAdd }: { model: Model; onAdd: () => void }) {
   const [dismissed, setDismissed] = useState<Model>();
   const [leaving, setLeaving] = useState<Model>();
-  const missing = model.externalFiles?.filter((f) => !f.loaded).map((f) => f.name) ?? [];
+  const missingFiles = model.externalFiles?.filter((f) => !f.loaded) ?? [];
+  const missing = missingFiles.map((f) => f.name);
   if (!missing.length || dismissed === model) return null;
   const nothingShown = !model.nodes.some((n) => n.proto >= 0);
   return (
@@ -18,7 +20,9 @@ export function MissingFiles({ model, onAdd }: { model: Model; onAdd: () => void
       onTransitionEnd={(e) => leaving === model && e.propertyName === 'opacity' && setDismissed(model)}
     >
       <p>
-        <strong>{missing.join(', ')}</strong> {missing.length === 1 ? 'is' : 'are'} missing,{' '}
+        <strong title={missingFiles.some((f) => f.location) ? missingFiles.map(externalFileLabel).join('\n') : undefined}>
+          {missing.join(', ')}
+        </strong> {missing.length === 1 ? 'is' : 'are'} missing,{' '}
         {nothingShown ? 'so no parts can be shown.' : "so some parts aren't shown."}
       </p>
       <button onClick={onAdd}>{missing.length === 1 ? `Add ${missing[0]}…` : 'Add files…'}</button>

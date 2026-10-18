@@ -1,5 +1,5 @@
 // PMI presentations (lines, and filled areas such as text), drawn with every instance of the part
-// that owns them, and the faces the selected item refers to.
+// (or, for assembly PMI, the assembly) that owns them, and the faces the selected item refers to.
 import * as THREE from 'three';
 import { faceTriangles, type Model } from '../core/model';
 import { isShown } from './objects';
@@ -22,6 +22,7 @@ export class PmiLayer {
     polygonOffsetUnits: -1,
   });
   private model?: Model;
+  private nodeObjects: THREE.Object3D[] = [];
   private owners: THREE.Object3D[][] = []; // per prototype: the node objects that instance it
   private objects: (THREE.LineSegments | THREE.Mesh)[][] = []; // per PMI item: lines and fill per instance
   private faces: THREE.Mesh[] = [];
@@ -31,10 +32,15 @@ export class PmiLayer {
   build(model: Model, nodeObjects: THREE.Object3D[], root: THREE.Object3D): void {
     this.clear();
     this.model = model;
+    this.nodeObjects = nodeObjects;
     this.owners = model.protos.map(() => []);
     model.nodes.forEach((n) => n.proto >= 0 && nodeObjects[n.id] && this.owners[n.proto].push(nodeObjects[n.id]));
     this.objects = model.pmi.map((item) => {
-      const owners = item.proto >= 0 ? this.owners[item.proto] : [root];
+      const owners = item.nodes
+        ? item.nodes.map((n) => nodeObjects[n]).filter(Boolean)
+        : item.proto >= 0
+          ? this.owners[item.proto]
+          : [root];
       const make = <T extends THREE.LineSegments | THREE.Mesh>(positions: Float32Array, create: (g: THREE.BufferGeometry) => T) => {
         if (!positions.length) return [];
         const geometry = new THREE.BufferGeometry();
@@ -70,10 +76,21 @@ export class PmiLayer {
     const item = index === null ? undefined : this.model?.pmi[index];
     if (!item || !this.model) return;
     this.paint(index!, true);
+    if (item.nodeFaces) {
+      for (const [node, ...faces] of item.nodeFaces) {
+        const owner = this.nodeObjects[node];
+        if (owner) this.addFaces(faceTriangles(this.model.protos[this.model.nodes[node].proto], faces), [owner]);
+      }
+      return;
+    }
     if (item.proto < 0 || !item.faces.length) return;
+    this.addFaces(faceTriangles(this.model.protos[item.proto], item.faces), this.owners[item.proto]);
+  }
+
+  private addFaces(positions: Float32Array, owners: THREE.Object3D[]): void {
     const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(faceTriangles(this.model.protos[item.proto], item.faces), 3));
-    for (const owner of this.owners[item.proto]) {
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    for (const owner of owners) {
       const mesh = new THREE.Mesh(geometry, this.faceMaterial);
       mesh.raycast = () => {};
       owner.add(mesh);
@@ -107,6 +124,7 @@ export class PmiLayer {
       }
     this.objects = [];
     this.owners = [];
+    this.nodeObjects = [];
     this.selected = null;
     this.model = undefined;
   }
@@ -118,7 +136,7 @@ export class PmiLayer {
   }
 
   private clearFaces(): void {
-    this.faces[0]?.geometry.dispose();
+    new Set(this.faces.map((m) => m.geometry)).forEach((g) => g.dispose());
     this.faces.forEach((m) => m.removeFromParent());
     this.faces = [];
   }

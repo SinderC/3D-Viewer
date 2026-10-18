@@ -14,13 +14,15 @@ class Step {
     this.lines.push(`#${this.lines.length + 1}=${entity};`);
     return `#${this.lines.length}`;
   }
-  text(schema) {
+  // header: more header entities, such as !EXTERNAL_ANCHOR(...)
+  text(schema, header = []) {
     return [
       'ISO-10303-21;',
       'HEADER;',
       "FILE_DESCRIPTION((''),'2;1');",
       "FILE_NAME('test.stp','2026-01-01T00:00:00',(''),(''),'','','');",
       `FILE_SCHEMA(('${schema}'));`,
+      ...header,
       'ENDSEC;',
       'DATA;',
       ...this.lines,
@@ -31,6 +33,7 @@ class Step {
 }
 
 const AP214 = 'AUTOMOTIVE_DESIGN { 1 0 10303 214 3 1 1 }';
+const AP242 = 'AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF { 1 0 10303 442 1 1 4 }';
 const AP203 = 'AP203_CONFIGURATION_CONTROLLED_3D_DESIGN_OF_MECHANICAL_PARTS_AND_ASSEMBLIES_MIM_LF { 1 0 10303 403 3 1 4 }';
 const list = (items) => `(${items.join(',')})`;
 const pt = (s, [x, y, z]) => s.add(`CARTESIAN_POINT('',(${x.toFixed(1)},${y.toFixed(1)},${z.toFixed(1)}))`);
@@ -39,8 +42,14 @@ const axis = (s, origin = [0, 0, 0], z = [0, 0, 1], x = [1, 0, 0]) =>
   s.add(`AXIS2_PLACEMENT_3D('',${pt(s, origin)},${dir(s, z)},${dir(s, x)})`);
 
 // Millimetre geometric context.
-function context(s) {
-  const mm = s.add('( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.) )');
+// inch: lengths in inches (a conversion based unit), else millimetres.
+function context(s, inch = false) {
+  let mm = s.add('( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.) )');
+  if (inch) {
+    const factor = s.add(`LENGTH_MEASURE_WITH_UNIT(LENGTH_MEASURE(25.4),${mm})`);
+    const dims = s.add('DIMENSIONAL_EXPONENTS(1.,0.,0.,0.,0.,0.,0.)');
+    mm = s.add(`( CONVERSION_BASED_UNIT('INCH',${factor}) LENGTH_UNIT() NAMED_UNIT(${dims}) )`);
+  }
   const rad = s.add('( NAMED_UNIT(*) PLANE_ANGLE_UNIT() SI_UNIT($,.RADIAN.) )');
   const sr = s.add('( NAMED_UNIT(*) SI_UNIT($,.STERADIAN.) SOLID_ANGLE_UNIT() )');
   const unc = s.add(`UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(1.E-07),${mm},'distance_accuracy_value','')`);
@@ -51,7 +60,8 @@ function context(s) {
 }
 
 // Box as a manifold solid B-rep with planar faces and line edges. face is ADVANCED_FACE or FACE_SURFACE.
-function box(s, [x0, y0, z0], size, face = 'ADVANCED_FACE') {
+// out.faces gets the faces: -z, +z, -y, +y, -x, +x.
+function box(s, [x0, y0, z0], size, face = 'ADVANCED_FACE', out = {}) {
   const corner = (i) => [x0 + (i & 1 ? size : 0), y0 + (i & 2 ? size : 0), z0 + (i & 4 ? size : 0)];
   const vertices = [...Array(8).keys()].map((i) => s.add(`VERTEX_POINT('',${pt(s, corner(i))})`));
   const edges = new Map();
@@ -80,6 +90,7 @@ function box(s, [x0, y0, z0], size, face = 'ADVANCED_FACE') {
     const plane = s.add(`PLANE('',${axis(s, corner(c[0]), n, ref)})`);
     return s.add(`${face}('',(${s.add(`FACE_OUTER_BOUND('',${loop},.T.)`)}),${plane},.T.)`);
   });
+  out.faces = faces;
   return s.add(`MANIFOLD_SOLID_BREP('',${s.add(`CLOSED_SHELL('',${list(faces)})`)})`);
 }
 
@@ -98,9 +109,10 @@ function product(s, ctx, name, items = [], rep = 'SHAPE_REPRESENTATION') {
   return { pd, pds, sr, origin };
 }
 
-// One occurrence of child in parent, moved by offset. OCCT names the instance after its id.
+// One occurrence of child in parent, moved by offset. OCCT names the instance after its id, which is
+// also its reference designator.
 function occurrence(s, ctx, parent, child, id, offset = [0, 0, 0]) {
-  const nauo = s.add(`NEXT_ASSEMBLY_USAGE_OCCURRENCE('${id}','','',${parent.pd},${child.pd},$)`);
+  const nauo = s.add(`NEXT_ASSEMBLY_USAGE_OCCURRENCE('${id}','','',${parent.pd},${child.pd},'${id}')`);
   const pds = s.add(`PRODUCT_DEFINITION_SHAPE('','',${nauo})`);
   const at = axis(s, offset);
   const rel = s.add(
@@ -296,18 +308,45 @@ const tests = {
   'parts in other files (external references), opened together or not'() {
     const part = new Step();
     product(part, context(part), 'box', [box(part, [0, 0, 0], 10)], 'ADVANCED_BREP_SHAPE_REPRESENTATION');
-    // withBracket: a part of its own too, so it shows something without the other file.
-    const assembly = (file, withBracket = false) => {
+    // bracket: a part of its own too, so it shows something without the other file.
+    // format: the document's 'data format' property (ExtRef RP 6.3.2), in a REPRESENTATION as the
+    // practice writes it, or in a SHAPE_REPRESENTATION as older files do (format = [value, true]).
+    // managed: the file is a constituent of a managed document ("document as product", ExtRef RP
+    // 5.3-5.5) that the part references, not referenced directly.
+    // location: the file's external_source path (ExtRef RP 5.2.3), as written.
+    // kind: the document_representation_type, 'digital' or 'physical' (ExtRef RP 5.2.1.2).
+    const assembly = (file, { bracket = false, format = null, managed = false, location = null, kind = 'digital' } = {}) => {
       const s = new Step();
       const ctx = context(s);
       const top = product(s, ctx, 'top');
       const ref = product(s, ctx, 'box'); // no shape here: it is in the other file
       occurrence(s, ctx, top, ref, 'first');
       occurrence(s, ctx, top, ref, 'second', [20, 0, 0]);
-      if (withBracket) occurrence(s, ctx, top, product(s, ctx, 'bracket', [box(s, [0, 20, 0], 10)], 'ADVANCED_BREP_SHAPE_REPRESENTATION'), 'bracket');
+      if (bracket) occurrence(s, ctx, top, product(s, ctx, 'bracket', [box(s, [0, 20, 0], 10)], 'ADVANCED_BREP_SHAPE_REPRESENTATION'), 'bracket');
       const doc = s.add(`DOCUMENT_FILE('${file}','',$,${s.add("DOCUMENT_TYPE('')")},'',$)`);
-      s.add(`DOCUMENT_REPRESENTATION_TYPE('digital',${doc})`);
-      const adr = s.add(`APPLIED_DOCUMENT_REFERENCE(${doc},'',(${ref.pd}))`);
+      s.add(`DOCUMENT_REPRESENTATION_TYPE('${kind}',${doc})`);
+      if (format) {
+        const [value, shapeRep] = [].concat(format);
+        const items = `(${s.add(`DESCRIPTIVE_REPRESENTATION_ITEM('data format','${value}')`)})`;
+        const rep = s.add(`${shapeRep ? 'SHAPE_REPRESENTATION' : 'REPRESENTATION'}('document format',${items},${s.add("REPRESENTATION_CONTEXT('','document parameters')")})`);
+        s.add(`PROPERTY_DEFINITION_REPRESENTATION(${s.add(`PROPERTY_DEFINITION('document property','',${doc})`)},${rep})`);
+      }
+      if (location) {
+        const role = s.add("IDENTIFICATION_ROLE('external document id and location',$)");
+        s.add(`APPLIED_EXTERNAL_IDENTIFICATION_ASSIGNMENT('${file}',${role},${s.add(`EXTERNAL_SOURCE(${location})`)},(${doc}))`);
+      }
+      let referenced = doc;
+      if (managed) {
+        const appCtx = s.add("APPLICATION_CONTEXT('managed model based 3d engineering')");
+        const prod = s.add(`PRODUCT('doc-1','box model','',(${s.add(`PRODUCT_CONTEXT('',${appCtx},'')`)}))`);
+        s.add(`PRODUCT_RELATED_PRODUCT_CATEGORY('document',$,(${prod}))`);
+        const version = s.add(`PRODUCT_DEFINITION_FORMATION('A','',${prod})`);
+        const pdCtx = s.add(`PRODUCT_DEFINITION_CONTEXT('digital document definition',${appCtx},'')`);
+        s.add(`PRODUCT_DEFINITION_WITH_ASSOCIATED_DOCUMENTS('rep-A','',${version},${pdCtx},(${doc}))`);
+        referenced = s.add(`DOCUMENT('','',$,${s.add("DOCUMENT_TYPE('configuration controlled document version')")})`);
+        s.add(`DOCUMENT_PRODUCT_EQUIVALENCE('equivalence',$,${referenced},${version})`);
+      }
+      const adr = s.add(`APPLIED_DOCUMENT_REFERENCE(${referenced},'',(${ref.pd}))`);
       s.add(`ROLE_ASSOCIATION(${s.add("OBJECT_ROLE('mandatory',$)")},${adr})`);
       return s.text(AP214);
     };
@@ -325,9 +364,289 @@ const tests = {
     if (r.json) assert.deepEqual(JSON.parse(r.json).externalFiles, [{ name: 'box.stp', loaded: false }]);
     else assert.match(r.error, /box\.stp/);
     // Partly in it: its own part shows, and the missing file is named.
-    m = read('external-assembly-partial.stp', assembly('box.stp', true));
+    m = read('external-assembly-partial.stp', assembly('box.stp', { bracket: true }));
     assert.deepEqual(triangles(m), [12]);
     assert.deepEqual(m.externalFiles, [{ name: 'box.stp', loaded: false }]);
+    // Where the file says the missing file is: a folder or a URL.
+    m = read('external-assembly-location.stp', assembly('box.stp', { bracket: true, location: "'./part_dir/'" }));
+    assert.deepEqual(m.externalFiles, [{ name: 'box.stp', loaded: false, location: './part_dir/' }]);
+    m = read('external-assembly-location.stp', assembly('box.stp', { location: "IDENTIFIER('https://plm.example.com/parts/')" }), { 'box.stp': part.text(AP214) });
+    assert.deepEqual(triangles(m), [12, 12]);
+    assert.deepEqual(m.externalFiles, [{ name: 'box.stp', loaded: true, location: 'https://plm.example.com/parts/' }]);
+    // Not part files: a paper document, or a file the viewer cannot read, named without a format.
+    for (const [file, kind] of [['Archive B, shelf 4', 'physical'], ['spec.pdf', 'digital'], ['box.CATPart', 'digital']]) {
+      m = read('external-assembly-document.stp', assembly(file, { bracket: true, kind }));
+      assert.equal(m.externalFiles, undefined, file);
+    }
+    // A managed document: the same tree as a plain file reference, no node for the document.
+    m = read('external-assembly-managed.stp', assembly('box.stp', { managed: true, format: 'STEP AP242' }), { 'box.stp': part.text(AP214) });
+    assert.deepEqual(triangles(m), [12, 12]);
+    assert.deepEqual(m.externalFiles, [{ name: 'box.stp', loaded: true }]);
+    assert.deepEqual(m.nodes.map((n) => n.name), ['top', 'first', 'second']);
+    // Formats: every STEP Part 21 name (ExtRef RP Table 2, File Compression RP Figure 4) is read,
+    // anything else is not.
+    for (const format of ['STEP AP242', ['STEP AP242', true], 'STEP AP203E2', 'STEP AP214 CC06', 'ISO 10303-242', 'iso 10303-214e3']) {
+      m = read('external-assembly-format.stp', assembly('box.stp', { format }), { 'box.stp': part.text(AP214) });
+      assert.deepEqual(triangles(m), [12, 12], String(format));
+    }
+    // A part in a format the viewer reads (ExtRef RP 6: any format), with or without a format property.
+    const stl = ['solid box', ...[[0, 1, 2], [0, 2, 3], [4, 6, 5], [4, 7, 6], [0, 4, 5], [0, 5, 1], [1, 5, 6], [1, 6, 2], [2, 6, 7], [2, 7, 3], [3, 7, 4], [3, 4, 0]].map((t) =>
+      `facet normal 0 0 0\nouter loop\n${t.map((i) => `vertex ${[[0, 0, 0], [10, 0, 0], [10, 10, 0], [0, 10, 0], [0, 0, 10], [10, 0, 10], [10, 10, 10], [0, 10, 10]][i].join(' ')}`).join('\n')}\nendloop\nendfacet`), 'endsolid box'].join('\n');
+    for (const format of [null, ['STL', true]]) {
+      m = read('external-assembly-stl.stp', assembly('parts/box.stl', { format }), { 'box.stl': stl });
+      assert.deepEqual(triangles(m), [12, 12], String(format));
+      near(Math.abs(volume(m, m.nodes.find((n) => n.proto >= 0))), 1000, 0.001, 'STL part volume');
+      assert.deepEqual(m.externalFiles, [{ name: 'box.stl', loaded: true }], String(format));
+    }
+    m = read('external-assembly-stl.stp', assembly('box.stl', { bracket: true }));
+    assert.deepEqual(triangles(m), [12]);
+    assert.deepEqual(m.externalFiles, [{ name: 'box.stl', loaded: false }]);
+    for (const format of ['ISO 10303-242 Domain Model XML', ['JT', true]]) {
+      m = read('external-assembly-format.stp', assembly('box.stp', { bracket: true, format }), { 'box.stp': part.text(AP214) });
+      assert.deepEqual(triangles(m), [12], String(format));
+      assert.equal(m.externalFiles, undefined, String(format));
+    }
+  },
+
+  'assembly PMI: on faces of one component instance (component_path_shape_aspect, MLRD)'() {
+    // PMI RP 9.3.4, Figure 94: a dimension between the same face of two instances of a part.
+    const s = new Step();
+    const ctx = context(s);
+    const out = {};
+    const bracket = product(s, ctx, 'bracket', [box(s, [0, 0, 0], 10, 'ADVANCED_FACE', out)], 'ADVANCED_BREP_SHAPE_REPRESENTATION');
+    const sub = product(s, ctx, 'sub');
+    const top = product(s, ctx, 'top');
+    const inSub = occurrence(s, ctx, sub, bracket, 'b1');
+    const first = occurrence(s, ctx, top, sub, 's1');
+    const second = occurrence(s, ctx, top, sub, 's2', [30, 0, 0]);
+    const direct = occurrence(s, ctx, top, bracket, 'b2', [0, 30, 0]);
+    const side = s.add(`SHAPE_ASPECT('+x side','',${bracket.pds},.T.)`); // the +x face of the bracket
+    s.add(`GEOMETRIC_ITEM_SPECIFIC_USAGE('','',${side},${bracket.sr},${out.faces[5]})`);
+    const at = (id, location) => s.add(`COMPONENT_PATH_SHAPE_ASPECT('${id}',$,${top.pds},.T.,${location},${side})`);
+    const mlrd = (id, path) => s.add(`MULTI_LEVEL_REFERENCE_DESIGNATOR('${id}','','',*,*,'${id}',(${path.join(',')}))`);
+    s.add(`DIMENSIONAL_LOCATION('distance','',${at('d1', mlrd('m1', [first, inSub]))},${at('d2', mlrd('m2', [second, inSub]))})`);
+    const mm = s.add('( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.) )');
+    s.add(`FLATNESS_TOLERANCE('flat','',${s.add(`LENGTH_MEASURE_WITH_UNIT(LENGTH_MEASURE(0.1),${mm})`)},${at('f', direct)})`);
+    // Presentation only, as in the PMI RP's example: the association's definition is the CPSA. A line
+    // between the two instances' faces, in the coordinates of the top assembly.
+    const line = s.add(`POLYLINE('',(${pt(s, [10, 5, 12])},${pt(s, [40, 5, 12])}))`);
+    const curveStyle = s.add("CURVE_STYLE('',DRAUGHTING_PRE_DEFINED_CURVE_FONT('continuous'),POSITIVE_LENGTH_MEASURE(0.5),DRAUGHTING_PRE_DEFINED_COLOUR('black'))");
+    const lines = s.add(`GEOMETRIC_CURVE_SET('',(${line}))`);
+    const shown = s.add(`ANNOTATION_CURVE_OCCURRENCE('Dimension.1',(${s.add(`PRESENTATION_STYLE_ASSIGNMENT((${curveStyle}))`)}),${lines})`);
+    const model = s.add(`DRAUGHTING_MODEL('',(${shown}),${ctx})`);
+    s.add(`DRAUGHTING_MODEL_ITEM_ASSOCIATION('Dimension.1',$,${at('p', mlrd('m3', [first, inSub]))},${model},${shown})`);
+    const m = read('assembly-pmi.stp', s.text(AP214));
+
+    // The tree: top > s1 > b1, s2 > b1, b2
+    const path = (n) => (n.parent < 0 ? [n.name] : [...path(m.nodes[n.parent]), n.name]);
+    const named = (...names) => m.nodes.findIndex((n) => path(n).join('/') === names.join('/'));
+    const [s1b1, s2b1, b2] = [named('top', 's1', 'b1'), named('top', 's2', 'b1'), named('top', 'b2')];
+    assert.ok(s1b1 >= 0 && s2b1 >= 0 && b2 >= 0, JSON.stringify(m.nodes.map(path)));
+    // The +x face, as the bridge numbers the bracket's faces
+    const proto = m.protos[m.nodes[b2].proto];
+    const plusX = [...Array(6).keys()].filter((f) => {
+      const d = new Float64Array(m.geometry, ...proto.faceData);
+      return d[f * 7] === 1 && d[f * 7 + 4] === 1; // plane with normal +x
+    });
+    assert.equal(plusX.length, 1, 'one +x face');
+
+    const summary = JSON.stringify(m.pmi.map(({ kind, type, proto, faces, nodes, nodeFaces }) => ({ kind, type, proto, faces, nodes, nodeFaces })));
+    const distance = m.pmi.find((p) => p.kind === 'dimension');
+    assert.ok(distance, summary);
+    assert.equal(distance.proto, -1, `owned by the assembly, not drawn on each bracket: ${summary}`);
+    assert.deepEqual(distance.nodes, [named('top')]);
+    assert.deepEqual(distance.nodeFaces, [[s1b1, plusX[0]], [s2b1, plusX[0]]]);
+    const flat = m.pmi.find((p) => p.type === 'Flatness');
+    assert.ok(flat, summary);
+    assert.deepEqual(flat.nodes, [named('top')]);
+    assert.deepEqual(flat.nodeFaces, [[b2, plusX[0]]]);
+    const drawn = m.pmi.find((p) => p.name === 'Dimension.1');
+    assert.ok(drawn, summary);
+    assert.deepEqual(drawn.nodes, [named('top')]);
+    assert.deepEqual(drawn.nodeFaces, [[s1b1, plusX[0]]]);
+    assert.deepEqual([...new Float32Array(m.geometry, ...drawn.segments)], [10, 5, 12, 40, 5, 12]);
+  },
+
+  'assembly PMI across files: external element references (EXTERNAL_ANCHOR, product_definition_reference)'() {
+    // ExtRef RP 7: the part's file anchors the shape aspect; the assembly places the part through an
+    // external reference whose product definition is a product_definition_reference_with_local_
+    // representation (7.4.1, Figure 27) and dimensions the anchored face of two instances.
+    const partFile = new Step();
+    const out = {};
+    const bracket = product(partFile, context(partFile), 'bracket', [box(partFile, [0, 0, 0], 10, 'ADVANCED_FACE', out)], 'ADVANCED_BREP_SHAPE_REPRESENTATION');
+    const side = partFile.add(`SHAPE_ASPECT('+x side','',${bracket.pds},.T.)`);
+    partFile.add(`GEOMETRIC_ITEM_SPECIFIC_USAGE('','',${side},${bracket.sr},${out.faces[5]})`);
+    const part = partFile.text(AP242, [`!EXTERNAL_ANCHOR('SIDE-X',${side});`]);
+
+    // A part defined in another file: its local representation, and the reference to the file
+    const external = (s, ctx, name, file) => {
+      const appCtx = s.add("APPLICATION_CONTEXT('managed model based 3d engineering')");
+      const prod = s.add(`PRODUCT('${name}','${name}','',(${s.add(`PRODUCT_CONTEXT('',${appCtx},'mechanical')`)}))`);
+      const pdf = s.add(`PRODUCT_DEFINITION_FORMATION('','',${prod})`);
+      const source = s.add("EXTERNAL_SOURCE('')"); // the file is next to the assembly
+      const pd = s.add(`PRODUCT_DEFINITION_REFERENCE_WITH_LOCAL_REPRESENTATION(${source},'design','',${pdf},${s.add(`PRODUCT_DEFINITION_CONTEXT('part definition',${appCtx},'design')`)})`);
+      const pds = s.add(`PRODUCT_DEFINITION_SHAPE('','',${pd})`);
+      const origin = axis(s);
+      const sr = s.add(`SHAPE_REPRESENTATION('${name}',(${origin}),${ctx})`);
+      s.add(`SHAPE_DEFINITION_REPRESENTATION(${pds},${sr})`);
+      const doc = s.add(`DOCUMENT_FILE('${file}','',$,${s.add("DOCUMENT_TYPE('')")},'',$)`);
+      s.add(`DOCUMENT_REPRESENTATION_TYPE('digital',${doc})`);
+      const role = s.add("IDENTIFICATION_ROLE('external document id and location',$)");
+      s.add(`APPLIED_EXTERNAL_IDENTIFICATION_ASSIGNMENT('${file}',${role},${source},(${doc}))`);
+      const adr = s.add(`APPLIED_DOCUMENT_REFERENCE(${doc},'',(${pd}))`);
+      s.add(`ROLE_ASSOCIATION(${s.add("OBJECT_ROLE('mandatory',$)")},${adr})`);
+      return { pd, pds, sr, origin, source };
+    };
+    const s = new Step();
+    const ctx = context(s);
+    const top = product(s, ctx, 'top');
+    const ref = external(s, ctx, 'bracket', 'bracket.stp');
+    const first = occurrence(s, ctx, top, ref, 'b1');
+    const second = occurrence(s, ctx, top, ref, 'b2', [30, 0, 0]);
+    const at = (id, location) => s.add(`COMPONENT_PATH_SHAPE_ASPECT('${id}',$,${top.pds},.T.,${location},IDENTIFIER('SIDE-X'))`);
+    s.add(`DIMENSIONAL_LOCATION('distance','',${at('d1', first)},${at('d2', second)})`);
+    let m = read('eer-assembly.stp', s.text(AP242), { 'bracket.stp': part });
+
+    assert.deepEqual(m.externalFiles, [{ name: 'bracket.stp', loaded: true }]);
+    const names = m.nodes.map((n) => n.name);
+    const [b1, b2] = [names.indexOf('b1'), names.indexOf('b2')];
+    assert.ok(b1 > 0 && b2 > 0 && m.nodes[b1].proto >= 0, JSON.stringify(names));
+    const distance = m.pmi.find((p) => p.kind === 'dimension');
+    assert.ok(distance, JSON.stringify(m.pmi));
+    assert.deepEqual(distance.nodes, [0]);
+    assert.deepEqual(distance.nodeFaces.map(([node, ...faces]) => [node, faces.length]), [[b1, 1], [b2, 1]]);
+
+    // Nested (7.4, Figure 26): top places sub.stp, which places bracket.stp. The top file navigates
+    // to the bracket in sub.stp with a usage whose parent is the local representation of sub and whose
+    // child is a product_definition_reference to the bracket, matched there by reference designator.
+    const subFile = new Step();
+    const subCtx = context(subFile);
+    const sub = product(subFile, subCtx, 'sub');
+    occurrence(subFile, subCtx, sub, external(subFile, subCtx, 'bracket', 'bracket.stp'), 'b1');
+    const t = new Step();
+    const tCtx = context(t);
+    const root = product(t, tCtx, 'root');
+    const subRef = external(t, tCtx, 'sub', 'sub.stp');
+    const s1 = occurrence(t, tCtx, root, subRef, 's1');
+    const s2 = occurrence(t, tCtx, root, subRef, 's2', [0, 30, 0]);
+    const bracketRef = t.add(`PRODUCT_DEFINITION_REFERENCE(${t.add("EXTERNAL_SOURCE('bracket.stp')")},'bracket','','design',$)`);
+    const nav = t.add(`NEXT_ASSEMBLY_USAGE_OCCURRENCE('b1','','',${subRef.pd},${bracketRef},'b1')`);
+    const path = (id, usages) => t.add(`MULTI_LEVEL_REFERENCE_DESIGNATOR('${id}','','',*,*,'${id}',(${usages.join(',')}))`);
+    const on = (id, location) => t.add(`COMPONENT_PATH_SHAPE_ASPECT('${id}',$,${root.pds},.T.,${location},IDENTIFIER('SIDE-X'))`);
+    t.add(`DIMENSIONAL_LOCATION('across','',${on('a1', path('m1', [s1, nav]))},${on('a2', path('m2', [s2, nav]))})`);
+    m = read('eer-nested.stp', t.text(AP242), { 'sub.stp': subFile.text(AP242), 'bracket.stp': part });
+    const tree = (n) => (n.parent < 0 ? [n.name] : [...tree(m.nodes[n.parent]), n.name]);
+    const leaf = (p) => m.nodes.findIndex((n) => tree(n).join('/') === p);
+    const across = m.pmi.find((p) => p.kind === 'dimension');
+    assert.ok(across, JSON.stringify(m.nodes.map(tree)));
+    assert.deepEqual(across.nodes, [0]);
+    assert.deepEqual(across.nodeFaces.map(([node, ...faces]) => [node, faces.length]), [[leaf('root/s1/b1'), 1], [leaf('root/s2/b1'), 1]]);
+  },
+
+  'attributes on one component instance: on its NAUO, or deeper down on a MLRD (UDA RP 6.2)'() {
+    const s = new Step();
+    const ctx = context(s);
+    const part = product(s, ctx, 'box', [box(s, [0, 0, 0], 10)], 'ADVANCED_BREP_SHAPE_REPRESENTATION');
+    const sub = product(s, ctx, 'sub');
+    const top = product(s, ctx, 'top');
+    const inSub = occurrence(s, ctx, sub, part, 'box');
+    const first = occurrence(s, ctx, top, sub, 's1');
+    occurrence(s, ctx, top, sub, 's2', [30, 0, 0]);
+    const attribute = (of, name, value) => {
+      const pd = s.add(`PROPERTY_DEFINITION('${name}',$,${of})`);
+      const rep = s.add(`REPRESENTATION('',(${s.add(`DESCRIPTIVE_REPRESENTATION_ITEM('${name}','${value}')`)}),${ctx})`);
+      s.add(`PROPERTY_DEFINITION_REPRESENTATION(${pd},${rep})`);
+      s.add(`GENERAL_PROPERTY_ASSOCIATION('',$,${s.add(`GENERAL_PROPERTY('','${name}',$)`)},${pd})`);
+    };
+    attribute(first, 'assembly step', '10');
+    attribute(s.add(`MULTI_LEVEL_REFERENCE_DESIGNATOR('s1-box','','',*,*,'s1-box',(${first},${inSub}))`), 'torque', '12 Nm');
+    const m = read('instance-attributes.stp', s.text(AP242));
+    const tree = (n) => (n.parent < 0 ? [n.name] : [...tree(m.nodes[n.parent]), n.name]);
+    const at = (path) => m.nodes.find((n) => tree(n).join('/') === path)?.attributes;
+    assert.deepEqual(at('top/s1'), [['assembly step', '10']]);
+    // Occurrence identification (PDM UG 4.1.1.2): the NAUO's id and reference designator
+    assert.deepEqual(m.nodes.find((n) => tree(n).join('/') === 'top/s1').occurrence, [['Id', 's1'], ['Reference designator', 's1']]);
+    assert.deepEqual(at('top/s1/box'), [['torque', '12 Nm']]);
+    assert.equal(at('top/s2'), undefined);
+    assert.equal(at('top/s2/box'), undefined);
+  },
+
+  'quantified and promissory usages (PDM UG 4.1.2, 4.1.4)'() {
+    const s = new Step();
+    const ctx = context(s);
+    const gasket = product(s, ctx, 'gasket', [box(s, [0, 0, 0], 10)], 'ADVANCED_BREP_SHAPE_REPRESENTATION');
+    const washer = product(s, ctx, 'washer', [box(s, [0, 0, 0], 2)], 'ADVANCED_BREP_SHAPE_REPRESENTATION');
+    const bolt = product(s, ctx, 'bolt', [box(s, [0, 0, 0], 5)], 'ADVANCED_BREP_SHAPE_REPRESENTATION');
+    const sub = product(s, ctx, 'sub', [box(s, [0, 20, 0], 5)], 'ADVANCED_BREP_SHAPE_REPRESENTATION');
+    const top = product(s, ctx, 'top');
+    occurrence(s, ctx, top, sub, 'sub');
+    const unit = s.add(`NAMED_UNIT(${s.add('DIMENSIONAL_EXPONENTS(0.,0.,0.,0.,0.,0.,0.)')})`);
+    // PDM UG Example 17: next_assembly_usage_occurrence and quantified_assembly_component_usage as
+    // one complex instance
+    const quantified = (child, id, n) =>
+      s.add(
+        `(ASSEMBLY_COMPONENT_USAGE($) NEXT_ASSEMBLY_USAGE_OCCURRENCE() PRODUCT_DEFINITION_RELATIONSHIP('${id}','quantified usage',$,${top.pd},${child.pd}) ` +
+          `PRODUCT_DEFINITION_USAGE() QUANTIFIED_ASSEMBLY_COMPONENT_USAGE(${s.add(`MEASURE_WITH_UNIT(COUNT_MEASURE(${n}.),${unit})`)}))`,
+      );
+    const rel = s.add(
+      `( REPRESENTATION_RELATIONSHIP('','',${gasket.sr},${top.sr}) REPRESENTATION_RELATIONSHIP_WITH_TRANSFORMATION(${s.add(`ITEM_DEFINED_TRANSFORMATION('','',${gasket.origin},${axis(s, [40, 0, 0])})`)}) SHAPE_REPRESENTATION_RELATIONSHIP() )`,
+    );
+    s.add(`CONTEXT_DEPENDENT_SHAPE_REPRESENTATION(${rel},${s.add(`PRODUCT_DEFINITION_SHAPE('','',${quantified(gasket, 'g', 2)})`)})`);
+    quantified(washer, 'w', 4); // no placement
+    s.add(`PROMISSORY_USAGE_OCCURRENCE('p1','bolt','',${top.pd},${bolt.pd},$)`); // somewhere below top
+    const m = read('quantified-usage.stp', s.text(AP214));
+
+    // OCCT read the complex instance as an unknown entity: the gasket was not in the assembly.
+    const g = m.nodes.find((n) => n.name === 'quantified usage'); // named after the usage, as any NAUO
+    assert.ok(g && m.nodes[g.parent].name === 'top', JSON.stringify(m.nodes.map((n) => n.name)));
+    assert.deepEqual(g.matrix.slice(12, 15), [40, 0, 0]);
+    assert.deepEqual(g.occurrence, [['Id', 'g'], ['Name', 'quantified usage'], ['Quantity', '2']]);
+    assert.deepEqual(props(m, 'top').filter(([k]) => k === 'Not placed' || k === 'Somewhere below'), [
+      ['Not placed', 'washer × 4'],
+      ['Somewhere below', 'bolt'],
+    ]);
+  },
+
+  'an assembly with geometry of its own (PDM UG 4.4), e.g. a weld'() {
+    const s = new Step();
+    const ctx = context(s);
+    const part = product(s, ctx, 'plate', [box(s, [0, 0, 0], 10)], 'ADVANCED_BREP_SHAPE_REPRESENTATION');
+    const weld = box(s, [10, 0, 0], 2);
+    const top = product(s, ctx, 'top', [weld]); // the assembly's shape representation holds the weld
+    occurrence(s, ctx, top, part, 'p1');
+    occurrence(s, ctx, top, part, 'p2', [12, 0, 0]);
+    const m = read('assembly-own-geometry.stp', s.text(AP214));
+    const triangles = m.nodes.filter((n) => n.proto >= 0).map((n) => [n.name, m.protos[n.proto].indices[1] / 3]);
+    assert.equal(triangles.length, 3, JSON.stringify(m.nodes));
+    near(Math.abs(volume(m, m.nodes.find((n) => n.proto >= 0 && !['p1', 'p2'].includes(n.name)))), 8, 0.001, 'weld volume');
+  },
+
+  'a part file in other units than its assembly (external reference)'() {
+    // assemblyInch: the assembly in inches and the part in mm, else the other way round
+    const load = (assemblyInch) => {
+      const partFile = new Step();
+      product(partFile, context(partFile, !assemblyInch), 'cube', [box(partFile, [0, 0, 0], 1)], 'ADVANCED_BREP_SHAPE_REPRESENTATION');
+      const s = new Step();
+      const ctx = context(s, assemblyInch);
+      const top = product(s, ctx, 'top');
+      const ref = product(s, ctx, 'cube');
+      occurrence(s, ctx, top, ref, 'c1', [2, 0, 0]);
+      const file = `cube-${assemblyInch ? 'mm' : 'inch'}.stp`;
+      const doc = s.add(`DOCUMENT_FILE('${file}','',$,${s.add("DOCUMENT_TYPE('')")},'',$)`);
+      s.add(`DOCUMENT_REPRESENTATION_TYPE('digital',${doc})`);
+      s.add(`ROLE_ASSOCIATION(${s.add("OBJECT_ROLE('mandatory',$)")},${s.add(`APPLIED_DOCUMENT_REFERENCE(${doc},'',(${ref.pd}))`)})`);
+      const m = read(`mixed-units-${assemblyInch ? 'inch' : 'mm'}.stp`, s.text(AP214), { [file]: partFile.text(AP214) });
+      const cube = m.nodes.find((n) => n.name === 'c1');
+      assert.ok(cube && cube.proto >= 0, JSON.stringify(m.nodes));
+      return [Math.abs(volume(m, cube)), cube.matrix[12]];
+    };
+    // Geometry in mm: the part's size from its own file's unit, the placement from the assembly's
+    let [v, x] = load(false);
+    near(v, 25.4 ** 3, 0.001, 'a one-inch cube in mm3');
+    near(x, 2, 1e-9, 'placement in mm');
+    [v, x] = load(true);
+    near(v, 1, 0.001, 'a one-mm cube');
+    near(x, 50.8, 1e-9, 'placement of two inches in mm');
   },
 
   'a colour on one occurrence of a nested component (SHUO)'() {

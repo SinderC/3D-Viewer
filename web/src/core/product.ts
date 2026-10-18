@@ -62,13 +62,16 @@ export function failures(rows: Row[]): number | undefined {
   return checked.length ? checked.filter(([, value]) => value.startsWith(mark(false))).length : undefined;
 }
 
+/** A referenced file's name, with where the assembly says it is. */
+export const externalFileLabel = (f: ExternalFile) => (f.location ? `${f.name} (${f.location})` : f.name);
+
 /** Value and tooltip for the files an assembly references: how many were opened with it. */
 export function externalFilesInfo(files: ExternalFile[]): [string, string] {
-  const missing = files.filter((f) => !f.loaded).map((f) => f.name);
+  const missing = files.filter((f) => !f.loaded).map(externalFileLabel);
   const loaded = files.length - missing.length;
   return [
     `${mark(!missing.length)} ${loaded} of ${files.length}`,
-    missing.length ? `Not opened: ${missing.join(', ')}. Open them together with this file.` : files.map((f) => f.name).join(', '),
+    missing.length ? `Not opened: ${missing.join(', ')}. Open them together with this file.` : files.map(externalFileLabel).join(', '),
   ];
 }
 
