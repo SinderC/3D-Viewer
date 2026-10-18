@@ -8,3 +8,7 @@ web/public/occt/
 *.tsbuildinfo
 samples/
 references/
+occt-issues/
+issue_tracker/
+seeds.html
+seeds.ts
