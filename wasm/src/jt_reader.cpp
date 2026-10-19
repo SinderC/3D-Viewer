@@ -151,7 +151,7 @@ public:
 
   bool empty() const { return myTriangles == 0; }
 
-  JtPmi& pmi() { return myPmi; }
+  FilePmi& pmi() { return myPmi; }
 
 private:
   // XCAF label for a node's definition; built once per node so instanced parts are shared.
@@ -483,10 +483,10 @@ private:
     }
   }
 
-  void add(JtPmi pmi, const TDF_Label& part, const gp_Trsf& trsf, bool top)
+  void add(FilePmi pmi, const TDF_Label& part, const gp_Trsf& trsf, bool top)
   {
     const int first = int(myPmi.items.size());
-    for (JtPmiItem& item : pmi.items)
+    for (FilePmiItem& item : pmi.items)
     {
       for (std::vector<float>* points : {&item.segments, &item.triangles})
         for (size_t k = 0; k + 2 < points->size(); k += 3)
@@ -499,7 +499,7 @@ private:
       item.part = part;
       myPmi.items.push_back(std::move(item));
     }
-    for (JtPmiView& v : pmi.views)
+    for (FilePmiView& v : pmi.views)
     {
       for (int& i : v.pmi)
         i += first;
@@ -591,15 +591,15 @@ private:
   Handle(XCAFDoc_ColorTool)                  myColors;
   Handle(JtData_Model)                       myModel;
   double                                     myScale;
-  JtPmi                                      myPmi;
-  std::vector<JtPmiView>                     myPartViews;
+  FilePmi                                      myPmi;
+  std::vector<FilePmiView>                     myPartViews;
   size_t                                     myTriangles = 0;
   std::map<const Standard_Transient*, TDF_Label> myDefs;
 };
 
 } // namespace
 
-std::string readJt(const char* path, const Handle(TDocStd_Document)& doc, JtPmi& pmi)
+std::string readJt(const char* path, const Handle(TDocStd_Document)& doc, FilePmi& pmi)
 {
   Handle(JtData_Model)     model = new JtData_Model(TCollection_ExtendedString(path));
   Handle(JtNode_Partition) root  = model->Init();

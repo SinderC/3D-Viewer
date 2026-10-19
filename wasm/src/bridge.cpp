@@ -142,6 +142,7 @@
 #include <XSControl_WorkSession.hxx>
 
 #include "jt_reader.h"
+#include "qif_reader.h"
 
 #include <emscripten/bind.h>
 #include <emscripten/heap.h>
@@ -476,7 +477,7 @@ public:
   {
   }
 
-  void build(const JtPmi& jtPmi, const ProductProps& productProps, const ValidationProps& validation, const AssemblyRefs& assemblyRefs,
+  void build(const FilePmi& filePmi, const ProductProps& productProps, const ValidationProps& validation, const AssemblyRefs& assemblyRefs,
              const ProductProps& occurrences)
   {
     myOccurrences  = &occurrences;
@@ -499,7 +500,7 @@ public:
 
     collectPmi();
     collectViews();
-    addJtPmi(jtPmi);
+    addFilePmi(filePmi);
   }
 
   const std::vector<Node>&      nodes() const { return myNodes; }
@@ -1279,24 +1280,34 @@ private:
     }
   }
 
-  // JT PMI comes drawn already, in the coordinates of its part (or the model).
-  void addJtPmi(const JtPmi& jt)
+  // JT PMI comes drawn already, in the coordinates of its part (or the model); QIF PMI is semantic only.
+  void addFilePmi(const FilePmi& file)
   {
     const int first = int(myPmi.size());
-    for (const JtPmiItem& item : jt.items)
+    for (const FilePmiItem& item : file.items)
     {
       Pmi p;
-      p.kind = item.kind;
-      p.type = item.type;
-      p.name = item.name;
+      p.kind      = item.kind;
+      p.type      = item.type;
+      p.name      = item.name;
+      p.value     = item.value;
+      p.plusMinus = item.plusMinus;
+      p.range     = item.range;
+      p.angular   = item.angular;
+      p.datums    = item.datums;
       if (!item.part.IsNull())
         if (const auto it = myProtoByEntry.find(entryOf(item.part)); it != myProtoByEntry.end())
           p.proto = it->second;
+      if (p.proto >= 0)
+        for (const TopoDS_Shape& face : item.faces)
+          if (const int* i = myProtos[size_t(p.proto)].faceIndex.Seek(face);
+              i && std::find(p.faces.begin(), p.faces.end(), *i) == p.faces.end())
+            p.faces.push_back(*i);
       p.segments  = append(item.segments);
       p.triangles = append(item.triangles);
       myPmi.push_back(std::move(p));
     }
-    for (const JtPmiView& v : jt.views)
+    for (const FilePmiView& v : file.views)
     {
       SavedView view{v.name, v.direction, v.up, {}};
       for (int i : v.pmi)
@@ -1394,7 +1405,7 @@ struct Source
   std::string format;
   std::string schema; // STEP only
   std::string unit;   // file length unit name as in STEP ("MILLIMETRE", "INCH", ...); empty = mm
-  JtPmi       jtPmi;  // JT only (STEP PMI is in the XCAF document)
+  FilePmi     pmi;    // JT and QIF (STEP PMI is in the XCAF document)
   // STEP only:
   ProductProps    products;
   ValidationProps validation;
@@ -2252,12 +2263,20 @@ Source readBrepDoc(const std::string& bytes, const std::string& name, const Hand
   return {"BREP", {}, {}};
 }
 
+Source readQifDoc(const std::string& bytes, const Handle(TDocStd_Document)& doc, Progress& progress)
+{
+  progress("read", -1);
+  Source src{"QIF", {}, {}, {}};
+  src.unit = readQif(bytes, doc, src.pmi);
+  return src;
+}
+
 Source readJtDoc(const std::string& bytes, const Handle(TDocStd_Document)& doc, Progress& progress)
 {
   progress("read", -1);
   TempFile file(".jt", bytes);
   Source   src{"JT", {}, {}, {}};
-  src.unit = readJt(file.path(), doc, src.jtPmi);
+  src.unit = readJt(file.path(), doc, src.pmi);
   return src;
 }
 
@@ -2293,6 +2312,8 @@ Source readDoc(std::string&                    bytes,
     return readBrepDoc(bytes, name, doc, progress);
   if (ext == ".jt")
     return readJtDoc(bytes, doc, progress);
+  if (ext == ".qif")
+    return readQifDoc(bytes, doc, progress);
   throw std::runtime_error("Unsupported file type: " + (ext.empty() ? fileName : ext));
 }
 
@@ -2531,7 +2552,7 @@ val readModel(val jsBytes, const std::string& fileName, val jsOptions, val onPro
     std::string().swap(bytes); // the other readers are done with it too
 
     Builder builder(doc, opts, progress);
-    builder.build(src.jtPmi, src.products, src.validation, src.assemblyRefs, src.occurrences);
+    builder.build(src.pmi, src.products, src.validation, src.assemblyRefs, src.occurrences);
     progress.mark("built");
 
     result.set("json", toJson(src, builder));

@@ -11,4 +11,4 @@
 // its parts, and the saved views of the model (or else of the first part that has any). Returns
 // the file's length unit as a STEP-style name ("MILLIMETRE", "INCH", ...). Throws
 // std::runtime_error when the file cannot be read.
-std::string readJt(const char* path, const Handle(TDocStd_Document)& doc, JtPmi& pmi);
+std::string readJt(const char* path, const Handle(TDocStd_Document)& doc, FilePmi& pmi);

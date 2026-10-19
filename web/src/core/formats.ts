@@ -14,6 +14,7 @@ export const FORMATS = [
   { name: 'OBJ', extensions: ['.obj'], mime: 'model/obj' },
   { name: 'VRML', extensions: ['.wrl', '.vrml'], mime: 'model/vrml' },
   { name: 'BREP', extensions: ['.brep', '.brp'], mime: 'application/octet-stream' },
+  { name: 'QIF', extensions: ['.qif'], mime: 'application/xml' },
 ];
 
 const formatOf = (fileName: string) => {

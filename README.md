@@ -6,12 +6,12 @@ A 3D viewer for CAD and mesh files that runs in the browser. Files stay on your 
 uploaded, and the production build's Content-Security-Policy allows requests to the app's own origin only.
 After the first visit it works offline as an installable PWA.
 
-**Formats:** STEP, IGES, BREP, JT, glTF/GLB, FBX, 3MF, Collada, OBJ, STL, PLY and VRML.
+**Formats:** STEP, IGES, BREP, JT, QIF, glTF/GLB, FBX, 3MF, Collada, OBJ, STL, PLY and VRML.
 CAD files are read and tessellated by [Open CASCADE Technology](https://dev.opencascade.org/) compiled
-to WebAssembly, JT by TKJT (from [PyOpenJt](https://github.com/jriegel/PyOpenJt)), and the
-other mesh formats by three.js.
+to WebAssembly, JT by TKJT (from [PyOpenJt](https://github.com/jriegel/PyOpenJt)), QIF by a reader
+of our own on OCCT, and the other mesh formats by three.js.
 
-**Highlights:** assembly tree, STEP AP242 and JT PMI with saved views, measurement on exact B-rep
+**Highlights:** assembly tree, STEP AP242, JT and QIF PMI with saved views, measurement on exact B-rep
 geometry, section planes, exploded view, material appearances, STL/GLB export.
 
 ## Quick start

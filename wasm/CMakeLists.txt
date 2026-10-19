@@ -25,10 +25,10 @@ target_include_directories(tkjt PUBLIC ${TKJT_DIRS} ${OpenCASCADE_INCLUDE_DIR} "
 target_compile_definitions(tkjt PRIVATE NO_JT_MULTITHREADING __isascii=isascii) # __isascii: MSVC name
 target_compile_options(tkjt PRIVATE -fwasm-exceptions -UOCC_CONVERT_SIGNALS -sUSE_ZLIB=1 -w)
 
-add_executable(occt-viewer src/bridge.cpp src/jt_pmi.cpp src/jt_reader.cpp src/xt_reader.cpp)
+add_executable(occt-viewer src/bridge.cpp src/jt_pmi.cpp src/jt_reader.cpp src/xt_reader.cpp src/qif_reader.cpp)
 target_link_libraries(occt-viewer PRIVATE
   tkjt "${XZ_INSTALL}/lib/liblzma.a"
-  TKDESTEP TKDEIGES TKDEOBJ TKDESTL TKDEVRML TKRWMesh TKXCAF TKMesh)
+  TKDESTEP TKDEIGES TKDEOBJ TKDESTL TKDEVRML TKRWMesh TKXCAF TKMesh TKCDF)
 # Must match the OCCT build (see scripts/build-occt.sh).
 target_compile_options(occt-viewer PRIVATE -fwasm-exceptions -UOCC_CONVERT_SIGNALS)
 target_link_options(occt-viewer PRIVATE

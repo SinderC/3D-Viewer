@@ -6,6 +6,7 @@
 | IGES | `.igs` `.iges` | OCCT | B-rep | full |
 | BREP | `.brep` `.brp` | OCCT | B-rep | full |
 | JT | `.jt` | TKJT | mesh, optional XT B-rep edges | full on XT edges, otherwise points |
+| QIF | `.qif` | OCCT (own reader) | B-rep | full |
 | glTF / GLB | `.gltf` `.glb` | three.js | mesh | point to point |
 | FBX | `.fbx` | three.js | mesh | point to point |
 | 3MF | `.3mf` | three.js | mesh | point to point |
@@ -43,6 +44,18 @@ B-rep geometry, so every measurement works.
 - **PMI:** JT 10 PMI as drawn in the file (lines, arrowheads and font glyphs), per part and for the
   model, with saved views. JT 8 and 9 give saved views only. No semantic values or referenced faces.
 - Not supported: JT B-rep, external part files.
+
+## QIF
+
+- QIF 3 (ISO 23952) model-based definition: the exact B-rep, so every measurement works. Parts and
+  assemblies, colours of bodies and faces, and the file's length unit (including the product's scale
+  coefficient). Bodies the file hides (auxiliary geometry) are hidden.
+- **PMI:** semantic only, not drawn: characteristics (dimensions and geometric tolerances) with their
+  nominal, tolerance or limits, datums and referenced faces; datums and notes. Saved views with their
+  direction and the PMI they show.
+- Files without model geometry (measurement plans, results, rules) are rejected with a message.
+- Not supported: drawn PMI (`PMIDisplay`), mesh faces, point clouds, polynomial spline curves and
+  surfaces, external QIF references.
 
 ## Mesh formats
 

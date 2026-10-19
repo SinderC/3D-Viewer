@@ -191,7 +191,7 @@ std::string viewName(std::string s)
 }
 
 // Views with a direction; returns, per raw view, its index in out.views (or -1).
-std::vector<int> addViews(const std::vector<RawView>& raw, const std::vector<std::string>& strings, JtPmi& out)
+std::vector<int> addViews(const std::vector<RawView>& raw, const std::vector<std::string>& strings, FilePmi& out)
 {
   std::vector<int> index;
   for (const RawView& v : raw)
@@ -201,7 +201,7 @@ std::vector<int> addViews(const std::vector<RawView>& raw, const std::vector<std
       index.push_back(-1);
       continue;
     }
-    JtPmiView view;
+    FilePmiView view;
     view.name      = viewName(v.nameId >= 0 && size_t(v.nameId) < strings.size() ? strings[size_t(v.nameId)] : "");
     view.direction = gp_Dir(v.eye);
     view.up        = upOf(view.direction, v.angle);
@@ -413,7 +413,7 @@ std::string spaced(const std::string& s)
   return out;
 }
 
-JtPmi readJt10(Reader& r)
+FilePmi readJt10(Reader& r)
 {
   r.u8();  // version
   r.i16(); // empty
@@ -481,13 +481,13 @@ JtPmi readJt10(Reader& r)
     return nullptr;
   };
 
-  JtPmi            out;
+  FilePmi            out;
   std::vector<int> itemOf(entities.size(), -1);
   const auto       model = [](float x, float y, float z) { return gp_XYZ(x, y, z); };
   for (size_t i = 0; i < entities.size(); ++i)
   {
     const Entity& e = entities[i];
-    JtPmiItem     item;
+    FilePmiItem     item;
     addPolylines(e.lineIndices, e.lineVertices, 3, model, item.segments);
     if (i < entityPolygons.size() && entityPolygons[i].dim == 3)
       addStrips(entityPolygons[i], model, item.triangles);
@@ -557,7 +557,7 @@ class ClassicReader
 public:
   ClassicReader(Reader& r, int version) : r(r), v(version) {}
 
-  JtPmi read()
+  FilePmi read()
   {
     list(&ClassicReader::entity2D);    // dimensions
     list(&ClassicReader::note);        // notes
@@ -577,7 +577,7 @@ public:
     std::vector<std::string> strings(size_t(r.count()));
     for (std::string& s : strings)
       s = r.string8();
-    JtPmi out;
+    FilePmi out;
     if (v > 5)
     {
       std::vector<RawView> views(size_t(r.count()));
@@ -665,7 +665,7 @@ private:
 
 } // namespace
 
-JtPmi readJtPmi(const uint8_t* data, size_t size, int jtMajorVersion, bool bigEndian)
+FilePmi readJtPmi(const uint8_t* data, size_t size, int jtMajorVersion, bool bigEndian)
 {
   Reader r(data, size, bigEndian);
   if (jtMajorVersion >= 10)
