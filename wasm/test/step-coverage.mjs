@@ -34,6 +34,7 @@ class Step {
 
 const AP214 = 'AUTOMOTIVE_DESIGN { 1 0 10303 214 3 1 1 }';
 const AP242 = 'AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF { 1 0 10303 442 1 1 4 }';
+const AP242E2 = 'AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF { 1 0 10303 442 3 1 4 }';
 const AP203 = 'AP203_CONFIGURATION_CONTROLLED_3D_DESIGN_OF_MECHANICAL_PARTS_AND_ASSEMBLIES_MIM_LF { 1 0 10303 403 3 1 4 }';
 const list = (items) => `(${items.join(',')})`;
 const pt = (s, [x, y, z]) => s.add(`CARTESIAN_POINT('',(${x.toFixed(1)},${y.toFixed(1)},${z.toFixed(1)}))`);
@@ -92,6 +93,30 @@ function box(s, [x0, y0, z0], size, face = 'ADVANCED_FACE', out = {}) {
   });
   out.faces = faces;
   return s.add(`MANIFOLD_SOLID_BREP('',${s.add(`CLOSED_SHELL('',${list(faces)})`)})`);
+}
+
+// The box from box() as a tessellated solid: one triangulated face per side, sharing the corners.
+// links: the exact faces from box()'s out.faces, for each face's geometric_link; solid: the exact solid.
+function tessellatedBox(s, [x0, y0, z0], size, links = [], solid = '$') {
+  const corner = (i) => [x0 + (i & 1 ? size : 0), y0 + (i & 2 ? size : 0), z0 + (i & 4 ? size : 0)];
+  const coords = [...Array(8).keys()].map((i) => `(${corner(i).map((v) => v.toFixed(1)).join(',')})`);
+  const points = s.add(`COORDINATES_LIST('',8,(${coords.join(',')}))`);
+  const sides = [
+    [[0, 2, 3, 1], [0, 0, -1]],
+    [[4, 5, 7, 6], [0, 0, 1]],
+    [[0, 1, 5, 4], [0, -1, 0]],
+    [[2, 6, 7, 3], [0, 1, 0]],
+    [[0, 4, 6, 2], [-1, 0, 0]],
+    [[1, 3, 7, 5], [1, 0, 0]],
+  ];
+  const faces = sides.map(([c, n], k) => {
+    const index = c.map((v) => v + 1).join(',');
+    return s.add(
+      `TRIANGULATED_FACE('',${points},4,((${n.map((v) => v.toFixed(1)).join(',')})),${links[k] ?? '$'},` +
+        `(${index}),((1,2,3),(1,3,4)))`,
+    );
+  });
+  return s.add(`TESSELLATED_SOLID('',${list(faces)},${solid})`);
 }
 
 // Part or assembly with its shape representation (an origin placement plus items).
@@ -168,6 +193,15 @@ function near(actual, expected, tolerance, what) {
   assert.ok(Math.abs(actual - expected) <= tolerance * Math.abs(expected), `${what}: ${actual} is not ${expected}`);
 }
 const nodeNamed = (model, name) => model.nodes.find((n) => n.name === name);
+// [triangles, edges] of each body drawn; of the node named name and below only, else of all.
+function bodies(model, name) {
+  const top = name === undefined ? -1 : model.nodes.indexOf(nodeNamed(model, name));
+  assert.ok(name === undefined || top >= 0, `no node ${name}`);
+  const below = (i) => i === top || (i >= 0 && below(model.nodes[i].parent));
+  return model.nodes
+    .filter((n, i) => n.proto >= 0 && (top < 0 || below(i)))
+    .map((n) => [model.protos[n.proto].indices[1] / 3, model.protos[n.proto].edgeStarts[1]]);
+}
 const props = (model, name) => model.products[nodeNamed(model, name).product]?.props ?? [];
 
 const tests = {
@@ -664,6 +698,228 @@ const tests = {
     [v, x] = load(true);
     near(v, 1, 0.001, 'a one-mm cube');
     near(x, 50.8, 1e-9, 'placement of two inches in mm');
+  },
+
+  // Tess RP 5.4.5: the tessellated faces may link to the exact ones (geometric_link)
+  'exact and tessellated shape of one part: only the exact one is drawn (Alt Shapes RP 5, Tess RP 5.4.5)'() {
+    // same: both representations on the part (Alt Shapes RP 5.1); context: the tessellated one in a
+    // context of its own, placed by a unit transformation (5.2); srr: both related to a placeholder
+    // shape, as AP203 hybrid models are written
+    // linked: the tessellated faces to the exact faces; solid: also the solid to the exact solid
+    for (const layout of ['same', 'context', 'srr'])
+      for (const linked of [false, 'faces', 'solid']) {
+        const s = new Step();
+        const ctx = context(s);
+        const out = {};
+        const exact = box(s, [0, 0, 0], 10, 'ADVANCED_FACE', out);
+        const tess = tessellatedBox(s, [0, 0, 0], 10, linked ? out.faces : [], linked === 'solid' ? exact : '$');
+        let part;
+        if (layout === 'srr') {
+          part = product(s, ctx, 'box');
+          const absr = s.add(`ADVANCED_BREP_SHAPE_REPRESENTATION('',(${exact}),${ctx})`);
+          const tsr = s.add(`TESSELLATED_SHAPE_REPRESENTATION('',(${tess}),${ctx})`);
+          s.add(`SHAPE_REPRESENTATION_RELATIONSHIP('','',${absr},${part.sr})`);
+          s.add(`SHAPE_REPRESENTATION_RELATIONSHIP('','',${tsr},${part.sr})`);
+        } else {
+          part = product(s, ctx, 'box', [exact], 'ADVANCED_BREP_SHAPE_REPRESENTATION');
+          const tsrCtx = layout === 'context' ? context(s) : ctx;
+          const origin = axis(s);
+          const tsr = s.add(`TESSELLATED_SHAPE_REPRESENTATION('LOD_1',(${origin},${tess}),${tsrCtx})`);
+          const sdr = s.add(`SHAPE_DEFINITION_REPRESENTATION(${part.pds},${tsr})`);
+          s.add(`NAME_ATTRIBUTE('alternative shape representation',${sdr})`);
+          if (layout === 'context')
+            s.add(
+              `( REPRESENTATION_RELATIONSHIP('','',${tsr},${part.sr}) ` +
+                `REPRESENTATION_RELATIONSHIP_WITH_TRANSFORMATION(${s.add(`ITEM_DEFINED_TRANSFORMATION('','',${origin},${part.origin})`)}) ` +
+                'SHAPE_REPRESENTATION_RELATIONSHIP() )',
+            );
+        }
+        const name = `exact-and-tessellated-${layout}${{ faces: '-linked', solid: '-solid-linked' }[linked] ?? ''}.stp`;
+        const m = read(name, s.text(AP242E2));
+        assert.deepEqual(bodies(m), [[12, 12]], name);
+      }
+  },
+
+  'what else may sit beside the exact and the tessellated shape'() {
+    // AP242 Ed1 has no placements in a tessellated representation, so tessellation went in a plain one
+    let s = new Step();
+    let ctx = context(s);
+    let part = product(s, ctx, 'box', [box(s, [0, 0, 0], 10)], 'ADVANCED_BREP_SHAPE_REPRESENTATION');
+    s.add(`SHAPE_DEFINITION_REPRESENTATION(${part.pds},${s.add(`SHAPE_REPRESENTATION('',(${tessellatedBox(s, [0, 0, 0], 10)}),${ctx})`)})`);
+    assert.deepEqual(bodies(read('exact-and-tessellated-ed1.stp', s.text(AP242))), [[12, 12]], 'AP242 Ed1');
+
+    // Different bodies: the exact one is kept, as there is no telling them from alternatives
+    s = new Step();
+    ctx = context(s);
+    part = product(s, ctx, 'box', [box(s, [0, 0, 0], 10)], 'ADVANCED_BREP_SHAPE_REPRESENTATION');
+    s.add(`SHAPE_DEFINITION_REPRESENTATION(${part.pds},${s.add(`TESSELLATED_SHAPE_REPRESENTATION('',(${tessellatedBox(s, [20, 0, 0], 10)}),${ctx})`)})`);
+    assert.deepEqual(bodies(read('exact-and-tessellated-different.stp', s.text(AP242E2))), [[12, 12]], 'different bodies');
+
+    // The exact shape through a mapped item
+    s = new Step();
+    ctx = context(s);
+    const mappedOrigin = axis(s);
+    const absr = s.add(`ADVANCED_BREP_SHAPE_REPRESENTATION('',(${mappedOrigin},${box(s, [0, 0, 0], 10)}),${ctx})`);
+    const mapped = s.add(`MAPPED_ITEM('',${s.add(`REPRESENTATION_MAP(${mappedOrigin},${absr})`)},${axis(s)})`);
+    part = product(s, ctx, 'box', [mapped]);
+    s.add(`SHAPE_DEFINITION_REPRESENTATION(${part.pds},${s.add(`TESSELLATED_SHAPE_REPRESENTATION('',(${tessellatedBox(s, [0, 0, 0], 10)}),${ctx})`)})`);
+    assert.deepEqual(bodies(read('exact-and-tessellated-mapped.stp', s.text(AP242E2))), [[12, 12]], 'mapped item');
+
+    // Exact and tessellated shape both through mapped items
+    s = new Step();
+    ctx = context(s);
+    const map = (rep, origin) => s.add(`MAPPED_ITEM('',${s.add(`REPRESENTATION_MAP(${origin},${rep})`)},${axis(s)})`);
+    const exactOrigin = axis(s);
+    const tessOrigin = axis(s);
+    const exactRep = s.add(`ADVANCED_BREP_SHAPE_REPRESENTATION('',(${exactOrigin},${box(s, [0, 0, 0], 10)}),${ctx})`);
+    const tessRep = s.add(`TESSELLATED_SHAPE_REPRESENTATION('',(${tessOrigin},${tessellatedBox(s, [0, 0, 0], 10)}),${ctx})`);
+    product(s, ctx, 'box', [map(exactRep, exactOrigin), map(tessRep, tessOrigin)]);
+    assert.deepEqual(bodies(read('exact-and-tessellated-mapped-both.stp', s.text(AP242E2))), [[12, 12]], 'both mapped');
+
+    // The tessellated shapes below a representation of mapped items, itself mapped
+    s = new Step();
+    ctx = context(s);
+    part = product(s, ctx, 'box', [box(s, [0, 0, 0], 10)], 'ADVANCED_BREP_SHAPE_REPRESENTATION');
+    const mapOf = (items) => {
+      const origin = axis(s);
+      const rep = s.add(`SHAPE_REPRESENTATION('',(${origin},${items.join(',')}),${ctx})`);
+      return s.add(`MAPPED_ITEM('',${s.add(`REPRESENTATION_MAP(${origin},${rep})`)},${axis(s)})`);
+    };
+    const tessMap = () => {
+      const origin = axis(s);
+      const rep = s.add(`TESSELLATED_SHAPE_REPRESENTATION('',(${origin},${tessellatedBox(s, [0, 0, 0], 10)}),${ctx})`);
+      return s.add(`MAPPED_ITEM('',${s.add(`REPRESENTATION_MAP(${origin},${rep})`)},${axis(s)})`);
+    };
+    const outer = s.add(`SHAPE_REPRESENTATION('',(${axis(s)},${mapOf([tessMap(), tessMap()])}),${ctx})`);
+    s.add(`SHAPE_DEFINITION_REPRESENTATION(${part.pds},${outer})`);
+    const nested = read('exact-and-tessellated-nested.stp', s.text(AP242E2));
+    assert.deepEqual(bodies(nested), [[12, 12]], 'nested mapped items');
+    assert.equal(nested.nodes.length, 2, `no empty node: ${JSON.stringify(nested.nodes)}`);
+
+    // Each shape on a product definition shape of its own
+    s = new Step();
+    ctx = context(s);
+    part = product(s, ctx, 'box', [box(s, [0, 0, 0], 10)], 'ADVANCED_BREP_SHAPE_REPRESENTATION');
+    const pds2 = s.add(`PRODUCT_DEFINITION_SHAPE('','',${part.pd})`);
+    s.add(`SHAPE_DEFINITION_REPRESENTATION(${pds2},${s.add(`TESSELLATED_SHAPE_REPRESENTATION('',(${tessellatedBox(s, [0, 0, 0], 10)}),${ctx})`)})`);
+    assert.deepEqual(bodies(read('exact-and-tessellated-two-pds.stp', s.text(AP242E2))), [[12, 12]], 'two product definition shapes');
+
+    // Exact shapes OCCT reads that are not B-rep solids: a surface set and a CSG primitive
+    for (const [what, rep, item] of [
+      ['surface set', 'GEOMETRICALLY_BOUNDED_SURFACE_SHAPE_REPRESENTATION', (st) =>
+        st.add(`GEOMETRIC_SET('',(${st.add(`RECTANGULAR_TRIMMED_SURFACE('',${st.add(`PLANE('',${axis(st)})`)},0.,10.,0.,10.,.T.,.T.)`)}))`)],
+      ['CSG primitive', 'CSG_SHAPE_REPRESENTATION', (st) => st.add(`BLOCK('',${axis(st)},10.,10.,10.)`)],
+    ]) {
+      s = new Step();
+      ctx = context(s);
+      part = product(s, ctx, 'box', [item(s)], rep);
+      s.add(`SHAPE_DEFINITION_REPRESENTATION(${part.pds},${s.add(`TESSELLATED_SHAPE_REPRESENTATION('',(${tessellatedBox(s, [0, 0, 0], 10)}),${ctx})`)})`);
+      const b = bodies(read(`exact-and-tessellated-${what.replace(' ', '-').toLowerCase()}.stp`, s.text(AP242E2)));
+      assert.ok(b.length === 1 && b[0][1] > 0, `${what}: ${JSON.stringify(b)}`);
+    }
+  },
+
+  'colours of the exact and the tessellated shape: the exact one is drawn in its own'() {
+    const s = new Step();
+    const ctx = context(s);
+    const out = {};
+    const exact = box(s, [0, 0, 0], 10, 'ADVANCED_FACE', out);
+    const part = product(s, ctx, 'box', [exact], 'ADVANCED_BREP_SHAPE_REPRESENTATION');
+    const tess = tessellatedBox(s, [0, 0, 0], 10, out.faces);
+    s.add(`SHAPE_DEFINITION_REPRESENTATION(${part.pds},${s.add(`TESSELLATED_SHAPE_REPRESENTATION('',(${tess}),${ctx})`)})`);
+    const styles = [styled(s, exact, [1, 0, 0]), styled(s, tess, [0, 0, 1])];
+    s.add(`MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION('',${list(styles)},${ctx})`);
+    const m = read('exact-and-tessellated-colours.stp', s.text(AP242E2));
+    assert.deepEqual(bodies(m), [[12, 12]]);
+    assert.deepEqual(m.protos.flatMap((p) => p.groups).map(([, , c]) => m.colors[c].slice(0, 3)), [[1, 0, 0]]);
+  },
+
+  'validation properties of the exact and the tessellated shape: of the exact one'() {
+    const s = new Step();
+    const ctx = context(s);
+    const mm = s.add('( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.) )');
+    const part = product(s, ctx, 'box', [box(s, [0, 0, 0], 10)], 'ADVANCED_BREP_SHAPE_REPRESENTATION');
+    s.add(`SHAPE_DEFINITION_REPRESENTATION(${part.pds},${s.add(`TESSELLATED_SHAPE_REPRESENTATION('',(${tessellatedBox(s, [0, 0, 0], 10)}),${ctx})`)})`);
+    const prop = s.add(`PROPERTY_DEFINITION('geometric validation property','',${part.pds})`);
+    const measure = (name, type, v) => s.add(`MEASURE_REPRESENTATION_ITEM('${name}',${type}(${v}),${mm})`);
+    const items = [measure('volume measure', 'VOLUME_MEASURE', '1000.'), measure('surface area measure', 'AREA_MEASURE', '600.')];
+    s.add(`PROPERTY_DEFINITION_REPRESENTATION(${prop},${s.add(`REPRESENTATION('volume',${list(items)},${ctx})`)})`);
+    const m = read('exact-and-tessellated-validation.stp', s.text(AP242E2));
+    const p = m.products[nodeNamed(m, 'box').product];
+    near(p.volume[1], 1000, 1e-6, 'volume');
+    near(p.area[1], 600, 1e-6, 'area');
+  },
+
+  'an external part file with an exact and a linked tessellated shape keeps its edges'() {
+    const partFile = new Step();
+    const pctx = context(partFile);
+    const out = {};
+    const part = product(partFile, pctx, 'box', [box(partFile, [0, 0, 0], 10, 'ADVANCED_FACE', out)], 'ADVANCED_BREP_SHAPE_REPRESENTATION');
+    const tsr = partFile.add(`TESSELLATED_SHAPE_REPRESENTATION('',(${tessellatedBox(partFile, [0, 0, 0], 10, out.faces)}),${pctx})`);
+    partFile.add(`SHAPE_DEFINITION_REPRESENTATION(${part.pds},${tsr})`);
+    const s = new Step();
+    const ctx = context(s);
+    const top = product(s, ctx, 'top');
+    const ref = product(s, ctx, 'box');
+    occurrence(s, ctx, top, ref, 'b1');
+    const doc = s.add(`DOCUMENT_FILE('box-tessellated.stp','',$,${s.add("DOCUMENT_TYPE('')")},'',$)`);
+    s.add(`DOCUMENT_REPRESENTATION_TYPE('digital',${doc})`);
+    s.add(`ROLE_ASSOCIATION(${s.add("OBJECT_ROLE('mandatory',$)")},${s.add(`APPLIED_DOCUMENT_REFERENCE(${doc},'',(${ref.pd}))`)})`);
+    const m = read('external-exact-and-tessellated.stp', s.text(AP242E2), { 'box-tessellated.stp': partFile.text(AP242E2) });
+    // Still drawn twice: the part's file is read by OCCT, not filtered here
+    assert.ok(bodies(m).some(([tr, e]) => tr === 12 && e === 12), JSON.stringify(bodies(m)));
+  },
+
+  'tessellated-only parts are still drawn: with a placeholder shape, beside curves, in an assembly'() {
+    // A placeholder shape related to the tessellated one
+    let s = new Step();
+    let ctx = context(s);
+    let part = product(s, ctx, 'box');
+    s.add(`SHAPE_REPRESENTATION_RELATIONSHIP('','',${s.add(`TESSELLATED_SHAPE_REPRESENTATION('',(${tessellatedBox(s, [0, 0, 0], 10)}),${ctx})`)},${part.sr})`);
+    assert.deepEqual(bodies(read('tessellated.stp', s.text(AP242E2))), [[12, 0]], 'placeholder');
+
+    // Curves are not an exact shape: a sketch beside the tessellated body
+    s = new Step();
+    ctx = context(s);
+    const curve = s.add(`POLYLINE('',(${pt(s, [0, 0, 0])},${pt(s, [10, 0, 0])}))`);
+    part = product(s, ctx, 'box', [s.add(`GEOMETRIC_CURVE_SET('',(${curve}))`)]);
+    s.add(`SHAPE_REPRESENTATION_RELATIONSHIP('','',${s.add(`TESSELLATED_SHAPE_REPRESENTATION('',(${tessellatedBox(s, [0, 0, 0], 10)}),${ctx})`)},${part.sr})`);
+    assert.ok(bodies(read('tessellated-and-curves.stp', s.text(AP242E2))).some(([t, e]) => t === 12 && e === 0), 'beside curves');
+
+    // An assembly of an exact part with a tessellated alternative and a tessellated-only part
+    s = new Step();
+    ctx = context(s);
+    const exactPart = product(s, ctx, 'exact', [box(s, [0, 0, 0], 10)], 'ADVANCED_BREP_SHAPE_REPRESENTATION');
+    s.add(`SHAPE_DEFINITION_REPRESENTATION(${exactPart.pds},${s.add(`TESSELLATED_SHAPE_REPRESENTATION('',(${tessellatedBox(s, [0, 0, 0], 10)}),${ctx})`)})`);
+    const tessPart = product(s, ctx, 'tessellated', [tessellatedBox(s, [0, 0, 0], 10)], 'TESSELLATED_SHAPE_REPRESENTATION');
+    const top = product(s, ctx, 'top');
+    occurrence(s, ctx, top, exactPart, 'exact');
+    occurrence(s, ctx, top, tessPart, 'tessellated', [20, 0, 0]);
+    const m = read('exact-and-tessellated-assembly.stp', s.text(AP242E2));
+    assert.deepEqual(bodies(m, 'exact'), [[12, 12]], 'exact part');
+    assert.deepEqual(bodies(m, 'tessellated'), [[12, 0]], 'tessellated part');
+
+    // A shape OCCT does not read as exact (a bare closed shell) beside the tessellated one
+    s = new Step();
+    ctx = context(s);
+    const shell = s.add(`CLOSED_SHELL('',${list(((o) => (box(s, [0, 0, 0], 10, 'ADVANCED_FACE', o), o.faces))({}))})`);
+    part = product(s, ctx, 'box', [shell]);
+    s.add(`SHAPE_DEFINITION_REPRESENTATION(${part.pds},${s.add(`TESSELLATED_SHAPE_REPRESENTATION('',(${tessellatedBox(s, [0, 0, 0], 10)}),${ctx})`)})`);
+    assert.deepEqual(bodies(read('tessellated-and-shell.stp', s.text(AP242E2))), [[12, 0]], 'beside a bare shell');
+
+    // One tessellated shape used by an exact part too: the tessellated-only part keeps it
+    s = new Step();
+    ctx = context(s);
+    const shared = s.add(`TESSELLATED_SHAPE_REPRESENTATION('',(${tessellatedBox(s, [0, 0, 0], 10)}),${ctx})`);
+    const a = product(s, ctx, 'exact', [box(s, [0, 0, 0], 10)], 'ADVANCED_BREP_SHAPE_REPRESENTATION');
+    s.add(`SHAPE_DEFINITION_REPRESENTATION(${a.pds},${shared})`);
+    const b = product(s, ctx, 'tessellated');
+    s.add(`SHAPE_DEFINITION_REPRESENTATION(${b.pds},${shared})`);
+    const both = product(s, ctx, 'top');
+    occurrence(s, ctx, both, a, 'exact');
+    occurrence(s, ctx, both, b, 'tessellated', [20, 0, 0]);
+    const shm = read('tessellated-shared.stp', s.text(AP242E2));
+    assert.ok(bodies(shm, 'tessellated').some(([tr, e]) => tr === 12 && e === 0), `shared: ${JSON.stringify(bodies(shm, 'tessellated'))}`);
   },
 
   'a colour on one occurrence of a nested component (SHUO)'() {

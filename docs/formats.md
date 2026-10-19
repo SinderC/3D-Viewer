@@ -19,6 +19,8 @@
 ## STEP
 
 - AP203 (ed1/ed2), AP214, AP242 (ed1–ed3), including AP242 tessellated geometry, CSG and swept solids.
+  A part with both an exact and a tessellated shape is drawn from the exact one; a different tessellated
+  body in such a part is left out too. Part files of an external reference still show both shapes.
 - Assembly structure, colours (including single-occurrence colours), layers, materials, approvals and
   organisations. For each component occurrence, its id, name, reference designator and quantity. Items the file marks invisible are hidden.
 - **External references:** an assembly that keeps parts in other files (STEP AP203, AP214 or AP242,

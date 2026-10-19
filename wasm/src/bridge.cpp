@@ -28,6 +28,7 @@
 #include <IGESData_IGESModel.hxx>
 #include <Interface_EntityIterator.hxx>
 #include <Interface_Graph.hxx>
+#include <Interface_Static.hxx>
 #include <Interface_HArray1OfHAsciiString.hxx>
 #include <Message.hxx>
 #include <Message_Messenger.hxx>
@@ -464,6 +465,21 @@ void matchNormalsToMesh(const Handle(Poly_Triangulation)& tri, double maxAngle)
 // ---------------------------------------------------------------------------
 // Model builder
 
+// Whether any face is exact (has a surface), not only a triangulation.
+bool hasSurface(const TopoDS_Shape& shape)
+{
+  for (TopExp_Explorer ex(shape, TopAbs_FACE); ex.More(); ex.Next())
+    if (!BRep_Tool::Surface(TopoDS::Face(ex.Current())).IsNull())
+      return true;
+  return false;
+}
+
+// Label entries: bodies whose faces without a surface are not drawn, components not drawn; see exactBodies.
+struct ExactBodies
+{
+  std::set<std::string> bodies, skip;
+};
+
 class Builder
 {
 public:
@@ -479,8 +495,9 @@ public:
   }
 
   void build(const FilePmi& filePmi, const ProductProps& productProps, const ValidationProps& validation, const AssemblyRefs& assemblyRefs,
-             const ProductProps& occurrences)
+             const ProductProps& occurrences, const ExactBodies& exactBodies)
   {
+    myExactBodies  = &exactBodies;
     myOccurrences  = &occurrences;
     myAssemblyRefs = &assemblyRefs;
     myProductProps = &productProps;
@@ -567,6 +584,8 @@ private:
     node.hidden = !isVisible(label) || !isVisible(def);
     if (XCAFDoc_ShapeTool::IsComponent(label))
     {
+      if (myExactBodies->skip.count(entryOf(label)))
+        return;
       path.Append(label);
       occurrenceStyle(path, node);
       node.attributes = occurrenceAttributes(path);
@@ -679,22 +698,31 @@ private:
       p.area                     = file.area;
       p.centroid                 = file.centroid;
       const TopoDS_Shape shape   = XCAFDoc_ShapeTool::GetShape(def);
-      // Volume and centroid of the solids when there are any (open surfaces have no volume).
-      TopoDS_Compound solids;
+      // Volume and centroid of the solids when there are any (open surfaces have no volume). Of what is
+      // drawn: each solid and face once, and no tessellation beside exact surfaces (see exactBodies).
+      TopoDS_Compound solids, faces;
       BRep_Builder    bb;
       bb.MakeCompound(solids);
-      bool hasSolids = false, exact = false;
-      for (TopExp_Explorer ex(shape, TopAbs_SOLID); ex.More(); ex.Next(), hasSolids = true)
-        bb.Add(solids, ex.Current());
-      for (TopExp_Explorer ex(shape, TopAbs_FACE); ex.More() && !exact; ex.Next())
-        exact = !BRep_Tool::Surface(TopoDS::Face(ex.Current())).IsNull();
+      bb.MakeCompound(faces);
+      FaceSet   seen;
+      bool      hasSolids = false;
+      const bool exact    = hasSurface(shape);
+      for (TopExp_Explorer ex(shape, TopAbs_SOLID); ex.More(); ex.Next())
+        if (seen.Add(ex.Current()) && hasSurface(ex.Current()))
+        {
+          bb.Add(solids, ex.Current());
+          hasSolids = true;
+        }
+      for (TopExp_Explorer ex(shape, TopAbs_FACE); ex.More(); ex.Next())
+        if (seen.Add(ex.Current()) && !BRep_Tool::Surface(TopoDS::Face(ex.Current())).IsNull())
+          bb.Add(faces, ex.Current());
       if (exact)
       {
         GProp_GProps volume, area;
         if (hasSolids && (!p.volume.empty() || !p.centroid.empty()))
           BRepGProp::VolumeProperties(solids, volume);
         if (!p.area.empty() || (!p.centroid.empty() && !hasSolids))
-          BRepGProp::SurfaceProperties(file.wetted && hasSolids ? TopoDS_Shape(solids) : shape, area);
+          BRepGProp::SurfaceProperties(file.wetted && hasSolids ? TopoDS_Shape(solids) : TopoDS_Shape(faces), area);
         if (!p.volume.empty() && hasSolids)
           p.volume.push_back(volume.Mass());
         if (!p.area.empty())
@@ -796,6 +824,7 @@ private:
     int        partColor = -1;
     FaceSet    hidden;
     const auto colorOf   = faceStyles(def, shape, partColor, hidden);
+    const bool exactOnly = myExactBodies->bodies.count(entryOf(def)) > 0;
 
     std::vector<float>    pos, nrm, edges;
     std::vector<uint32_t> idx, faceStarts, edgeStarts;
@@ -807,7 +836,7 @@ private:
       const TopoDS_Face&         face = TopoDS::Face(ex.Current());
       TopLoc_Location            loc;
       Handle(Poly_Triangulation) tri = BRep_Tool::Triangulation(face, loc);
-      if (tri.IsNull() || tri->NbTriangles() == 0 || hidden.Contains(face))
+      if (tri.IsNull() || tri->NbTriangles() == 0 || hidden.Contains(face) || (exactOnly && BRep_Tool::Surface(face).IsNull()))
         continue;
 
       if (!tri->HasNormals())
@@ -1384,6 +1413,7 @@ private:
   const ProductProps*        myProductProps = nullptr;
   const AssemblyRefs*        myAssemblyRefs = nullptr;
   const ProductProps*        myOccurrences  = nullptr;
+  const ExactBodies*         myExactBodies  = nullptr;
   // For assembly PMI: the nodes of each definition label entry, and each node's child by its
   // component label entry
   std::map<std::string, std::vector<int>>       myNodesByDef;
@@ -1413,6 +1443,7 @@ struct Source
   ValidationProps validation;
   AssemblyRefs    assemblyRefs;
   ProductProps    occurrences; // occurrence identification and quantity, by component label entry
+  ExactBodies     exactBodies;
   // Counts the file states for validation; -1 = not stated.
   int annotations = -1, views = -1;
   // Files the assembly references (external references).
@@ -1706,6 +1737,80 @@ std::string pdEntry(STEPCAFControl_Reader& reader, const Handle(StepBasic_Produc
   TCollection_AsciiString entry;
   TDF_Tool::Entry(*label, entry);
   return entry.ToCString();
+}
+
+// The bodies of an XCAF assembly that are not parts, also below sub-assemblies that are not parts either
+// (representations of mapped items). skip: the components not to draw if the part is exact: those that
+// place a body again where an earlier one does, as a tessellated solid linked to the exact one (Tess RP
+// 5.4.5) comes out, and sub-assemblies without exact geometry, which would be left empty.
+void partBodies(const TDF_Label& assembly, const std::set<std::string>& parts, LabelSequence& bodies,
+                std::vector<std::string>& skip)
+{
+  LabelSequence components;
+  XCAFDoc_ShapeTool::GetComponents(assembly, components, false);
+  std::vector<std::pair<std::string, TopLoc_Location>> placed;
+  for (const TDF_Label& c : components)
+  {
+    TDF_Label body;
+    if (!XCAFDoc_ShapeTool::GetReferredShape(c, body) || parts.count(entryOf(body)))
+      continue;
+    const std::pair<std::string, TopLoc_Location> at(entryOf(body), XCAFDoc_ShapeTool::GetLocation(c));
+    if (std::any_of(placed.begin(), placed.end(), [&](const auto& p) { return p.first == at.first && p.second.IsEqual(at.second); }))
+    {
+      skip.push_back(entryOf(c));
+      continue;
+    }
+    placed.push_back(at);
+    if (XCAFDoc_ShapeTool::IsAssembly(body))
+    {
+      partBodies(body, parts, bodies, skip);
+      if (!hasSurface(XCAFDoc_ShapeTool::GetShape(body)))
+        skip.push_back(entryOf(c));
+    }
+    else
+      bodies.Append(body);
+  }
+}
+
+// The bodies of parts with exact geometry, by label entry; meshPart leaves out their tessellated faces.
+// OCCT reads all of a part's shapes (Alt Shapes RP 5), so an exact and a tessellated one overlap. A
+// part with several shapes is an assembly in XCAF: its components are its bodies and its sub-parts.
+// A tessellated body that is not an alternative of the exact one cannot be told apart, and goes too.
+ExactBodies exactBodies(STEPCAFControl_Reader& reader, const Handle(TDocStd_Document)& doc)
+{
+  const Handle(Interface_InterfaceModel) model = reader.ChangeReader().WS()->Model();
+  std::set<std::string>                  parts, inexact;
+  ExactBodies                            out;
+  for (int i = 1; i <= model->NbEntities(); ++i)
+    if (const auto pd = Handle(StepBasic_ProductDefinition)::DownCast(model->Value(i)); !pd.IsNull())
+      if (std::string entry = pdEntry(reader, pd); !entry.empty())
+        parts.insert(std::move(entry));
+  std::set<std::string> otherFiles; // whose sub-parts are not known here
+  using Files = std::decay_t<decltype(reader.ExternFiles())>;
+  for (Files::Iterator it(reader.ExternFiles()); it.More(); it.Next())
+    if (!it.Value().IsNull() && !it.Value()->GetLabel().IsNull())
+      otherFiles.insert(entryOf(it.Value()->GetLabel()));
+  for (const std::string& entry : parts)
+  {
+    TDF_Label part;
+    TDF_Tool::Label(doc->GetData(), entry.c_str(), part);
+    if (part.IsNull() || otherFiles.count(entry))
+      continue;
+    LabelSequence            bodies;
+    std::vector<std::string> skip;
+    if (XCAFDoc_ShapeTool::IsAssembly(part))
+      partBodies(part, parts, bodies, skip);
+    else
+      bodies.Append(part);
+    const bool exact = std::any_of(bodies.begin(), bodies.end(), [](const TDF_Label& body) { return hasSurface(XCAFDoc_ShapeTool::GetShape(body)); });
+    for (const TDF_Label& body : bodies)
+      (exact ? out.bodies : inexact).insert(entryOf(body));
+    if (exact)
+      out.skip.insert(skip.begin(), skip.end());
+  }
+  for (const std::string& body : inexact) // a body shared with a part without exact geometry stays
+    out.bodies.erase(body);
+  return out;
 }
 
 // A unit as text: an SI unit's symbol ("m", "kg"), a conversion based unit's name ("INCH"), or
@@ -2045,6 +2150,9 @@ Source readStepDoc(std::string&                    bytes,
                    Progress&                       progress)
 {
   STEPCAFControl_Reader reader;
+  // A tessellated face linked to an exact one would replace its mesh; see also exactBodies. Static, as
+  // OCCT reads the files of external references with readers of its own.
+  Interface_Static::SetIVal("read.step.tessellated", DESTEP_Parameters::RWMode_Tessellated_OnNoBRep);
   reader.SetNameMode(true);
   reader.SetColorMode(true);
   reader.SetLayerMode(true);
@@ -2090,6 +2198,7 @@ Source readStepDoc(std::string&                    bytes,
   }
   external.insertOtherParts(reader, doc, progress);
   progress.mark("transferred");
+  src.exactBodies = exactBodies(reader, doc);
   src.products   = readProductProps(reader);
   readUsages(reader, doc, src.products, src.occurrences);
   src.validation = readValidationProps(reader);
@@ -2556,7 +2665,7 @@ val readModel(val jsBytes, const std::string& fileName, val jsOptions, val onPro
     std::string().swap(bytes); // the other readers are done with it too
 
     Builder builder(doc, opts, progress);
-    builder.build(src.pmi, src.products, src.validation, src.assemblyRefs, src.occurrences);
+    builder.build(src.pmi, src.products, src.validation, src.assemblyRefs, src.occurrences, src.exactBodies);
     progress.mark("built");
 
     result.set("json", toJson(src, builder));
