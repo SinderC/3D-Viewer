@@ -20,7 +20,8 @@ npm run build && npm run preview    # production build, with CSP and service wor
 ```
 
 Rerun `build-bridge.sh` after changing anything under `wasm/src`. Rerun `build-occt.sh` or
-`build-jt-deps.sh` after changing the pinned versions or their patches.
+`build-jt-deps.sh` after changing the pinned versions or their patches. How patches are written and
+applied: [patches.md](patches.md).
 
 ## Tests
 
