@@ -3,6 +3,7 @@
 export const FORMATS = [
   { name: 'STEP', extensions: ['.stp', '.step'], mime: 'model/step' },
   { name: 'JT', extensions: ['.jt'], mime: 'model/jt' },
+  { name: 'QIF', extensions: ['.qif'], mime: 'application/xml' },
   { name: 'STL', extensions: ['.stl'], mime: 'model/stl' },
   { name: 'IGES', extensions: ['.igs', '.iges'], mime: 'model/iges' },
   { name: 'glTF', extensions: ['.gltf'], mime: 'model/gltf+json', reader: 'three' },
@@ -14,7 +15,6 @@ export const FORMATS = [
   { name: 'OBJ', extensions: ['.obj'], mime: 'model/obj' },
   { name: 'VRML', extensions: ['.wrl', '.vrml'], mime: 'model/vrml' },
   { name: 'BREP', extensions: ['.brep', '.brp'], mime: 'application/octet-stream' },
-  { name: 'QIF', extensions: ['.qif'], mime: 'application/xml' },
 ];
 
 const formatOf = (fileName: string) => {
