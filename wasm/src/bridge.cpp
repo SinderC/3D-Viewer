@@ -231,6 +231,7 @@ struct Pmi
   std::vector<double>      value;      // nominal value (dimension, tolerance), if any
   std::vector<double>      plusMinus;  // lower and upper tolerance, if any
   std::vector<double>      range;      // lower and upper limit, if any
+  std::string              bound;      // "max" or "min": value is a one-sided limit
   bool                     angular = false; // values in degrees, not model units
   std::vector<double>      perUnit;  // length or area sides a tolerance applies per, if any
   std::string              unitArea; // circular, rectangular or square for a unit area
@@ -1293,6 +1294,7 @@ private:
       p.value     = item.value;
       p.plusMinus = item.plusMinus;
       p.range     = item.range;
+      p.bound     = item.bound;
       p.angular   = item.angular;
       p.datums    = item.datums;
       if (!item.part.IsNull())
@@ -2445,6 +2447,8 @@ std::string toJson(const Source& src, const Builder& b)
     numbers("perUnit", p.perUnit);
     if (!p.unitArea.empty())
       o << ",\"unitArea\":\"" << p.unitArea << '"';
+    if (!p.bound.empty())
+      o << ",\"bound\":\"" << p.bound << '"';
     if (p.angular)
       o << ",\"angular\":true";
     if (!p.datums.empty())

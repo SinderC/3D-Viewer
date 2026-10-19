@@ -88,6 +88,8 @@ export interface PmiItem {
   value?: [number];
   plusMinus?: [lower: number, upper: number];
   range?: [lower: number, upper: number];
+  /** `value` is a one-sided limit (e.g. R5 MAX). */
+  bound?: 'max' | 'min';
   angular?: boolean;
   /** Length, or area sides, a tolerance applies per (e.g. flatness 0.05 per Ø25 area). */
   perUnit?: [number] | [number, number];

@@ -21,6 +21,7 @@ struct FilePmiItem
   // Semantic PMI (QIF), as in the bridge's Pmi: lengths in mm, angles in degrees.
   std::vector<TopoDS_Shape> faces; // referenced faces of the owning part
   std::vector<double>       value, plusMinus, range;
+  std::string               bound; // "max" or "min": value is a one-sided limit
   bool                      angular = false;
   std::vector<std::string>  datums;
 };

@@ -32,7 +32,7 @@ function perUnit(p: PmiItem, unit: UnitId): string | undefined {
 
 function nominal(p: PmiItem, unit: UnitId): string | undefined {
   if (p.range) return `${amount(p.range[0], p, unit)} – ${amount(p.range[1], p, unit)}`;
-  if (p.value) return amount(p.value[0], p, unit);
+  if (p.value) return amount(p.value[0], p, unit) + (p.bound ? ` ${p.bound}` : '');
   return undefined;
 }
 
@@ -63,7 +63,7 @@ export function pmiInfo(p: PmiItem, unit: UnitId): [string, string][] {
     ['Kind', PMI_KINDS[p.kind].replace(/s$/, '')],
     ['Type', p.type],
     ['Name', p.name || undefined],
-    [p.range ? 'Limits' : p.kind === 'tolerance' ? 'Tolerance' : 'Nominal', nominal(p, unit)],
+    [p.range ? 'Limits' : p.bound ? 'Limit' : p.kind === 'tolerance' ? 'Tolerance' : 'Nominal', nominal(p, unit)],
     ['Deviation', deviation(p, unit)],
     ['Per unit', p.perUnit && `${perUnit(p, unit)} ${p.unitArea ? 'area' : 'length'}`],
     ['Datums', p.datums?.join(', ') || undefined],

@@ -63,6 +63,7 @@
 #include <gp_Quaternion.hxx>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -154,6 +155,8 @@ std::vector<double> parseNumbers(const std::string& s)
     const double v = std::strtod(p, &end);
     if (end == p)
       break;
+    if (!std::isfinite(v)) // strtod also reads nan and inf
+      throw std::runtime_error("QIF: " + std::string(p, static_cast<const char*>(end)) + " is not a finite number");
     out.push_back(v);
   }
   return out;
@@ -179,6 +182,8 @@ std::vector<double> base64Doubles(const std::string& s)
   }
   std::vector<double> out(bytes.size() / 8);
   std::memcpy(out.data(), bytes.data(), out.size() * 8); // little-endian, as WebAssembly
+  if (!std::all_of(out.begin(), out.end(), [](double v) { return std::isfinite(v); }))
+    throw std::runtime_error("QIF: binary array with a value that is not a finite number");
   return out;
 }
 
@@ -670,14 +675,15 @@ private:
     const LDOM_Element primary = child(units, "PrimaryUnits");
     const LDOM_Element linear = child(primary, "LinearUnit"), pmiLinear = child(primary, "PMILinearUnit");
     const LDOM_Element pmiAngular = child(primary, "PMIAngularUnit"), angular = child(primary, "AngularUnit");
-    myMm         = linear.isNull() ? 1.0 : unitFactor(linear) * 1000;
+    // Units the file leaves out are SI: metre and radian (§5.18.3).
+    myMm         = (linear.isNull() ? 1.0 : unitFactor(linear)) * 1000;
     myPmiMm      = pmiLinear.isNull() ? myMm : unitFactor(pmiLinear) * 1000;
+    if (!(myMm > 0) || !(myPmiMm > 0))
+      throw std::runtime_error("QIF: a length unit with a conversion factor that is not positive");
     // Distances in the product are written multiplied by its scale coefficient (§5.10.3).
     const std::vector<double> scale = numbers(child(child(myRoot, "Product"), "Header"), "ScaleCoefficient");
     myModelMm = scale.empty() || scale[0] <= 0 ? myMm : myMm / scale[0];
-    myPmiDegrees = !pmiAngular.isNull() ? unitFactor(pmiAngular) * 180 / M_PI
-                   : !angular.isNull()  ? unitFactor(angular) * 180 / M_PI
-                                        : 1.0;
+    myPmiDegrees = (!pmiAngular.isNull() ? unitFactor(pmiAngular) : !angular.isNull() ? unitFactor(angular) : 1.0) * 180 / M_PI;
   }
 
   // A PMI value in mm, or in degrees.
@@ -926,7 +932,7 @@ private:
       const auto f = myFaces.find(id);
       if (f == myFaces.end() || !f->second)
         continue;
-      const TopoDS_Shape fixed = fix.Context()->Value(*f->second);
+      const TopoDS_Shape fixed = fix.Context()->ValueLeaf(*f->second); // ShapeFix may replace a face more than once
       for (TopExp_Explorer ex(fixed, TopAbs_FACE); ex.More(); ex.Next())
         myFinalFaces[id].push_back(scale ? scale->ModifiedShape(ex.Current()) : ex.Current());
     }
@@ -975,6 +981,8 @@ private:
         }
       for (const int id : b.faceIds)
       {
+        if (!myFinalFaces.count(id)) // not built (logged in face)
+          continue;
         myFacePart[id]                      = part;
         const std::optional<Quantity_Color> fc = colorOf(lookup(id));
         if (!fc)
@@ -1036,6 +1044,9 @@ private:
     if (const LDOM_Element r = child(t, "Rotation"); !r.isNull())
     {
       const gp_XYZ x = xyz(r, "XDirection"), y = xyz(r, "YDirection"), z = xyz(r, "ZDirection");
+      // A rotation: unit axes, right-handed. Anything else would scale or mirror the component.
+      if (std::abs(x.Crossed(y).Dot(z) - 1) > 1e-6)
+        throw std::runtime_error("QIF: transform " + std::to_string(transformId) + " is not a rotation");
       trsf.SetValues(x.X(), y.X(), z.X(), 0, x.Y(), y.Y(), z.Y(), 0, x.Z(), y.Z(), z.Z(), 0);
     }
     if (!numbers(t, "Origin").empty())
@@ -1096,6 +1107,22 @@ private:
     }
   }
 
+  // A datum of a reference frame: simple (A), or compound (B-C, as drawn).
+  static std::string datumLabel(const LDOM_Element& datum, const std::map<int, std::string>& labels)
+  {
+    const auto label = [&](const LDOM_Element& simple) {
+      const auto it = labels.find(idOf(child(simple, "DatumDefinitionId")));
+      return it == labels.end() ? std::string() : it->second;
+    };
+    if (const LDOM_Element simple = child(datum, "SimpleDatum"); !simple.isNull())
+      return label(simple);
+    std::string out;
+    for (const LDOM_Element& part : elements(child(datum, "CompoundDatum")))
+      if (const std::string l = label(child(part, "SimpleDatum")); !l.empty())
+        out += (out.empty() ? "" : "-") + l;
+    return out;
+  }
+
   void readPmi(FilePmi& pmi)
   {
     std::map<int, int> itemOf; // QIF id → index into pmi.items
@@ -1138,7 +1165,7 @@ private:
         item.value = {measure(tol, false)};
         if (const int frame = idOf(child(def, "DatumReferenceFrameId")); myById.count(frame))
           for (const LDOM_Element& d : elements(child(lookup(frame), "Datums")))
-            if (const std::string label = datumLabels[idOf(child(child(d, "SimpleDatum"), "DatumDefinitionId"))]; !label.empty())
+            if (const std::string label = datumLabel(d, datumLabels); !label.empty())
               item.datums.push_back(label);
       }
       else
@@ -1147,15 +1174,27 @@ private:
         item.angular = base.rfind("Angle", 0) == 0 || base.rfind("Angular", 0) == 0;
         if (const LDOM_Element target = child(n, "TargetValue"); !target.isNull())
           item.value = {measure(target, item.angular)};
-        const LDOM_Element limits = child(def, "Tolerance");
-        const LDOM_Element lo = child(limits, "MinValue"), hi = child(limits, "MaxValue");
+        // Limits, or deviations from the nominal; one of the two alone bounds one side only (R5 MAX).
+        const LDOM_Element limits  = child(def, "Tolerance");
+        const LDOM_Element lo      = child(limits, "MinValue"), hi = child(limits, "MaxValue");
+        const std::string  asLimit = text(child(limits, "DefinedAsLimit"));
+        const bool         limit   = asLimit == "true" || asLimit == "1";
         if (!lo.isNull() && !hi.isNull())
         {
           const std::vector<double> values = {measure(lo, item.angular), measure(hi, item.angular)};
-          if (const std::string limit = text(child(limits, "DefinedAsLimit")); limit == "true" || limit == "1")
+          if (limit)
             item.range = values, item.value.clear();
           else
             item.plusMinus = values;
+        }
+        else if (!lo.isNull() || !hi.isNull())
+        {
+          const double v = measure(hi.isNull() ? lo : hi, item.angular);
+          if (limit || !item.value.empty())
+          {
+            item.value = {limit ? v : item.value[0] + v};
+            item.bound = hi.isNull() ? "min" : "max";
+          }
         }
       }
       addFaces(ids(n, "FeatureNominalIds"), item);
@@ -1179,18 +1218,19 @@ private:
     // NIST models' STEP views.
     for (const LDOM_Element& v : elements(child(child(child(myRoot, "Product"), "ViewSet"), "SavedViewSet")))
     {
+      // A view without a usable camera has no direction to show it from: left out.
+      const std::vector<int> cams = ids(v, "CameraIds");
+      if (cams.empty() || !myById.count(cams[0]))
+        continue;
+      const std::vector<double> q = numbers(child(lookup(cams[0]), "Orientation"), "Value");
+      if (q.size() != 4 || std::sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]) < 1e-9)
+        continue;
+      gp_Quaternion rot(-q[1], -q[2], -q[3], q[0]); // inverse; QIF writes the scalar part first
+      rot.Normalize();
       FilePmiView view;
-      view.name = attr(v, "label");
-      if (const std::vector<int> cams = ids(v, "CameraIds"); !cams.empty() && myById.count(cams[0]))
-      {
-        const std::vector<double> q = numbers(child(lookup(cams[0]), "Orientation"), "Value");
-        if (q.size() == 4)
-        {
-          const gp_Quaternion rot(-q[1], -q[2], -q[3], q[0]); // inverse; QIF writes the scalar part first
-          view.direction = gp_Dir(rot.Multiply(gp_Vec(0, 0, 1)));
-          view.up        = gp_Dir(rot.Multiply(gp_Vec(0, 1, 0)));
-        }
-      }
+      view.name      = attr(v, "label");
+      view.direction = gp_Dir(rot.Multiply(gp_Vec(0, 0, 1)));
+      view.up        = gp_Dir(rot.Multiply(gp_Vec(0, 1, 0)));
       for (const int id : ids(v, "AnnotationVisibleIds"))
         if (const auto it = itemOf.find(id); it != itemOf.end())
           view.pmi.push_back(it->second);

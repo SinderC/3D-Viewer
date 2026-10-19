@@ -20,6 +20,7 @@ describe('pmiLabel', () => {
 
   it('formats unequal deviations and angles', () => {
     expect(pmiLabel(item({ type: 'Angle', angular: true, value: [90], plusMinus: [0.5, 1] }), 'mm')).toBe('Angle 90° +1° / −0.5°');
+    expect(pmiLabel(item({ type: 'Radius', value: [5], bound: 'max' }), 'mm')).toBe('Radius 5.000 mm max');
   });
 
   it('adds datum references to tolerances', () => {
