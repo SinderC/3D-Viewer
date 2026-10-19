@@ -8,9 +8,14 @@
 // QIF 2D and 3D curves are parameterised independently, so edges are brought to the same parameter
 // by ShapeFix afterwards.
 //
-// Not read: drawn PMI (PMIDisplay), mesh faces, point clouds, spline (polynomial) curves and surfaces.
+// Drawn PMI (PMIDisplay) is 2D geometry and text in a plane; the text is drawn in a font of our own
+// (pmi_text.h), not the exporter's.
+//
+// Not read: mesh faces, point clouds, spline (polynomial) curves and surfaces; of drawn PMI, areas
+// given as loops, flag and weld symbol frames.
 
 #include "qif_reader.h"
+#include "pmi_text.h"
 
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
@@ -578,6 +583,305 @@ Surface surfaceOf(const LDOM_Element& c)
   }
   throw std::runtime_error("QIF: " + tag + " is not supported");
 }
+
+// ---------------------------------------------------------------------------
+// Drawn PMI (§7.5.7.5): 2D lines, frames, leaders and text in the plane of a PMIDisplay
+
+std::vector<gp_XY> points2d(const LDOM_Element& e, const std::string& name)
+{
+  const std::vector<double> v = numbers(e, name);
+  std::vector<gp_XY>        out;
+  for (size_t i = 0; i + 1 < v.size(); i += 2)
+    out.emplace_back(v[i], v[i + 1]);
+  return out;
+}
+
+gp_XY xy(const LDOM_Element& e, const std::string& name)
+{
+  const gp_XYZ p = xyz(e, name);
+  return {p.X(), p.Y()};
+}
+
+std::optional<gp_XY> optionalXy(const LDOM_Element& e, const std::string& name)
+{
+  return numbers(e, name).empty() ? std::nullopt : std::optional<gp_XY>(xy(e, name));
+}
+
+// UTF-8, with a byte that does not start a valid sequence taken as Latin-1: LDOM keeps a character
+// reference such as &#216; as that one byte.
+std::u32string decode(const std::string& s)
+{
+  std::u32string out;
+  for (size_t i = 0; i < s.size();)
+  {
+    const unsigned char c  = static_cast<unsigned char>(s[i]);
+    const size_t        n  = c < 0xC2 ? 0 : c < 0xE0 ? 1 : c < 0xF0 ? 2 : c < 0xF5 ? 3 : 0; // continuation bytes
+    char32_t            cp = c & (0x3F >> n);
+    bool                ok = n > 0 && i + n < s.size();
+    for (size_t k = 1; ok && k <= n; ++k)
+    {
+      const unsigned char b = static_cast<unsigned char>(s[i + k]);
+      ok                    = (b & 0xC0) == 0x80;
+      cp                    = cp << 6 | (b & 0x3F);
+    }
+    out.push_back(ok ? cp : c);
+    i += ok ? n + 1 : 1;
+  }
+  return out;
+}
+
+// Special symbols (§7.5.7.3, Table 7) as the font's characters; {BR} breaks the line. Tokens not
+// listed (weld symbols) are drawn as written.
+std::vector<std::u32string> textLines(const std::string& data)
+{
+  static const std::map<std::string, std::u32string> kSymbols = {
+    {"STRAIGHTNESS", U"⏤"}, {"FLATNESS", U"⏥"}, {"CIRCULARITY", U"○"}, {"CYLINDRICITY", U"⌭"},
+    {"PROFILE_LINE", U"⌒"}, {"PROFILE_SURFACE", U"⌓"}, {"ANGULARITY", U"∠"},
+    {"PERPENDICULARITY", U"⟂"}, {"PARALLELISM", U"∥"}, {"POSITION", U"⌖"},
+    {"CONCENTRICITY", U"◎"}, {"SYMMETRY", U"⌯"}, {"RUNOUT_CIRCULAR", U"↗"}, {"RUNOUT_TOTAL", U"⌰"},
+    {"DIAMETER", U"⌀"}, {"DIAMETER_SPHERICAL", U"S⌀"}, {"RADIUS", U"R"}, {"RADIUS_SPHERICAL", U"SR"},
+    {"RADIUS_CONTROLLED", U"CR"}, {"BETWEEN", U"↔"}, {"CONICAL_TAPER", U"⌲"}, {"SLOPE", U"⌳"},
+    {"COUNTERBORE", U"⌴"}, {"SPOTFACE", U"SF"}, {"COUNTERSINK", U"⌵"}, {"DEPTH", U"↧"},
+    {"SQUARE", U"□"}, {"PLUS_MINUS", U"±"}, {"DEGREE", U"°"}, {"ST", U"ST"}, {"CF", U"CF"},
+    {"M", U"Ⓜ"}, {"L", U"Ⓛ"}, {"P", U"Ⓟ"}, {"T", U"Ⓣ"}, {"F", U"Ⓕ"}, {"U", U"Ⓤ"},
+    {"I", U"(I)"}, {"TRANSLATION", U"▷"}, {"BRACKET_CURLED_LEFT", U"{"}, {"BRACKET_CURLED_RIGHT", U"}"}};
+  std::vector<std::u32string> lines(1);
+  for (size_t i = 0; i < data.size();)
+  {
+    const size_t open  = data.find('{', i);
+    const size_t close = open == std::string::npos ? open : data.find('}', open);
+    if (close == std::string::npos)
+    {
+      lines.back() += decode(data.substr(i));
+      break;
+    }
+    lines.back() += decode(data.substr(i, open - i));
+    const std::string name = data.substr(open + 1, close - open - 1);
+    if (name == "BR")
+      lines.emplace_back();
+    else if (const auto sym = kSymbols.find(name); sym != kSymbols.end())
+      lines.back() += sym->second;
+    else
+      lines.back() += decode(data.substr(open, close - open + 1));
+    i = close + 1;
+  }
+  return lines;
+}
+
+// A PMIDisplay's plane: 2D points in QIF length units → model coordinates, drawn into its item.
+struct Sketch
+{
+  gp_Pnt       origin;
+  gp_Dir       x, y;
+  double       unit; // mm per QIF length unit
+  FilePmiItem& item;
+
+  gp_Pnt at(const gp_XY& p) const
+  {
+    return origin.Translated(gp_Vec(x) * (p.X() * unit) + gp_Vec(y) * (p.Y() * unit));
+  }
+
+  void line(const gp_XY& a, const gp_XY& b)
+  {
+    if (a.IsEqual(b, 0))
+      return;
+    for (const gp_Pnt& p : {at(a), at(b)})
+      item.segments.insert(item.segments.end(), {float(p.X()), float(p.Y()), float(p.Z())});
+  }
+
+  void polyline(const std::vector<gp_XY>& pts, bool closed)
+  {
+    for (size_t i = 0; i + 1 < pts.size(); ++i)
+      line(pts[i], pts[i + 1]);
+    if (closed && pts.size() > 2)
+      line(pts.back(), pts.front());
+  }
+
+  void triangle(const gp_XY& a, const gp_XY& b, const gp_XY& c)
+  {
+    for (const gp_Pnt& p : {at(a), at(b), at(c)})
+      item.triangles.insert(item.triangles.end(), {float(p.X()), float(p.Y()), float(p.Z())});
+  }
+
+  // Points along the arc around center from a to b, the shorter way (QIF arcs are at most a semicircle).
+  static std::vector<gp_XY> arc(const gp_XY& center, const gp_XY& a, const gp_XY& b)
+  {
+    const gp_XY  ra = a - center, rb = b - center;
+    const double r = ra.Modulus(), from = std::atan2(ra.Y(), ra.X());
+    const double sweep = std::atan2(ra.Crossed(rb), ra.Dot(rb));
+    const int    n     = std::max(2, int(std::ceil(std::abs(sweep) / (M_PI / 32))));
+    std::vector<gp_XY> out;
+    for (int i = 0; i <= n; ++i)
+    {
+      const double t = from + sweep * i / n;
+      out.push_back(center + gp_XY(std::cos(t), std::sin(t)) * r);
+    }
+    return out;
+  }
+
+  void circle(const gp_XY& center, double r, bool filled)
+  {
+    std::vector<gp_XY> pts;
+    for (int i = 0; i < 64; ++i)
+      pts.push_back(center + gp_XY(std::cos(i * M_PI / 32), std::sin(i * M_PI / 32)) * r);
+    if (!filled)
+      polyline(pts, true);
+    for (size_t i = 1; filled && i + 1 < pts.size(); ++i)
+      triangle(pts[0], pts[i], pts[i + 1]);
+  }
+
+  // A leader head (§7.5.7.5.2) at tip, pointing along dir (unit), size long.
+  void head(const std::string& form, const gp_XY& tip, const gp_XY& dir, double size)
+  {
+    if (!(size > 0))
+      return;
+    const gp_XY n(-dir.Y(), dir.X());
+    const bool  filled = form.find("FILLED") != std::string::npos && form.find("UNFILLED") == std::string::npos;
+    if (form.rfind("DOT_", 0) == 0 || form == "DIMENSION_ORIGIN")
+      circle(tip, size / 4, filled);
+    else if (form.rfind("BOX_", 0) == 0)
+    {
+      const gp_XY d = (dir + n) * (size / 4), e = (dir - n) * (size / 4);
+      const gp_XY corners[4] = {tip + d, tip - e, tip - d, tip + e};
+      if (filled)
+        triangle(corners[0], corners[1], corners[2]), triangle(corners[0], corners[2], corners[3]);
+      else
+        polyline({corners[0], corners[1], corners[2], corners[3]}, true);
+    }
+    else if (form == "SYMBOL_SLASH")
+      line(tip - (dir + n) * (size / 2), tip + (dir + n) * (size / 2));
+    else if (form == "SYMBOL_CROSS")
+    {
+      line(tip - (dir + n) * (size / 2), tip + (dir + n) * (size / 2));
+      line(tip - (dir - n) * (size / 2), tip + (dir - n) * (size / 2));
+    }
+    else if (form != "NONE") // arrows and triangles; also the integral sign, not drawn as such
+    {
+      const double halfWidth = size * (form.rfind("TRIANGLE_", 0) == 0 ? std::tan(M_PI / 6) : std::tan(M_PI / 12));
+      const gp_XY  base = tip - dir * size, a = base + n * halfWidth, b = base - n * halfWidth;
+      if (form == "ARROW_OPEN")
+        line(a, tip), line(tip, b);
+      else if (filled || form.empty() || form == "SYMBOL_INTEGRAL")
+        triangle(tip, a, b);
+      else
+        polyline({tip, a, b}, true);
+    }
+  }
+
+  // Leaders (§7.5.7.5.1–7): a line, or an arc around Center, from StartPoint (head HeadForm) to
+  // EndPoint; double-headed ones have their second head (HeadForm2) at PointConnection; extended
+  // ones continue from EndPoint to PointExtension.
+  void leader(const LDOM_Element& e)
+  {
+    const std::string tag = tagOf(e);
+    const gp_XY       start = xy(e, "StartPoint"), end = xy(e, "EndPoint");
+    const std::vector<double> heights = numbers(e, "HeadHeight");
+    const double      size  = heights.empty() ? 0 : heights[0];
+    const bool        circular = tag.find("Circular") != std::string::npos, twoHeads = tag.find("DoubleHead") != std::string::npos;
+    const gp_XY       center = circular ? xy(e, "Center") : gp_XY();
+    const std::optional<gp_XY> extension = optionalXy(e, "PointExtension"), connection = optionalXy(e, "PointConnection");
+    // Unit direction d at p, or along the arc's tangent there, whichever way is nearer d.
+    auto along = [&](const gp_XY& p, gp_XY d) {
+      if (circular)
+      {
+        const gp_XY r = p - center, t(-r.Y(), r.X());
+        d = t.Dot(d) < 0 ? -t : t;
+      }
+      return d.Modulus() > 0 ? d / d.Modulus() : gp_XY(1, 0);
+    };
+    std::vector<gp_XY> path = circular ? arc(center, start, end) : std::vector<gp_XY>{start, end};
+    if (extension)
+      path.push_back(*extension);
+    polyline(path, false);
+    // The first head points away from EndPoint. A dimension line whose EndPoint is its StartPoint
+    // (text at the start, arrows outside) points it at the connection instead; the second head
+    // always points against the first (inside or outside arrows alike).
+    const bool  atStart = (start - end).Modulus() <= 1e-6 * std::max(size, 1.0);
+    const gp_XY first   = along(start, atStart && connection ? *connection - start : start - end);
+    head(text(child(e, "HeadForm")), start, first, size);
+    if (twoHeads && connection)
+    {
+      if (!circular) // the dimension line reaches the connection when it lies beyond EndPoint
+        line(end, *connection);
+      head(text(child(e, "HeadForm2")), *connection, along(*connection, -first), size);
+    }
+    if (text(child(e, "Modifier")) == "ALL_AROUND") // a circle at the leader's bend
+      circle(end, size / 2, false);
+  }
+
+  void witnessLines(const LDOM_Element& e)
+  {
+    for (const char* s : {"Segment1", "Segment2"})
+      if (const LDOM_Element seg = child(e, s); !seg.isNull())
+        line(xy(seg, "StartPoint"), xy(seg, "EndPoint"));
+    if (const std::optional<gp_XY> center = optionalXy(e, "CircleCenter")) // circular (§7.5.7.5.8.2)
+      polyline(arc(*center, xy(e, "BeginPoint"), xy(e, "EndPoint")), false);
+  }
+
+  void frame(const LDOM_Element& e)
+  {
+    const std::string tag = tagOf(e);
+    if (tag == "FrameRectangular")
+    {
+      const gp_XY  p = xy(e, "XY");
+      const double w = number(e, "Width"), h = number(e, "Height");
+      polyline({p, p + gp_XY(w, 0), p + gp_XY(w, h), p + gp_XY(0, h)}, true);
+    }
+    else if (tag == "FrameCircular")
+    {
+      const gp_XY  c = xy(e, "XY");
+      const double r = number(e, "Radius");
+      circle(c, r, false);
+      if (flag(e, "crossed"))
+        line(c - gp_XY(r, 0), c + gp_XY(r, 0));
+    }
+    else if (tag == "FrameIrregularForm") // closed only if its last point is its first
+      polyline(points2d(e, "Points"), false);
+    else if (tag == "FrameTriangle" || tag == "FramePentagonal" || tag == "FrameHexagonal" || tag == "FrameOctagonal")
+    {
+      std::vector<gp_XY> pts;
+      for (const LDOM_Element& p : elements(e))
+        if (const std::vector<double> v = parseNumbers(text(p)); tagOf(p) == "Point" && v.size() >= 2)
+          pts.emplace_back(v[0], v[1]);
+      polyline(pts, true);
+    }
+  }
+
+  // Graphics (§7.5.7.5.18): polylines, and areas given as triangles.
+  void graphics(const LDOM_Element& e)
+  {
+    for (const LDOM_Element& p : elements(child(e, "Polylines")))
+      polyline(points2d(p, "Points"), false);
+    for (const LDOM_Element& area : elements(child(e, "Areas")))
+    {
+      const LDOM_Element        t     = child(area, "Triangulation");
+      const std::vector<gp_XY>  verts = points2d(t, "Vertices");
+      // Not TrianglesBinary: integers, not the doubles numbers() decodes.
+      const std::vector<double> idx   = parseNumbers(text(child(t, "Triangles")));
+      const auto                valid = [&](double k) { return k >= 0 && k < double(verts.size()); };
+      for (size_t i = 0; i + 2 < idx.size(); i += 3)
+        if (valid(idx[i]) && valid(idx[i + 1]) && valid(idx[i + 2]) && idx[i] != idx[i + 1] && idx[i + 1] != idx[i + 2]
+            && idx[i] != idx[i + 2])
+          triangle(verts[size_t(idx[i])], verts[size_t(idx[i + 1])], verts[size_t(idx[i + 2])]);
+    }
+  }
+
+  // Texts: each line's baseline starts at XY; lineHeight is the height of capital letters (as the
+  // samples' frames fit them) and lines are 1.5 of it apart.
+  void texts(const LDOM_Element& e)
+  {
+    const double h = std::atof(attr(e, "lineHeight").c_str());
+    if (!(h > 0))
+      return;
+    for (const LDOM_Element& t : elements(e))
+    {
+      const std::vector<std::u32string> lines = textLines(text(child(t, "Data")));
+      const gp_XY                       p     = optionalXy(t, "XY").value_or(gp_XY());
+      for (size_t i = 0; i < lines.size(); ++i)
+        drawText(lines[i], at(p - gp_XY(0, 1.5 * h * double(i))), x, y, h * unit, item.triangles);
+    }
+  }
+};
 
 // ---------------------------------------------------------------------------
 // Reader
@@ -1213,9 +1517,22 @@ private:
       add(std::atoi(attr(note, "id").c_str()), std::move(item));
     }
 
+    for (const LDOM_Element& target : elements(child(myRoot, "DatumTargetDefinitions")))
+    {
+      FilePmiItem item;
+      item.kind = "datum";
+      item.type = "Datum target " + text(child(target, "DatumTargetLabel"));
+      addFaces({idOf(child(target, "FeatureNominalId"))}, item);
+      add(std::atoi(attr(target, "id").c_str()), std::move(item));
+    }
+
+    const std::map<int, gp_Dir> normals = readDisplays(itemOf, pmi);
+
     // Saved views: the camera's orientation turns the model into the view plane, so the inverse
-    // turns the view's +z (the viewing direction) and +y (up) into the model. Checked against the
-    // NIST models' STEP views.
+    // turns the view's -z (the viewing direction: an identity camera looks down, as in the NIST
+    // ftc_08 Top view) and +y (up) into the model. Cameras of the same exporter also look along +z
+    // (NIST ctc_01, ftc_09, against their STEP views), with nothing in the file to tell; a saved view
+    // shows its annotations from the front, so it is turned round when most of them face away.
     for (const LDOM_Element& v : elements(child(child(child(myRoot, "Product"), "ViewSet"), "SavedViewSet")))
     {
       // A view without a usable camera has no direction to show it from: left out.
@@ -1229,13 +1546,75 @@ private:
       rot.Normalize();
       FilePmiView view;
       view.name      = attr(v, "label");
-      view.direction = gp_Dir(rot.Multiply(gp_Vec(0, 0, 1)));
+      view.direction = gp_Dir(rot.Multiply(gp_Vec(0, 0, -1)));
       view.up        = gp_Dir(rot.Multiply(gp_Vec(0, 1, 0)));
+      int facingAway = 0; // annotations seen from behind, less those seen from the front
       for (const int id : ids(v, "AnnotationVisibleIds"))
         if (const auto it = itemOf.find(id); it != itemOf.end())
+        {
           view.pmi.push_back(it->second);
+          if (const auto n = normals.find(it->second); n != normals.end())
+            facingAway += n->second.Dot(view.direction) > 0 ? 1 : -1;
+        }
+      if (facingAway > 0)
+        view.direction.Reverse();
       pmi.views.push_back(std::move(view));
     }
+  }
+
+  // Drawn PMI: each PMIDisplay draws the item it references, in a plane at its Origin whose normal
+  // and text direction are its annotation view's (§7.5.7.4); its own Direction overrides the latter.
+  // Returns each drawn item's plane normal (the side its text reads from).
+  std::map<int, gp_Dir> readDisplays(const std::map<int, int>& itemOf, FilePmi& pmi)
+  {
+    std::map<int, gp_Dir> normals;
+    const LDOM_Element visualization = child(child(myRoot, "Product"), "VisualizationSet");
+    for (const LDOM_Element& d : elements(child(visualization, "PMIDisplaySet")))
+    {
+      const LDOM_Element plane = child(d, "Plane");
+      const auto         it    = itemOf.find(ref(d, "Reference"));
+      const auto         view  = myById.find(ref(plane, "AnnotationViewId"));
+      if (it == itemOf.end() || view == myById.end())
+        continue;
+      // A bad element is left out, not the rest of the display.
+      const auto log = [&](const std::exception& e) {
+        std::cerr << "QIF PMI display of " << ref(d, "Reference") << ": " << e.what() << '\n';
+      };
+      try
+      {
+        const gp_Dir normal = dir(view->second, "Normal");
+        const gp_Dir along  = dir(numbers(plane, "Direction").empty() ? view->second : plane, "Direction");
+        const gp_Dir y      = normal.Crossed(along); // fails if along is the normal
+        const gp_XYZ origin = xyz(plane, numbers(plane, "Origin").empty() ? "Point" : "Origin");
+        Sketch       s{gp_Pnt(origin * myModelMm), y.Crossed(normal), y, myModelMm, pmi.items[size_t(it->second)]};
+        normals[it->second] = normal;
+        for (const LDOM_Element& e : elements(d))
+          try
+          {
+            const std::string tag = tagOf(e);
+            if (tag.rfind("Leader", 0) == 0)
+              s.leader(e);
+            else if (tag == "WitnessLines")
+              s.witnessLines(e);
+            else if (tag == "Frames")
+              for (const LDOM_Element& f : elements(e))
+                s.frame(f);
+            else if (tag == "Graphics")
+              s.graphics(e);
+            else if (tag == "Texts")
+              s.texts(e);
+          }
+          catch (const std::exception& ex) // OCCT's Standard_Failure included
+          {
+            log(ex);
+          }
+      }
+      catch (const std::exception& e) // the plane
+      {
+        log(e);
+      }
+    }
+    return normals;
   }
 
   LDOM_Element                                       myRoot;

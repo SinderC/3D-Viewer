@@ -2,8 +2,8 @@
 
 ## Requirements
 
-git, CMake ≥ 3.20, Python 3, Node ≥ 20. Toolchain and library versions are pinned in
-`wasm/scripts/env.sh`.
+git, curl, CMake ≥ 3.20, Python 3, Node ≥ 20. Toolchain and library versions are pinned in
+`wasm/scripts/env.sh`; the PMI font in `wasm/scripts/build-bridge.sh`.
 
 ## Build
 
@@ -53,7 +53,8 @@ wasm/src/bridge.cpp       OCCT → mesh bridge (embind): readModel(bytes, fileNa
 wasm/src/jt_reader.cpp    JT scene graph → XCAF document (via TKJT)
 wasm/src/jt_pmi.cpp       JT PMI Manager data → drawn PMI and saved views
 wasm/src/xt_reader.cpp    Parasolid XT (neutral binary) → edges, for JT parts with embedded XT data
-wasm/src/qif_reader.cpp   QIF (ISO 23952) B-rep, product structure and semantic PMI → XCAF document
+wasm/src/qif_reader.cpp   QIF (ISO 23952) B-rep, product structure and PMI → XCAF document and drawn PMI
+wasm/src/pmi_text.cpp     text → filled triangles (osifont via FreeType), for drawn PMI
 wasm/patches/             changes to TKJT (JT 10 support, fixes, raw PMI data) and OCCT (STEP and meshing fixes)
 wasm/scripts/             toolchain and build scripts
 wasm/test/                Node tests against the built module

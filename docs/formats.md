@@ -50,12 +50,14 @@ B-rep geometry, so every measurement works.
 - QIF 3 (ISO 23952) model-based definition: the exact B-rep, so every measurement works. Parts and
   assemblies, colours of bodies and faces, and the file's length unit (including the product's scale
   coefficient). Bodies the file hides (auxiliary geometry) are hidden.
-- **PMI:** semantic only, not drawn: characteristics (dimensions and geometric tolerances) with their
-  nominal, tolerance or limits, datums and referenced faces; datums and notes. Saved views with their
-  direction and the PMI they show.
+- **PMI:** characteristics (dimensions and geometric tolerances) with their nominal, tolerance or
+  limits, datums and referenced faces; datums, datum targets and notes. Drawn as the file places them
+  (`PMIDisplay`: frames, leaders, witness lines, graphics and text). Text uses one font of our own
+  (osifont), not the font the file names, so its width may differ slightly from the exporter's
+  frames. Saved views with their direction and the PMI they show.
 - Files without model geometry (measurement plans, results, rules) are rejected with a message.
-- Not supported: drawn PMI (`PMIDisplay`), mesh faces, point clouds, polynomial spline curves and
-  surfaces, external QIF references.
+- Not supported: mesh faces, point clouds, polynomial spline curves and surfaces, external QIF
+  references; of drawn PMI, areas given as loops, flag and weld symbol frames.
 
 ## Mesh formats
 

@@ -11,8 +11,16 @@ company, and Milo Yip, licensed under the MIT License, used by OCCT's glTF reade
 
 It also includes TKJT, the JT reader from PyOpenJt (https://github.com/jriegel/PyOpenJt),
 Copyright (c) 2013-2015 OPEN CASCADE SAS and (c) 2024 Juergen Riegel, licensed under the GNU General
-Public License version 2 or later, with the changes in wasm/patches. Because of this the compiled
-occt-viewer.wasm, and the application as a whole, are distributed under GPL-2.0-or-later (see LICENSE).
+Public License version 2 or later, with the changes in wasm/patches.
+
+It also includes FreeType (https://freetype.org/), used by OCCT to read the font for drawn PMI text.
+Portions of this software are copyright (c) 2026 The FreeType Project (www.freetype.org). All rights
+reserved. FreeType is dual-licensed under the FreeType License and the GNU General Public License
+version 2 or later; it is used here under the latter.
+
+It also includes the osifont font (https://github.com/hikikomori82/osifont), licensed under the GNU
+Lesser General Public License version 3 with font exception (see LICENSE.LGPL-3.0), embedded in
+occt-viewer.wasm to draw PMI text.
 
 It also includes liblzma from XZ Utils (https://tukaani.org/xz/), licensed under the BSD Zero Clause
 License, and zlib (https://zlib.net/), Copyright (c) 1995-2024 Jean-loup Gailly and Mark Adler,
@@ -25,3 +33,6 @@ Format Reference published by Siemens Industry Software; Parasolid is a trademar
 
 It also includes the Geist font (https://github.com/vercel/geist-font), Copyright 2024 The Geist
 Project Authors, licensed under the SIL Open Font License, Version 1.1.
+
+Because of TKJT (GPL-2.0-or-later) and osifont (LGPL-3.0), the compiled occt-viewer.wasm, and the
+application as a whole, are distributed under GPL-3.0-or-later (see LICENSE).

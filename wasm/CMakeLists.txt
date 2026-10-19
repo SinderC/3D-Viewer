@@ -7,6 +7,14 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # OpenCASCADE_DIR is passed by scripts/build-bridge.sh (install dir of the pinned OCCT version).
 find_package(OpenCASCADE REQUIRED CONFIG NO_DEFAULT_PATH CMAKE_FIND_ROOT_PATH_BOTH)
 
+if(NOT OpenCASCADE_WITH_FREETYPE) # an install from before drawn PMI text would link, then draw no text
+  message(FATAL_ERROR "OCCT was built without FreeType: run wasm/scripts/build-occt.sh")
+endif()
+# OCCT's targets link "freetype". As a target it is Emscripten's port, in the variant whose longjmp
+# matches -fwasm-exceptions; a plain -lfreetype would pick the one with JavaScript longjmp.
+add_library(freetype INTERFACE)
+target_link_options(freetype INTERFACE -sUSE_FREETYPE=1)
+
 # JT reader: TKJT sources and liblzma, fetched/built by scripts/build-jt-deps.sh.
 # JtToTopoDS is left out: it converts XT B-Rep through a proprietary Parasolid reader.
 file(GLOB TKJT_DIRS LIST_DIRECTORIES true "${TKJT_SRC}/TKJT/src/*")
@@ -25,10 +33,15 @@ target_include_directories(tkjt PUBLIC ${TKJT_DIRS} ${OpenCASCADE_INCLUDE_DIR} "
 target_compile_definitions(tkjt PRIVATE NO_JT_MULTITHREADING __isascii=isascii) # __isascii: MSVC name
 target_compile_options(tkjt PRIVATE -fwasm-exceptions -UOCC_CONVERT_SIGNALS -sUSE_ZLIB=1 -w)
 
-add_executable(occt-viewer src/bridge.cpp src/jt_pmi.cpp src/jt_reader.cpp src/xt_reader.cpp src/qif_reader.cpp)
+# Font for drawn PMI text (osifont, LGPL-3 with font exception), fetched by scripts/build-bridge.sh.
+if(NOT EXISTS "${PMI_FONT}")
+  message(FATAL_ERROR "PMI font not found: run wasm/scripts/build-bridge.sh")
+endif()
+
+add_executable(occt-viewer src/bridge.cpp src/jt_pmi.cpp src/jt_reader.cpp src/xt_reader.cpp src/qif_reader.cpp src/pmi_text.cpp)
 target_link_libraries(occt-viewer PRIVATE
   tkjt "${XZ_INSTALL}/lib/liblzma.a"
-  TKDESTEP TKDEIGES TKDEOBJ TKDESTL TKDEVRML TKRWMesh TKXCAF TKMesh TKCDF)
+  TKDESTEP TKDEIGES TKDEOBJ TKDESTL TKDEVRML TKRWMesh TKXCAF TKMesh TKCDF TKV3d)
 # Must match the OCCT build (see scripts/build-occt.sh).
 target_compile_options(occt-viewer PRIVATE -fwasm-exceptions -UOCC_CONVERT_SIGNALS)
 target_link_options(occt-viewer PRIVATE
@@ -43,5 +56,6 @@ target_link_options(occt-viewer PRIVATE
   -sSTACK_SIZE=4MB
   -sFILESYSTEM=1 # MEMFS: the IGES, mesh and JT readers read by file name
   -sUSE_ZLIB=1
+  "--embed-file=${PMI_FONT}@/fonts/osifont.ttf"
   -sDYNAMIC_EXECUTION=0)
-set_target_properties(occt-viewer PROPERTIES SUFFIX ".js")
+set_target_properties(occt-viewer PROPERTIES SUFFIX ".js" LINK_DEPENDS "${PMI_FONT}") # relink when the font changes

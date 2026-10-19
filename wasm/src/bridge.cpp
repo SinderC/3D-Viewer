@@ -1281,7 +1281,7 @@ private:
     }
   }
 
-  // JT PMI comes drawn already, in the coordinates of its part (or the model); QIF PMI is semantic only.
+  // JT and QIF PMI come drawn already, in the coordinates of their part (or the model).
   void addFilePmi(const FilePmi& file)
   {
     const int first = int(myPmi.size());

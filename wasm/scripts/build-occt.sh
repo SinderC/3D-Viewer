@@ -11,6 +11,9 @@ fi
 for p in "$WASM_DIR"/patches/occt-*.patch; do
   git -C "$OCCT_SRC" apply --reverse --check "$p" 2>/dev/null || git -C "$OCCT_SRC" apply "$p"
 done
+# FreeType (Emscripten port) turns text into outlines for drawn PMI (StdPrs_BRepFont).
+embuilder build freetype >/dev/null
+FREETYPE_INCLUDE="$(em-config CACHE)/sysroot/include/freetype2"
 if [ ! -d "$RAPIDJSON_SRC" ]; then
   git init -q "$RAPIDJSON_SRC"
   git -C "$RAPIDJSON_SRC" fetch -q --depth 1 https://github.com/Tencent/rapidjson.git "$RAPIDJSON_COMMIT"
@@ -37,7 +40,9 @@ emcmake cmake -S "$OCCT_SRC" -B "$OCCT_BUILD" -G "Unix Makefiles" \
   -DBUILD_MODULE_Draw=OFF \
   -DBUILD_ADDITIONAL_TOOLKITS="$TOOLKITS" \
   -DBUILD_DOC_Overview=OFF \
-  -DUSE_TK=OFF -DUSE_FREETYPE=OFF -DUSE_FREEIMAGE=OFF -DUSE_RAPIDJSON=ON -D3RDPARTY_RAPIDJSON_INCLUDE_DIR="$RAPIDJSON_SRC/include" \
+  -DUSE_TK=OFF -DUSE_FREEIMAGE=OFF \
+  -DUSE_FREETYPE=ON -D3RDPARTY_FREETYPE_INCLUDE_DIR_ft2build="$FREETYPE_INCLUDE" -D3RDPARTY_FREETYPE_INCLUDE_DIR_freetype2="$FREETYPE_INCLUDE" \
+  -DUSE_RAPIDJSON=ON -D3RDPARTY_RAPIDJSON_INCLUDE_DIR="$RAPIDJSON_SRC/include" \
   -DUSE_DRACO=OFF -DUSE_TBB=OFF -DUSE_OPENGL=OFF -DUSE_GLES2=OFF -DUSE_XLIB=OFF
 
 cmake --build "$OCCT_BUILD" -j "$(sysctl -n hw.ncpu 2>/dev/null || nproc)"

@@ -32,6 +32,7 @@ cd web && npm install && npm run dev
 
 ## License
 
-GPL-2.0-or-later (see [LICENSE](LICENSE)), because the WebAssembly module links TKJT, which is GPL-2.0+.
+GPL-3.0-or-later (see [LICENSE](LICENSE)), because the WebAssembly module links TKJT (GPL-2.0-or-later)
+and embeds the osifont font (LGPL-3.0, see [LICENSE.LGPL-3.0](LICENSE.LGPL-3.0)) for PMI text.
 Open CASCADE Technology is LGPL-2.1 with an additional exception; its build scripts and patches are in
 this repository so the module can be relinked against a modified OCCT. Third-party notices are in [NOTICE](NOTICE).
