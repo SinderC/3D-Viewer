@@ -60,7 +60,8 @@ B-rep geometry, so every measurement works.
   assemblies, colours of bodies and faces, and the file's length unit (including the product's scale
   coefficient). Bodies the file hides (auxiliary geometry) are hidden.
 - **PMI:** characteristics (dimensions and geometric tolerances) with their nominal, tolerance or
-  limits, datum reference frame (precedence and compound datums A-B, without datum modifiers) and
+  limits, datum reference frame (precedence, compound datums A-B and datum modifiers such as Ⓜ Ⓛ Ⓡ
+  [CF] [PL] Ⓟ; the ASME translation and degrees of freedom are not read) and
   referenced faces, edges and vertices; datums, datum targets and notes. Drawn as the file places them
   (`PMIDisplay`: frames, leaders, witness lines, graphics and text). Text uses one font of our own
   (osifont), not the font the file names, so its width may differ slightly from the exporter's

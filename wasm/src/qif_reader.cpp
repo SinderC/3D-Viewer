@@ -155,6 +155,14 @@ std::string text(const LDOM_Element& e)
   return out;
 }
 
+// An element's text without surrounding white space, for enumerations and Booleans.
+std::string token(const LDOM_Element& e)
+{
+  const std::string s     = text(e);
+  const size_t      first = s.find_first_not_of(" \t\r\n");
+  return first == std::string::npos ? std::string() : s.substr(first, s.find_last_not_of(" \t\r\n") - first + 1);
+}
+
 std::vector<double> parseNumbers(const std::string& s)
 {
   std::vector<double> out;
@@ -1431,15 +1439,49 @@ private:
     }
   }
 
-  // A frame compartment: one datum, or the datums of a compound (common) datum A-B.
-  static std::vector<std::string> frameCompartment(const LDOM_Element&               datum,
-                                                   const std::map<int, std::string>& labels)
+  // A frame compartment: one datum, or the datums of a compound (common) datum A-B, each with its
+  // modifiers (ISO 23952 5.17.6.2 and the ISO elements of DatumType), named as for STEP.
+  std::vector<DatumRef> frameCompartment(const LDOM_Element& datum, const std::map<int, std::string>& labels) const
   {
-    std::vector<std::string> out;
+    std::vector<DatumRef> out;
     const auto label = [&](const LDOM_Element& simple) {
       const auto it = labels.find(idOf(child(simple, "DatumDefinitionId")));
-      if (it != labels.end() && !it->second.empty())
-        out.push_back(it->second);
+      if (it == labels.end() || it->second.empty())
+        return;
+      DatumRef d{it->second};
+      const std::string material = token(child(simple, "MaterialModifier"));
+      if (material == "MAXIMUM" || material == "MAXIMUM_RPR")
+        d.modifiers.push_back("maximumMaterial");
+      else if (material == "LEAST" || material == "LEAST_RPR")
+        d.modifiers.push_back("leastMaterial");
+      if (material.size() > 4 && material.compare(material.size() - 4, 4, "_RPR") == 0)
+        d.modifiers.push_back("reciprocity");
+      // Enumerations: the schema's values are not at hand, so known symbols and names are mapped
+      // and anything else is kept as written.
+      static const std::map<std::string, std::string> kEnums = {
+        {"ACS", "anyCrossSection"}, {"ANY_CROSS_SECTION", "anyCrossSection"},
+        {"ALS", "anyLongitudinalSection"}, {"ANY_LONGITUDINAL_SECTION", "anyLongitudinalSection"},
+        {"SCS", "specificCrossSection"}, {"SPECIFIC_CROSS_SECTION", "specificCrossSection"},
+        {"PD", "pitchDiameter"}, {"PITCH_DIAMETER", "pitchDiameter"},
+        {"MD", "majorDiameter"}, {"MAJOR_DIAMETER", "majorDiameter"},
+        {"LD", "minorDiameter"}, {"MINOR_DIAMETER", "minorDiameter"},
+        {"PT", "point"}, {"POINT", "point"}, {"SL", "line"}, {"LINE", "line"}, {"PL", "plane"}, {"PLANE", "plane"}};
+      for (const char* tag : {"SectionModifier", "DiameterModifier", "ReducedDatum"})
+        if (const std::string v = token(child(simple, tag)); !v.empty())
+          d.modifiers.push_back(kEnums.count(v) ? kEnums.at(v) : v);
+      static const std::pair<const char*, const char*> kFlags[] = {
+        {"ContactingFeature", "contactingFeature"}, {"DistanceVariable", "distanceVariable"},
+        {"DatumFixed", "datumFixed"}, {"ConstrainOrientation", "orientation"},
+        {"ConstrainSubsequent", "constrainSubsequent"}};
+      for (const auto& [tag, name] : kFlags)
+        if (const std::string v = token(child(simple, tag)); v == "true" || v == "1")
+          d.modifiers.push_back(name);
+      if (const LDOM_Element projected = child(simple, "ProjectedDatum"); !projected.isNull())
+      {
+        d.sizeType = "projected";
+        d.size     = measure(projected, false);
+      }
+      out.push_back(std::move(d));
     };
     if (const LDOM_Element simple = child(datum, "SimpleDatum"); !simple.isNull())
       label(simple);
@@ -1464,7 +1506,7 @@ private:
     {
       const int   id    = std::atoi(attr(d, "id").c_str());
       FilePmiItem item;
-      datumLabels[id] = text(child(d, "DatumLabel"));
+      datumLabels[id] = token(child(d, "DatumLabel"));
       item.kind       = "datum";
       item.type       = "Datum " + datumLabels[id];
       addShapes(ids(d, "FeatureNominalIds"), item);
@@ -1490,9 +1532,19 @@ private:
         item.kind  = "tolerance";
         item.value = {measure(tol, false)};
         if (const int frame = idOf(child(def, "DatumReferenceFrameId")); myById.count(frame))
+        {
+          // In precedence order, not document order; other precedences after these, as listed
+          static const std::vector<std::string> kOrder = {"PRIMARY", "SECONDARY", "TERTIARY", "QUATERNARY", "QUINARY"};
+          std::vector<std::pair<size_t, std::vector<DatumRef>>> ranked;
           for (const LDOM_Element& d : elements(child(lookup(frame), "Datums")))
-            if (std::vector<std::string> compartment = frameCompartment(d, datumLabels); !compartment.empty())
-              item.datums.push_back(std::move(compartment));
+            if (std::vector<DatumRef> compartment = frameCompartment(d, datumLabels); !compartment.empty())
+              ranked.emplace_back(std::find(kOrder.begin(), kOrder.end(), token(child(child(d, "Precedence"), "PrecedenceEnum")))
+                                    - kOrder.begin(),
+                                  std::move(compartment));
+          std::stable_sort(ranked.begin(), ranked.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+          for (auto& [rank, compartment] : ranked)
+            item.datums.push_back(std::move(compartment));
+        }
       }
       else
       {

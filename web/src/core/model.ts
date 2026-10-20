@@ -131,12 +131,14 @@ export interface DatumRef {
   situations?: { type: 'point' | 'line' | 'plane'; origin: Vec3; direction?: Vec3 }[];
 }
 
-/** Datum reference modifiers OCCT reads (PMI RP Table 15). */
+/** Datum reference modifiers: those of STEP (PMI RP Table 15) and the ones only QIF has (ISO 23952). */
 export type DatumModifier =
   | 'anyCrossSection'
   | 'anyLongitudinalSection'
   | 'basic'
   | 'contactingFeature'
+  | 'constrainSubsequent'
+  | 'datumFixed'
   | 'dofU'
   | 'dofV'
   | 'dofW'
@@ -144,6 +146,8 @@ export type DatumModifier =
   | 'dofY'
   | 'dofZ'
   | 'distanceVariable'
+  | 'reciprocity'
+  | 'specificCrossSection'
   | 'freeState'
   | 'leastMaterial'
   | 'line'

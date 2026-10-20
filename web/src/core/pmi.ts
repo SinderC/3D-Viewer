@@ -42,6 +42,10 @@ const DATUM_MODIFIERS: Record<Exclude<DatumModifier, `dof${string}`>, [symbol: s
   anyLongitudinalSection: ['[ALS]', 'any longitudinal section'],
   basic: ['BSC', 'basic'],
   contactingFeature: ['[CF]', 'contacting feature'],
+  reciprocity: ['Ⓡ', 'reciprocity'],
+  specificCrossSection: ['[SCS]', 'specific cross section'],
+  constrainSubsequent: ['<>', 'constrain subsequent'],
+  datumFixed: ['[DF]', 'datum fixed'],
   distanceVariable: ['[DV]', 'distance variable'],
   freeState: ['Ⓕ', 'free state'],
   leastMaterial: ['Ⓛ', 'least material'],
@@ -72,13 +76,11 @@ function datumModifiers(d: DatumRef, unit: UnitId, names = false): string[] {
   return out;
 }
 
-// One compartment: A Ⓜ, or a common datum A-B. When all its datums have the same modifiers (as
-// OCCT gives a compartment's modifiers to each datum), they are written once, after it: A-B Ⓜ.
+// One compartment: A Ⓜ, or a common datum with each datum's own modifiers after it, A Ⓜ-B Ⓜ (PMI
+// RP Figure 67). A modifier of the whole compartment comes to each datum (OCCT, QIF), so it shows
+// on each; written once, A-B Ⓜ would read as B's alone.
 function compartment(refs: DatumRef[], unit: UnitId): string {
-  const each = refs.map((d) => datumModifiers(d, unit).join(' '));
-  if (refs.length > 1 && each.every((m) => m === each[0]))
-    return [refs.map((d) => d.name).join('-'), each[0]].filter(Boolean).join(' ');
-  return refs.map((d, i) => [d.name, each[i]].filter(Boolean).join(' ')).join('-');
+  return refs.map((d) => [d.name, ...datumModifiers(d, unit)].join(' ')).join('-');
 }
 
 // The datum reference frame as in a feature control frame: A | B Ⓜ | C-D.

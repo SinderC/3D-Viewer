@@ -232,18 +232,6 @@ const std::tuple<const char*, const char*, std::vector<int> Refs::*> kRefLists[]
   {"vertices", "nodeVertices", &Refs::vertices},
 };
 
-// A datum referenced by a geometric tolerance, with its modifiers, e.g. B Ⓜ [Ø10].
-struct DatumRef
-{
-  std::string              name;
-  std::vector<std::string> modifiers; // e.g. maximumMaterial, basic, dofX
-  std::string              sizeType;  // modifier with value: diameter, distance, projected or spherical
-  double                   size = 0;
-  // Situation features of [PT] [SL] [PL]: point, line or plane, as a point and a direction (the
-  // line's, the plane's normal; none for a point)
-  std::vector<std::pair<std::string, gp_Ax1>> situations;
-};
-
 // PMI (STEP GD&T): one dimension, geometric tolerance, datum or note, with its drawn presentation.
 struct Pmi
 {
@@ -1407,12 +1395,7 @@ private:
       p.range     = item.range;
       p.bound     = item.bound;
       p.angular   = item.angular;
-      for (const std::vector<std::string>& names : item.datums)
-      {
-        std::vector<DatumRef>& compartment = p.datums.emplace_back();
-        for (const std::string& name : names)
-          compartment.push_back({name});
-      }
+      p.datums    = item.datums;
       if (!item.part.IsNull())
         if (const auto it = myProtoByEntry.find(entryOf(item.part)); it != myProtoByEntry.end())
           p.proto = it->second;
@@ -2751,7 +2734,7 @@ std::string toJson(const Source& src, const Builder& b)
           {
             o << ",\"modifiers\":[";
             for (size_t m = 0; m < d.modifiers.size(); ++m)
-              o << (m ? "," : "") << '"' << d.modifiers[m] << '"';
+              o << (m ? "," : "") << '"' << jsonEscape(d.modifiers[m]) << '"';
             o << ']';
           }
           if (!d.sizeType.empty())

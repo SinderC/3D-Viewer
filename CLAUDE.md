@@ -12,6 +12,7 @@ cd web && npm test                 # vitest unit tests
 cd web && npm run build            # tsc -b type check + production build
 node wasm/test/smoke.mjs [path…]   # loads files through the built WASM module
 node wasm/test/step-coverage.mjs   # STEP features beyond plain B-rep
+node wasm/test/qif-coverage.mjs    # QIF semantic PMI
 ```
 
 Full build, deployment and code layout: [docs/development.md](docs/development.md).

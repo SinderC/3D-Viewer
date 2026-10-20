@@ -51,10 +51,10 @@ describe('pmiLabel', () => {
         ['Datum modifiers', 'B: diameter 10.505 mm; C: basic, translation'],
       ]),
     );
-    // RP Figure 67: Ⓜ on A alone; one shared by all datums of a compartment is written once
+    // RP Figure 67: each datum of a common datum with its own modifiers
     const mmc = (...names: string[]) => names.map((name) => ({ name, modifiers: ['maximumMaterial'] as DatumModifier[] }));
     expect(pmiLabel(tol([[...mmc('A'), { name: 'B' }], [{ name: 'C' }]]), 'mm')).toBe('Position 0.100 mm | A Ⓜ-B | C');
-    expect(pmiLabel(tol([[{ name: 'D' }], mmc('E', 'F', 'G')]), 'mm')).toBe('Position 0.100 mm | D | E-F-G Ⓜ');
+    expect(pmiLabel(tol([[{ name: 'D' }], mmc('E', 'F', 'G')]), 'mm')).toBe('Position 0.100 mm | D | E Ⓜ-F Ⓜ-G Ⓜ');
     // Degrees of freedom together, after the other modifiers; unknown modifiers as they are
     const dof: DatumRef = { name: 'A', modifiers: ['dofX', 'maximumMaterial', 'dofY', 'dofU', 'tangent' as DatumModifier] };
     expect(pmiLabel(tol([[dof]]), 'mm')).toBe('Position 0.100 mm | A Ⓜ tangent [x,y,u]');
@@ -77,6 +77,8 @@ describe('pmiLabel', () => {
         ['Datum axes (part)', 'origin (1.0000 in, 0.0000 in, 0.0000 in), X (0, -1, 0), Z (0, 0, 1)'],
       ]),
     );
+    // QIF's ISO modifiers without a STEP equivalent
+    expect(pmiLabel(tol([[{ name: 'A', modifiers: ['datumFixed', 'constrainSubsequent'] }]]), 'mm')).toBe('Position 0.100 mm | A [DF] <>');
     const inch: DatumRef = { name: 'A', modifiers: ['point'], sizeType: 'spherical', size: 25.4 };
     expect(pmiLabel(tol([[inch]]), 'in')).toBe('Position 0.0039 in | A [PT] [SØ1.0000 in]');
   });

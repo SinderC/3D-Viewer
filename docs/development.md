@@ -29,10 +29,11 @@ applied: [patches.md](patches.md).
 cd web && npm test                # unit tests (vitest)
 node wasm/test/smoke.mjs [path…]  # loads every OCCT-read file under samples/ (or the given paths) and prints a summary
 node wasm/test/step-coverage.mjs  # writes small STEP files for features beyond plain B-rep and checks what is read
+node wasm/test/qif-coverage.mjs   # the same for QIF semantic PMI
 ```
 
 `samples/` is not in the repository; supply your own files. `DUMP=samples/step-coverage` makes the
-coverage test write its files there so the smoke test loads them too.
+coverage tests write their files there so the smoke test loads them too.
 
 ## Running offline
 
