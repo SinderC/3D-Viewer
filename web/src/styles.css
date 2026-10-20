@@ -235,7 +235,7 @@ input[type='checkbox'] { accent-color: var(--accent); margin: 0; }
    Wheel over a row scrolls the tree (the scroll chain still includes .tree); elsewhere it zooms. */
 .app.side-overlay {
   --side: min(280px, 40vw);
-  --overlay: color-mix(in srgb, var(--surface-1) 80%, transparent);
+  --overlay: color-mix(in srgb, var(--surface-1) 90%, transparent);
 }
 .app.side-overlay .stage { grid-column: side-start / stage-end; }
 .app.side-overlay .sidebar {
