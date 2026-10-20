@@ -1,5 +1,5 @@
 // The "Realistic" and "Studio" display styles: post-processing (ambient occlusion, tone mapping, grading,
-// vignette) and a soft contact shadow under the model. Made on first use; the other styles render straight to the canvas.
+// vignette) and the ground: a soft contact shadow under the model and the sun's shadow. Made on first use; the other styles render straight to the canvas.
 import * as THREE from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
@@ -150,9 +150,16 @@ const SHADOW_SIZE = 512;
 /**
  * A soft shadow on the ground under the model: its depth seen from below, darker where it is closer
  * to the ground, blurred. It depends only on the model, so it is redrawn when the model changes.
+ * The ground also catches the sun's shadow, which the backdrop alone cannot show.
  */
 export class ContactShadow {
-  readonly mesh: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>;
+  /** Both shadows, placed on the ground by `update`. */
+  readonly ground = new THREE.Group();
+  private readonly mesh: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>;
+  private readonly catcher = new THREE.Mesh(
+    new THREE.PlaneGeometry(1, 1),
+    new THREE.ShadowMaterial({ opacity: 0.35, depthWrite: false }),
+  );
   private readonly target = new THREE.WebGLRenderTarget(SHADOW_SIZE, SHADOW_SIZE);
   private readonly blurTarget = new THREE.WebGLRenderTarget(SHADOW_SIZE, SHADOW_SIZE);
   private readonly camera = new THREE.OrthographicCamera();
@@ -180,6 +187,10 @@ export class ContactShadow {
     this.mesh.material.side = THREE.DoubleSide;
     this.mesh.raycast = () => {};
     this.mesh.renderOrder = -1;
+    this.catcher.receiveShadow = true;
+    this.catcher.raycast = () => {};
+    this.catcher.renderOrder = -1;
+    this.ground.add(this.mesh, this.catcher);
   }
 
   /**
@@ -198,7 +209,8 @@ export class ContactShadow {
     const size = bounds.getSize(new THREE.Vector3());
     const center = bounds.getCenter(new THREE.Vector3());
     const extent = Math.max(size.x, size.y) * 1.4; // room for the blur around the outline
-    const reach = Math.max(size.z, extent * 0.25); // how high above the ground still casts a shadow
+    // How high above the ground still darkens it: only where the model nearly touches, the sun casts the rest.
+    const reach = extent * 0.08;
     const ground = bounds.min.z - extent * 1e-4; // just below the bottom faces, like the grid
 
     Object.assign(this.camera, { left: -extent / 2, right: extent / 2, top: extent / 2, bottom: -extent / 2, near: 0, far: reach });
@@ -206,9 +218,11 @@ export class ContactShadow {
     this.camera.up.set(0, 1, 0).applyQuaternion(upright);
     this.camera.lookAt(new THREE.Vector3(center.x, center.y, ground + 1).applyQuaternion(upright));
     this.camera.updateProjectionMatrix();
-    this.mesh.position.set(center.x, center.y, ground).applyQuaternion(upright);
-    this.mesh.quaternion.copy(upright);
+    this.ground.position.set(center.x, center.y, ground).applyQuaternion(upright);
+    this.ground.quaternion.copy(upright);
     this.mesh.scale.set(-extent, extent, 1);
+    // The sun's shadow falls beside the model, past the contact shadow; outside the sun's shadow map is lit, so no edge shows.
+    this.catcher.scale.set(3 * extent, 3 * extent, 1);
 
     // Render the model alone: borrow it into the shadow scene for the draw.
     const parent = root.parent;
@@ -231,7 +245,7 @@ export class ContactShadow {
   }
 
   setVisible(visible: boolean): void {
-    this.mesh.visible = visible;
+    this.ground.visible = visible;
   }
 
   private blur(amount: number, renderer: THREE.WebGLRenderer): void {
@@ -256,5 +270,7 @@ export class ContactShadow {
     this.scene.overrideMaterial?.dispose();
     this.mesh.geometry.dispose();
     this.mesh.material.dispose();
+    this.catcher.geometry.dispose();
+    this.catcher.material.dispose();
   }
 }

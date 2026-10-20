@@ -38,7 +38,7 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,wasm,woff2}'],
+        globPatterns: ['**/*.{js,css,html,svg,wasm,woff2,hdr}'],
         maximumFileSizeToCacheInBytes: 30 * 1024 * 1024,
       },
       manifest: {

@@ -18,8 +18,9 @@ Open a file with **File › Open**, Cmd/Ctrl+O, or by dropping it on the window.
 - Fit all, zoom to selection, six standard views and iso, ViewCube.
 - Perspective or orthographic camera. The **Up axis** setting picks the model axis that points up;
   standard views, ViewCube, grid, shadow and GLB export follow it.
-- Display styles: shaded, shaded with edges, wireframe, realistic (overhead light, ambient occlusion,
-  contact shadow, tone mapping) and studio (warm sun with shadows, cool sky fill, graded colour).
+- Display styles: shaded, shaded with edges, wireframe, realistic (lit by a photographed studio, overhead
+  light casting shadows on the model and the ground, ambient occlusion, contact shadow, tone mapping) and
+  studio (warm sun casting shadows, cool sky fill, graded colour).
   Edge styles need B-rep geometry or JT with XT data.
 - Ground grid. Save the view as a PNG.
 

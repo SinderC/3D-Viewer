@@ -37,5 +37,9 @@ Project Authors, licensed under the SIL Open Font License, Version 1.1.
 It also includes Lucide icons (https://lucide.dev), Copyright (c) 2026 Lucide Icons and
 Contributors, licensed under the ISC License.
 
+It also includes the "Studio Small 09" HDRI by Sergej Majboroda from Poly Haven
+(https://polyhaven.com/a/studio_small_09), released under CC0, as
+web/src/viewer/studio_small_09_1k.hdr.
+
 Because of TKJT (GPL-2.0-or-later) and osifont (LGPL-3.0), the compiled occt-viewer.wasm, and the
 application as a whole, are distributed under GPL-3.0-or-later (see LICENSE).

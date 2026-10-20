@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+import { HDRLoader } from 'three/examples/jsm/loaders/HDRLoader.js';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
@@ -22,6 +23,7 @@ import { ContactShadow, Effects, type Grade } from './realistic';
 import { buildSectionCaps, disposeCaps, sectionPlane, sectionPosition } from './section';
 import { AXES as TRIAD_AXES, AxisTriad } from './AxisTriad';
 import { ViewCube } from './ViewCube';
+import studioUrl from './studio_small_09_1k.hdr?url';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
@@ -70,6 +72,9 @@ const UP_AXES: Record<UpAxis, THREE.Vector3> = {
 const Z_UP = new THREE.Vector3(0, 0, 1);
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
 const SUN = new THREE.Vector3(-1, -1.5, 3); // from above, front left; a directional light only needs the direction
+// The studio photo's brighter softbox, in its own Y-up frame (measured): turned to sit on the sun's side.
+const STUDIO_KEY = new THREE.Vector3(0.55, 0.66, 0.51);
+const STUDIO_UPRIGHT = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2); // Y-up → Z-up
 
 // Directions from the target towards the camera, in the upright frame.
 const VIEW_DIRS: Record<ViewName, THREE.Vector3> = {
@@ -108,12 +113,13 @@ const PMI_COLORS: Record<PmiColor, Record<Theme, number>> = {
 };
 // Light intensities and colours; in the photographic styles the environment adds light, so the lamps dim.
 // The plain styles light from the camera, so every face towards you is lit; the photographic ones light
-// mostly from a fixed overhead sun, so shape reads from shading as in a photo. Studio is the animated-film
+// from a fixed overhead sun casting shadows, so shape reads from shading as in a photo. Realistic is
+// lit mostly by the studio photo, as a product shot, with no lamp on the camera. Studio is the animated-film
 // recipe: a warm sun casting shadows, a cool sky fill and a warm bounce from the ground, then graded.
 const NEUTRAL: Grade = { saturation: 1, contrast: 1, warmth: 0 };
 const LIGHTS = {
   plain: { key: 2.2, fill: 1.4, sun: 0, environment: 0, sunColor: 0xffffff, sky: 0xffffff, ground: 0x50545c, grade: NEUTRAL },
-  realistic: { key: 0.35, fill: 0.1, sun: 3.2, environment: 0.35, sunColor: 0xffffff, sky: 0xffffff, ground: 0x50545c, grade: NEUTRAL },
+  realistic: { key: 0, fill: 0, sun: 2.6, environment: 0.5, sunColor: 0xffffff, sky: 0xffffff, ground: 0x50545c, grade: NEUTRAL },
   studio: {
     key: 0.1,
     fill: 0.9,
@@ -171,6 +177,7 @@ export class Viewer {
   private readonly background = new THREE.Color();
   private contactShadow: ContactShadow | null = null;
   // Reflections for PBR materials (glTF, appearances); plain CAD colours do without, as before.
+  // The studio photo once loaded, the procedural room until then; one texture, so materials keep it.
   private readonly environment: THREE.Texture;
   private readonly finishes: Finishes;
   private readonly modelRoot = new THREE.Group();
@@ -250,18 +257,30 @@ export class Viewer {
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setPixelRatio(this.pixelRatio);
     this.renderer.localClippingEnabled = true;
-    // Only the studio sun casts. The light is fixed to the model, so its map is redrawn when the model changes, not per frame.
+    // Only the photographic styles' sun casts. The light is fixed to the model, so its map is redrawn when the model changes, not per frame.
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    // Variance shadows blur the map itself, so the shadow is soft like a softbox's; PCF's few samples stay hard or turn grainy.
+    this.renderer.shadowMap.type = THREE.VSMShadowMap;
     this.renderer.shadowMap.autoUpdate = false;
     this.sun.shadow.mapSize.setScalar(SHADOW_MAP_SIZE);
-    this.sun.shadow.radius = 3;
+    this.sun.shadow.radius = 12;
+    this.sun.shadow.blurSamples = 16;
     this.finishes = new Finishes(this.renderer.capabilities.getMaxAnisotropy());
     const pmrem = new THREE.PMREMGenerator(this.renderer);
     const room = new RoomEnvironment();
-    this.environment = pmrem.fromScene(room, 0.04).texture;
+    const environment = pmrem.fromScene(room, 0.04);
+    this.environment = environment.texture;
     room.dispose();
-    pmrem.dispose();
+    new HDRLoader().loadAsync(studioUrl).then(
+      (studio) => {
+        // Same size as the room's (1024 wide → 256 per cube face), so it fits the same target.
+        pmrem.fromEquirectangular(studio, environment);
+        studio.dispose();
+        pmrem.dispose();
+        this.requestRender();
+      },
+      () => pmrem.dispose(), // the room stays
+    );
     this.edgeMaterial.clippingPlanes = this.clipping;
     this.highlight.clippingPlanes = this.clipping;
     this.ghostMaterial.clippingPlanes = this.clipping;
@@ -424,6 +443,8 @@ export class Viewer {
       clippingPlanes: this.clipping,
       clipShadows: true,
       visible: this.display !== 'wireframe',
+      // The scene's own, not a copy, so the environment turns with the up axis on materials with an envMap too.
+      envMapRotation: this.scene.environmentRotation,
     });
   }
 
@@ -610,11 +631,11 @@ export class Viewer {
         ...this.measure.objects,
         this.pivotMarker,
         ...(this.grid ? [this.grid] : []),
-        ...(this.contactShadow ? [this.contactShadow.mesh] : []),
+        ...(this.contactShadow ? [this.contactShadow.ground] : []),
       ]);
       this.effects.setBackground(this.theme.background);
       this.contactShadow = new ContactShadow();
-      this.scene.add(this.contactShadow.mesh);
+      this.scene.add(this.contactShadow.ground);
       this.resize();
     }
     const lights = LIGHTS[style ?? 'plain'];
@@ -624,7 +645,7 @@ export class Viewer {
     this.hemisphere.groundColor.set(lights.ground);
     this.sun.intensity = lights.sun;
     this.sun.color.set(lights.sunColor);
-    this.sun.castShadow = style === 'studio';
+    this.sun.castShadow = on;
     this.effects?.setGrade(lights.grade);
     this.scene.environment = on ? this.environment : null;
     this.scene.environmentIntensity = lights.environment;
@@ -701,6 +722,10 @@ export class Viewer {
   setUpAxis(axis: UpAxis): void {
     this.upright.setFromUnitVectors(Z_UP, UP_AXES[axis]);
     this.sun.position.copy(SUN).applyQuaternion(this.upright);
+    // The studio photo upright, its key softbox turned to the sun's side. Shared with the materials' envMapRotation.
+    const key = STUDIO_KEY.clone().applyQuaternion(STUDIO_UPRIGHT);
+    const turn = new THREE.Quaternion().setFromAxisAngle(Z_UP, Math.atan2(SUN.y, SUN.x) - Math.atan2(key.y, key.x));
+    this.scene.environmentRotation.setFromQuaternion(this.upright.clone().multiply(turn).multiply(STUDIO_UPRIGHT));
     // The sky side, which three.js puts at +Y (the back) by default; kept relative to the upright frame.
     this.hemisphere.position.copy(Y_AXIS).applyQuaternion(this.upright);
     if (this.grid) {
