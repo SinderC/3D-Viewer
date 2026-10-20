@@ -29,8 +29,11 @@
   filled text), each with show/hide, its referenced faces, edges and vertices, and its semantic values
   (type, nominal, tolerances, datums; for geometric tolerances also the zone form Ø/SØ, modifiers
   such as Ⓜ Ⓛ Ⓕ CZ, unequally disposed zone (Ⓤ), projected zone length, runout zone angle, maximum
-  tolerance and unit basis). Not read: names of zone forms without a symbol, non-uniform zones,
-  affected planes and the ISO 1101 association modifiers. Assembly PMI on particular component
+  tolerance and unit basis, and the datum reference frame in precedence order with common datums
+  (A-B) and datum modifiers such as Ⓜ BSC ▷ [PL] [Ø10] [x,y]). Not read: names of zone forms
+  without a symbol, non-uniform zones, affected planes, the ISO 1101 association modifiers, nested
+  common datums, the datum system's degree-of-freedom axes and the situation feature geometry of
+  [PT] [SL] [PL]. Assembly PMI on particular component
   instances is drawn once in the assembly, also when the components are in other files (AP242
   external element references).
 - **Attributes** (user-defined) of parts, and of single component instances, deep ones included.
@@ -57,7 +60,8 @@ B-rep geometry, so every measurement works.
   assemblies, colours of bodies and faces, and the file's length unit (including the product's scale
   coefficient). Bodies the file hides (auxiliary geometry) are hidden.
 - **PMI:** characteristics (dimensions and geometric tolerances) with their nominal, tolerance or
-  limits, datums and referenced faces, edges and vertices; datums, datum targets and notes. Drawn as the file places them
+  limits, datum reference frame (precedence and compound datums A-B, without datum modifiers) and
+  referenced faces, edges and vertices; datums, datum targets and notes. Drawn as the file places them
   (`PMIDisplay`: frames, leaders, witness lines, graphics and text). Text uses one font of our own
   (osifont), not the font the file names, so its width may differ slightly from the exporter's
   frames. Saved views with their direction and the PMI they show.

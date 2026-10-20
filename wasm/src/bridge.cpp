@@ -232,6 +232,15 @@ const std::tuple<const char*, const char*, std::vector<int> Refs::*> kRefLists[]
   {"vertices", "nodeVertices", &Refs::vertices},
 };
 
+// A datum referenced by a geometric tolerance, with its modifiers, e.g. B Ⓜ [Ø10].
+struct DatumRef
+{
+  std::string              name;
+  std::vector<std::string> modifiers; // e.g. maximumMaterial, basic, dofX
+  std::string              sizeType;  // modifier with value: diameter, distance, projected or spherical
+  double                   size = 0;
+};
+
 // PMI (STEP GD&T): one dimension, geometric tolerance, datum or note, with its drawn presentation.
 struct Pmi
 {
@@ -259,7 +268,9 @@ struct Pmi
   std::vector<double>      runout;    // runout tolerance zone orientation angle, if any
   std::vector<double>      maxValue;  // maximum upper tolerance, if any
   std::vector<double>      unequal;   // displacement of an unequally disposed zone (Ⓤ), if any
-  std::vector<std::string> datums;
+  // Datum reference frame: compartments in precedence order; several datums in one are a
+  // common datum (A-B).
+  std::vector<std::vector<DatumRef>> datums;
 };
 
 // A saved view (STEP camera model) with the PMI it shows. OCCT keeps no camera position, so the
@@ -1208,14 +1219,7 @@ private:
         p.maxValue = {obj->GetMaxValueModifier()};
       if (const std::optional<double> unequal = obj->GetUnequalDisplacement())
         p.unequal = {*unequal};
-      LabelSequence datums;
-      XCAFDoc_DimTolTool::GetDatumOfTolerLabels(l, datums);
-      for (const TDF_Label& d : datums)
-      {
-        Handle(XCAFDoc_Datum) datum;
-        if (d.FindAttribute(XCAFDoc_Datum::GetID(), datum))
-          p.datums.push_back(str(datum->GetObject()->GetName()));
-      }
+      p.datums = datumFrame(l);
       addPmi(l, std::move(p), obj->GetPresentation(), obj->GetPresentationName());
     }
 
@@ -1397,7 +1401,12 @@ private:
       p.range     = item.range;
       p.bound     = item.bound;
       p.angular   = item.angular;
-      p.datums    = item.datums;
+      for (const std::vector<std::string>& names : item.datums)
+      {
+        std::vector<DatumRef>& compartment = p.datums.emplace_back();
+        for (const std::string& name : names)
+          compartment.push_back({name});
+      }
       if (!item.part.IsNull())
         if (const auto it = myProtoByEntry.find(entryOf(item.part)); it != myProtoByEntry.end())
           p.proto = it->second;
@@ -1459,6 +1468,51 @@ private:
                                          "Total runout"};
     const auto i = size_t(t);
     return i < sizeof kNames / sizeof *kNames ? kNames[i] : "Tolerance";
+  }
+
+  // OCCT gives each datum of a tolerance its compartment (position) and modifiers; datums sharing a
+  // position are a common datum.
+  static std::vector<std::vector<DatumRef>> datumFrame(const TDF_Label& tolerance)
+  {
+    std::map<int, std::vector<DatumRef>> byPosition;
+    LabelSequence                        labels;
+    XCAFDoc_DimTolTool::GetDatumOfTolerLabels(tolerance, labels);
+    for (const TDF_Label& l : labels)
+    {
+      Handle(XCAFDoc_Datum) attr;
+      if (!l.FindAttribute(XCAFDoc_Datum::GetID(), attr) || attr->GetObject().IsNull())
+        continue;
+      const Handle(XCAFDimTolObjects_DatumObject) obj = attr->GetObject();
+      DatumRef d{str(obj->GetName())};
+      for (const XCAFDimTolObjects_DatumSingleModif m : obj->GetModifiers())
+        if (const char* name = datumModifier(m))
+          d.modifiers.push_back(name);
+      XCAFDimTolObjects_DatumModifWithValue type;
+      obj->GetModifierWithValue(type, d.size);
+      static const char* const kSizeTypes[] = {"", "diameter", "distance", "projected", "spherical"};
+      if (size_t(type) < sizeof kSizeTypes / sizeof *kSizeTypes)
+        d.sizeType = kSizeTypes[size_t(type)];
+      // A datum set up from targets (A1, A2) comes once per target: the frame names it once.
+      std::vector<DatumRef>& compartment = byPosition[obj->GetPosition()];
+      const auto same = [&](const DatumRef& c) { return c.name == d.name; };
+      if (std::none_of(compartment.begin(), compartment.end(), same))
+        compartment.push_back(std::move(d));
+    }
+    std::vector<std::vector<DatumRef>> frame;
+    for (auto& [position, compartment] : byPosition)
+      frame.push_back(std::move(compartment));
+    return frame;
+  }
+
+  static const char* datumModifier(XCAFDimTolObjects_DatumSingleModif m)
+  {
+    static const char* const kNames[] = {
+      "anyCrossSection", "anyLongitudinalSection", "basic", "contactingFeature",
+      "dofU", "dofV", "dofW", "dofX", "dofY", "dofZ",
+      "distanceVariable", "freeState", "leastMaterial", "line", "majorDiameter", "maximumMaterial",
+      "minorDiameter", "orientation", "pitchDiameter", "plane", "point", "translation"};
+    const auto i = size_t(m);
+    return i < sizeof kNames / sizeof *kNames ? kNames[i] : nullptr;
   }
 
   static const char* toleranceModifier(XCAFDimTolObjects_GeomToleranceModif m)
@@ -2670,7 +2724,25 @@ std::string toJson(const Source& src, const Builder& b)
     {
       o << ",\"datums\":[";
       for (size_t k = 0; k < p.datums.size(); ++k)
-        o << (k ? "," : "") << '"' << jsonEscape(p.datums[k]) << '"';
+      {
+        o << (k ? ",[" : "[");
+        for (size_t j = 0; j < p.datums[k].size(); ++j)
+        {
+          const DatumRef& d = p.datums[k][j];
+          o << (j ? "," : "") << "{\"name\":\"" << jsonEscape(d.name) << '"';
+          if (!d.modifiers.empty())
+          {
+            o << ",\"modifiers\":[";
+            for (size_t m = 0; m < d.modifiers.size(); ++m)
+              o << (m ? "," : "") << '"' << d.modifiers[m] << '"';
+            o << ']';
+          }
+          if (!d.sizeType.empty())
+            o << ",\"sizeType\":\"" << d.sizeType << "\",\"size\":" << d.size;
+          o << '}';
+        }
+        o << ']';
+      }
       o << ']';
     }
     o << '}';

@@ -111,8 +111,43 @@ export interface PmiItem {
   maxValue?: [number];
   /** Displacement of an unequally disposed tolerance zone (Ⓤ), towards material added. */
   unequal?: [number];
-  datums?: string[];
+  /** Datum reference frame: compartments, primary first; several datums in one are a common datum (A-B). */
+  datums?: DatumRef[][];
 }
+
+/** A datum a tolerance references, with its modifiers (PMI RP Table 15), e.g. B Ⓜ [Ø10]. */
+export interface DatumRef {
+  name: string;
+  modifiers?: DatumModifier[];
+  /** Datum reference modifier with value (PMI RP Figure 65), in mm. */
+  sizeType?: 'diameter' | 'distance' | 'projected' | 'spherical';
+  size?: number;
+}
+
+/** Datum reference modifiers OCCT reads (PMI RP Table 15). */
+export type DatumModifier =
+  | 'anyCrossSection'
+  | 'anyLongitudinalSection'
+  | 'basic'
+  | 'contactingFeature'
+  | 'dofU'
+  | 'dofV'
+  | 'dofW'
+  | 'dofX'
+  | 'dofY'
+  | 'dofZ'
+  | 'distanceVariable'
+  | 'freeState'
+  | 'leastMaterial'
+  | 'line'
+  | 'majorDiameter'
+  | 'maximumMaterial'
+  | 'minorDiameter'
+  | 'orientation'
+  | 'pitchDiameter'
+  | 'plane'
+  | 'point'
+  | 'translation';
 
 /** Geometric tolerance modifiers OCCT reads (PMI RP Table 14). */
 export type ToleranceModifier =

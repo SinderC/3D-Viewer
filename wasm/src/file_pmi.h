@@ -23,7 +23,7 @@ struct FilePmiItem
   std::vector<double>       value, plusMinus, range;
   std::string               bound; // "max" or "min": value is a one-sided limit
   bool                      angular = false;
-  std::vector<std::string>  datums;
+  std::vector<std::vector<std::string>> datums; // frame compartments; several names = common datum (A-B)
 };
 
 struct FilePmiView

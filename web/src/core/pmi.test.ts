@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import type { Model, ModelNode, PmiItem, ToleranceModifier } from './model';
+import type { DatumModifier, DatumRef, Model, ModelNode, PmiItem, ToleranceModifier } from './model';
 import { pmiElements, pmiInfo, pmiLabel, refersTo } from './pmi';
+
+// A datum reference frame from compartments written as in the frame: 'A-B' is a common datum.
+const frame = (...compartments: string[]): DatumRef[][] => compartments.map((c) => c.split('-').map((name) => ({ name })));
 
 const item = (p: Partial<PmiItem>): PmiItem => ({
   kind: 'dimension',
@@ -26,9 +29,38 @@ describe('pmiLabel', () => {
   });
 
   it('adds datum references to tolerances', () => {
-    expect(pmiLabel(item({ kind: 'tolerance', type: 'Position', value: [0.1], datums: ['A', 'B'] }), 'mm')).toBe(
+    expect(pmiLabel(item({ kind: 'tolerance', type: 'Position', value: [0.1], datums: frame('A', 'B') }), 'mm')).toBe(
       'Position 0.100 mm | A | B',
     );
+  });
+
+  it('shows the datum reference frame: precedence, common datums and datum modifiers (PMI RP 6.9.7, 6.9.8)', () => {
+    const tol = (datums: DatumRef[][]) => item({ kind: 'tolerance', type: 'Position', value: [0.1], datums });
+    expect(pmiLabel(tol(frame('A-B', 'C')), 'mm')).toBe('Position 0.100 mm | A-B | C');
+    expect(pmiLabel(tol(frame('A', 'B', 'C')), 'mm')).toBe('Position 0.100 mm | A | B | C');
+    // RP Figure 62 and 65: BASIC and translation on C; a diameter on B
+    const basic: DatumRef[][] = [
+      [{ name: 'A' }],
+      [{ name: 'B', sizeType: 'diameter', size: 10.505 }],
+      [{ name: 'C', modifiers: ['basic', 'translation'] }],
+    ];
+    expect(pmiLabel(tol(basic), 'mm')).toBe('Position 0.100 mm | A | B [Ø10.505 mm] | C BSC ▷');
+    expect(pmiInfo(tol(basic), 'mm')).toEqual(
+      expect.arrayContaining([
+        ['Datums', 'A | B [Ø10.505 mm] | C BSC ▷'],
+        ['Datum modifiers', 'B: diameter 10.505 mm; C: basic, translation'],
+      ]),
+    );
+    // RP Figure 67: Ⓜ on A alone; one shared by all datums of a compartment is written once
+    const mmc = (...names: string[]) => names.map((name) => ({ name, modifiers: ['maximumMaterial'] as DatumModifier[] }));
+    expect(pmiLabel(tol([[...mmc('A'), { name: 'B' }], [{ name: 'C' }]]), 'mm')).toBe('Position 0.100 mm | A Ⓜ-B | C');
+    expect(pmiLabel(tol([[{ name: 'D' }], mmc('E', 'F', 'G')]), 'mm')).toBe('Position 0.100 mm | D | E-F-G Ⓜ');
+    // Degrees of freedom together, after the other modifiers; unknown modifiers as they are
+    const dof: DatumRef = { name: 'A', modifiers: ['dofX', 'maximumMaterial', 'dofY', 'dofU', 'tangent' as DatumModifier] };
+    expect(pmiLabel(tol([[dof]]), 'mm')).toBe('Position 0.100 mm | A Ⓜ tangent [x,y,u]');
+    expect(pmiInfo(tol([[dof]]), 'mm')).toContainEqual(['Datum modifiers', 'A: maximum material, tangent, degrees of freedom x, y, u']);
+    const inch: DatumRef = { name: 'A', modifiers: ['point'], sizeType: 'spherical', size: 25.4 };
+    expect(pmiLabel(tol([[inch]]), 'in')).toBe('Position 0.0039 in | A [PT] [SØ1.0000 in]');
   });
 
   it('adds the length or area a tolerance applies per', () => {
@@ -50,7 +82,7 @@ describe('pmiLabel', () => {
       modifiers: ['maximumMaterial', 'freeState'],
       projected: [12],
       maxValue: [0.2],
-      datums: ['A'],
+      datums: frame('A'),
     });
     expect(pmiLabel(position, 'mm')).toBe('Position Ø0.100 mm Ⓜ 0.200 mm max Ⓕ Ⓟ 12.000 mm | A');
     expect(pmiInfo(position, 'mm')).toEqual(
@@ -61,7 +93,7 @@ describe('pmiLabel', () => {
         ['Maximum', '0.200 mm'],
       ]),
     );
-    const profile = item({ kind: 'tolerance', type: 'Profile of a surface', value: [0.5], unequal: [0.35], datums: ['A'] });
+    const profile = item({ kind: 'tolerance', type: 'Profile of a surface', value: [0.5], unequal: [0.35], datums: frame('A') });
     expect(pmiLabel(profile, 'mm')).toBe('Profile of a surface 0.500 mm Ⓤ 0.350 mm | A');
     expect(pmiInfo(profile, 'mm')).toContainEqual(['Unequally disposed', '0.350 mm']);
     const sphere = item({ kind: 'tolerance', type: 'Position', value: [0.5], zone: 'spherical', modifiers: ['leastMaterial'] });

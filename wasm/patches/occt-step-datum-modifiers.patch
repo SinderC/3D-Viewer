@@ -1,0 +1,129 @@
+Changes to OCCT (V8_0_1) for the Open CAD Viewer. Applied by wasm/scripts/build-occt.sh.
+
+- STEP: in a common datum (A-B, PMI RP 6.9.8) the modifiers of one datum_reference_element were
+  added to the compartment's list and so also given to every later element: A Ⓜ-B read as
+  A Ⓜ-B Ⓜ, and A Ⓜ-B Ⓜ gave B Ⓜ twice. Each element now gets the compartment's modifiers and
+  its own.
+- STEP: a datum reference modifier with value whose length has no usable unit is left out; OCCT
+  kept its type with the value 0, e.g. [Ø0].
+- XCAF: a datum object's modifier with value, its value and its position are initialised.
+  XCAFDoc_Datum::GetObject sets them only when the label has them, so a datum without a modifier
+  with value returned whatever was in memory.
+
+diff --git a/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx b/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx
+index b62a678b..5e57fd16 100644
+--- a/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx
++++ b/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx
+@@ -3927,11 +3927,6 @@ bool STEPCAFControl_Reader::readDatumsAP242(const occ::handle<Standard_Transient
+                 }
+                 else if (aModif->Value(m).CaseNumber() == 1)
+                 {
+-                  aXCAFModifWithVal =
+-                    (XCAFDimTolObjects_DatumModifWithValue)(aModif->Value(m)
+-                                                              .DatumReferenceModifierWithValue()
+-                                                              ->ModifierType()
+-                                                            + 1);
+                   double aVal = aModif->Value(m)
+                                   .DatumReferenceModifierWithValue()
+                                   ->ModifierValue()
+@@ -3948,6 +3943,11 @@ bool STEPCAFControl_Reader::readDatumsAP242(const occ::handle<Standard_Transient
+                   {
+                     continue;
+                   }
++                  aXCAFModifWithVal =
++                    (XCAFDimTolObjects_DatumModifWithValue)(aModif->Value(m)
++                                                              .DatumReferenceModifierWithValue()
++                                                              ->ModifierType()
++                                                            + 1);
+                   occ::handle<StepBasic_NamedUnit> NU = anUnit.NamedUnit();
+                   STEPConstruct_UnitContext        anUnitCtx;
+                   anUnitCtx.ComputeFactors(NU, theLocalFactors);
+@@ -3978,7 +3978,12 @@ bool STEPCAFControl_Reader::readDatumsAP242(const occ::handle<Standard_Transient
+               {
+                 occ::handle<StepDimTol_DatumReferenceElement> aDRE =
+                   occ::down_cast<StepDimTol_DatumReferenceElement>(anIterDRC.Value());
+-                // get modifiers from group of datums
++                // the compartment's modifiers and the element's own: those of one element of a
++                // common datum (A-B) do not apply to the next
++                NCollection_Sequence<XCAFDimTolObjects_DatumSingleModif> anElemModifiers =
++                  aXCAFModifiers;
++                XCAFDimTolObjects_DatumModifWithValue anElemModifWithVal = aXCAFModifWithVal;
++                double                                anElemModifValue   = aModifValue;
+                 occ::handle<NCollection_HArray1<StepDimTol_DatumReferenceModifier>> aModifE =
+                   aDRE->Modifiers();
+                 if (!aModifE.IsNull())
+@@ -3987,17 +3992,12 @@ bool STEPCAFControl_Reader::readDatumsAP242(const occ::handle<Standard_Transient
+                   {
+                     if (aModifE->Value(k).CaseNumber() == 2)
+                     {
+-                      aXCAFModifiers.Append((XCAFDimTolObjects_DatumSingleModif)aModifE->Value(k)
+-                                              .SimpleDatumReferenceModifierMember()
+-                                              ->Value());
++                      anElemModifiers.Append((XCAFDimTolObjects_DatumSingleModif)aModifE->Value(k)
++                                               .SimpleDatumReferenceModifierMember()
++                                               ->Value());
+                     }
+                     else if (aModifE->Value(k).CaseNumber() == 1)
+                     {
+-                      aXCAFModifWithVal =
+-                        (XCAFDimTolObjects_DatumModifWithValue)(aModifE->Value(k)
+-                                                                  .DatumReferenceModifierWithValue()
+-                                                                  ->ModifierType()
+-                                                                + 1);
+                       double aVal = aModifE->Value(k)
+                                       .DatumReferenceModifierWithValue()
+                                       ->ModifierValue()
+@@ -4014,10 +4014,15 @@ bool STEPCAFControl_Reader::readDatumsAP242(const occ::handle<Standard_Transient
+                       {
+                         continue;
+                       }
++                      anElemModifWithVal =
++                        (XCAFDimTolObjects_DatumModifWithValue)(aModifE->Value(k)
++                                                                  .DatumReferenceModifierWithValue()
++                                                                  ->ModifierType()
++                                                                + 1);
+                       occ::handle<StepBasic_NamedUnit> NU = anUnit.NamedUnit();
+                       STEPConstruct_UnitContext        anUnitCtx;
+                       anUnitCtx.ComputeFactors(NU, theLocalFactors);
+-                      aModifValue = aVal * anUnitCtx.LengthFactor();
++                      anElemModifValue = aVal * anUnitCtx.LengthFactor();
+                     }
+                   }
+                 }
+@@ -4031,9 +4036,9 @@ bool STEPCAFControl_Reader::readDatumsAP242(const occ::handle<Standard_Transient
+                     setDatumToXCAF(aD,
+                                    theGDTL,
+                                    aPositionCounter,
+-                                   aXCAFModifiers,
+-                                   aXCAFModifWithVal,
+-                                   aModifValue,
++                                   anElemModifiers,
++                                   anElemModifWithVal,
++                                   anElemModifValue,
+                                    theDoc,
+                                    theWS,
+                                    theLocalFactors);
+diff --git a/src/DataExchange/TKXCAF/XCAFDimTolObjects/XCAFDimTolObjects_DatumObject.cxx b/src/DataExchange/TKXCAF/XCAFDimTolObjects/XCAFDimTolObjects_DatumObject.cxx
+index ac10d822..9455afaf 100644
+--- a/src/DataExchange/TKXCAF/XCAFDimTolObjects/XCAFDimTolObjects_DatumObject.cxx
++++ b/src/DataExchange/TKXCAF/XCAFDimTolObjects/XCAFDimTolObjects_DatumObject.cxx
+@@ -19,11 +19,14 @@ IMPLEMENT_STANDARD_RTTIEXT(XCAFDimTolObjects_DatumObject, Standard_Transient)
+ 
+ XCAFDimTolObjects_DatumObject::XCAFDimTolObjects_DatumObject()
+ {
+-  myIsDTarget  = false;
+-  myIsValidDT  = false;
+-  myHasPlane   = false;
+-  myHasPnt     = false;
+-  myHasPntText = false;
++  myModifierWithValue = XCAFDimTolObjects_DatumModifWithValue_None;
++  myValueOfModifier   = 0.0;
++  myPosition          = 0;
++  myIsDTarget         = false;
++  myIsValidDT         = false;
++  myHasPlane          = false;
++  myHasPnt            = false;
++  myHasPntText        = false;
+ }
+ 
+ //=================================================================================================

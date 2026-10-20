@@ -1,5 +1,5 @@
 // Display text for PMI items. Lengths come in mm and follow the chosen display unit; angles are degrees.
-import type { Model, PmiItem, PmiKind, ToleranceModifier } from './model';
+import type { DatumModifier, DatumRef, Model, PmiItem, PmiKind, ToleranceModifier } from './model';
 import { formatLength, type UnitId } from './units';
 
 export const PMI_KINDS: Record<PmiKind, string> = {
@@ -34,6 +34,66 @@ const MODIFIERS: Record<ToleranceModifier, [symbol: string, name: string]> = {
 // Unknown ids (from a newer producer) show as they are.
 const symbol = (m: ToleranceModifier) => MODIFIERS[m]?.[0] ?? m;
 const modifierName = (m: ToleranceModifier) => MODIFIERS[m]?.[1] ?? m;
+
+// Frame symbol and name of each datum reference modifier (PMI RP Table 15). The degrees of freedom
+// are listed together, as [x,y,u].
+const DATUM_MODIFIERS: Record<Exclude<DatumModifier, `dof${string}`>, [symbol: string, name: string]> = {
+  anyCrossSection: ['[ACS]', 'any cross section'],
+  anyLongitudinalSection: ['[ALS]', 'any longitudinal section'],
+  basic: ['BSC', 'basic'],
+  contactingFeature: ['[CF]', 'contacting feature'],
+  distanceVariable: ['[DV]', 'distance variable'],
+  freeState: ['Ⓕ', 'free state'],
+  leastMaterial: ['Ⓛ', 'least material'],
+  line: ['[SL]', 'situation line'],
+  majorDiameter: ['[MD]', 'major diameter'],
+  maximumMaterial: ['Ⓜ', 'maximum material'],
+  minorDiameter: ['[LD]', 'minor diameter'],
+  orientation: ['><', 'orientation only'],
+  pitchDiameter: ['[PD]', 'pitch diameter'],
+  plane: ['[PL]', 'situation plane'],
+  point: ['[PT]', 'situation point'],
+  translation: ['▷', 'translation'],
+};
+const DATUM_SIZES: Record<NonNullable<DatumRef['sizeType']>, [symbol: string, name: string]> = { diameter: ['Ø', 'diameter'], distance: ['', 'distance'], projected: ['Ⓟ ', 'projected'], spherical: ['SØ', 'spherical diameter'] };
+
+const dofs = (d: DatumRef) => (d.modifiers ?? []).filter((m) => m.startsWith('dof')).map((m) => m.slice(3).toLowerCase());
+
+// A datum's modifiers as symbols (names), in frame order: modifiers, size, degrees of freedom.
+function datumModifiers(d: DatumRef, unit: UnitId, names = false): string[] {
+  const out = (d.modifiers ?? []).filter((m) => !m.startsWith('dof')).map((m) => {
+    const entry = DATUM_MODIFIERS[m as keyof typeof DATUM_MODIFIERS];
+    return entry?.[names ? 1 : 0] ?? m;
+  });
+  const size = d.sizeType && d.size !== undefined ? DATUM_SIZES[d.sizeType] : undefined;
+  if (size) out.push(names ? `${size[1]} ${formatLength(d.size!, unit)}` : `[${size[0]}${formatLength(d.size!, unit)}]`);
+  const free = dofs(d);
+  if (free.length) out.push(names ? `degrees of freedom ${free.join(', ')}` : `[${free.join(',')}]`);
+  return out;
+}
+
+// One compartment: A Ⓜ, or a common datum A-B. When all its datums have the same modifiers (as
+// OCCT gives a compartment's modifiers to each datum), they are written once, after it: A-B Ⓜ.
+function compartment(refs: DatumRef[], unit: UnitId): string {
+  const each = refs.map((d) => datumModifiers(d, unit).join(' '));
+  if (refs.length > 1 && each.every((m) => m === each[0]))
+    return [refs.map((d) => d.name).join('-'), each[0]].filter(Boolean).join(' ');
+  return refs.map((d, i) => [d.name, each[i]].filter(Boolean).join(' ')).join('-');
+}
+
+// The datum reference frame as in a feature control frame: A | B Ⓜ | C-D.
+function datumFrame(p: PmiItem, unit: UnitId): string | undefined {
+  return p.datums?.length ? p.datums.map((c) => compartment(c, unit)).join(' | ') : undefined;
+}
+
+// Datum modifiers by name, for the info panel: B: maximum material; C: basic.
+function datumModifierNames(p: PmiItem, unit: UnitId): string | undefined {
+  const list = (p.datums ?? []).flat().flatMap((d) => {
+    const names = datumModifiers(d, unit, true);
+    return names.length ? [`${d.name}: ${names.join(', ')}`] : [];
+  });
+  return list.join('; ') || undefined;
+}
 
 const partition = <T>(list: T[], test: (v: T) => boolean): [T[], T[]] => [list.filter(test), list.filter((v) => !test(v))];
 
@@ -84,7 +144,7 @@ export function pmiLabel(p: PmiItem, unit: UnitId): string {
     ...others.map(symbol),
     p.projected && `Ⓟ ${formatLength(p.projected[0], unit)}`,
     deviation(p, unit),
-    p.datums?.length ? `| ${p.datums.join(' | ')}` : undefined,
+    p.datums?.length ? `| ${datumFrame(p, unit)}` : undefined,
   ];
   return parts.filter(Boolean).join(' ');
 }
@@ -147,7 +207,8 @@ export function pmiInfo(p: PmiItem, unit: UnitId): [string, string][] {
     ['Projected zone', p.projected && formatLength(p.projected[0], unit)],
     ['Zone angle', p.runout && `${+p.runout[0].toFixed(4)}°`],
     ['Maximum', p.maxValue && formatLength(p.maxValue[0], unit)],
-    ['Datums', p.datums?.join(', ') || undefined],
+    ['Datums', datumFrame(p, unit)],
+    ['Datum modifiers', datumModifierNames(p, unit)],
     ['Faces', count(p, 'face') ? String(count(p, 'face')) : undefined],
     ['Edges', count(p, 'edge') ? String(count(p, 'edge')) : undefined],
     ['Vertices', count(p, 'vertex') ? String(count(p, 'vertex')) : undefined],

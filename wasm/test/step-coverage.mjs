@@ -562,7 +562,7 @@ const tests = {
     const profile = m.pmi.find((p) => p.type === 'Profile of a surface');
     assert.ok(profile, JSON.stringify(m.pmi));
     near(profile.unequal[0], 0.508, 1e-9, 'unequal displacement in mm');
-    assert.deepEqual(profile.datums, ['A']);
+    assert.deepEqual(profile.datums, [[{ name: 'A' }]]);
   },
 
   'tolerance zones and modifiers OCCT does not read: the tolerance is still imported (PMI RP 6.9.2, 6.9.3)'() {
@@ -623,6 +623,51 @@ const tests = {
       assert.ok(!m.pmi.some((p) => p.modifiers), `${name}: no modifiers`);
       if (process.env.VERBOSE) console.log(`     ${name}: ${JSON.stringify(m.pmi.map(({ type, zone, modifiers }) => ({ type, zone, modifiers })))}`);
     }
+  },
+
+  'datum reference frame: precedence, common datums and datum modifiers, in inches (PMI RP 6.9.7, 6.9.8)'() {
+    const s = new Step();
+    const { part, length, aspect } = tolerancedBlock(s, true);
+    const top = aspect('top');
+    const datum = Object.fromEntries([...'ABCDEF'].map((n) => [n, s.add(`DATUM('',$,${part.pds},.F.,'${n}')`)]));
+    const modifiers = (list) => (list.length ? `(${list.join(',')})` : '$');
+    const simple = (...names) => names.map((n) => `SIMPLE_DATUM_REFERENCE_MODIFIER(.${n}.)`);
+    // base: a datum letter, or a list of [letter, element modifiers] for a common datum
+    const compartment = (base, ...mods) => {
+      const ref = typeof base === 'string' ? datum[base]
+        : `COMMON_DATUM_LIST((${base.map(([n, m = []]) => s.add(`DATUM_REFERENCE_ELEMENT('',$,${part.pds},.F.,${datum[n]},${modifiers(m)})`)).join(',')}))`;
+      return s.add(`DATUM_REFERENCE_COMPARTMENT('',$,${part.pds},.F.,${ref},${modifiers(mods)})`);
+    };
+    // Position tolerances told apart by value (in inches)
+    const position = (value, ...compartments) => {
+      const system = s.add(`DATUM_SYSTEM('',$,${part.pds},.F.,(${compartments.join(',')}))`);
+      s.add(`( GEOMETRIC_TOLERANCE('','',${length(value)},${top}) GEOMETRIC_TOLERANCE_WITH_DATUM_REFERENCE((${system})) POSITION_TOLERANCE() )`);
+    };
+    // A | B | C BSC ▷ (RP Figure 62)
+    position(0.01, compartment('A'), compartment('B'), compartment('C', ...simple('BASIC', 'TRANSLATION')));
+    // A Ⓜ-B | C (RP Figure 67): OCCT gave B the Ⓜ of A as well
+    position(0.02, compartment([['A', simple('MAXIMUM_MATERIAL_REQUIREMENT')], ['B']]), compartment('C'));
+    // D | (E-F Ⓕ) Ⓜ: the compartment's modifier applies to both
+    position(0.03, compartment('D'), compartment([['E'], ['F', simple('FREE_STATE')]], ...simple('MAXIMUM_MATERIAL_REQUIREMENT')));
+    // A [PL] [Ø0.5] [x,y] (RP Figure 65, Table 15)
+    const withValue = s.add(`DATUM_REFERENCE_MODIFIER_WITH_VALUE(.CIRCULAR_OR_CYLINDRICAL.,${length(0.5)})`);
+    position(0.04, compartment('A', ...simple('PLANE'), withValue, ...simple('DEGREE_OF_FREEDOM_CONSTRAINT_X', 'DEGREE_OF_FREEDOM_CONSTRAINT_Y')));
+    // B with a distance in no unit: left out, not read as [0]
+    const noUnit = s.add(`DATUM_REFERENCE_MODIFIER_WITH_VALUE(.DISTANCE.,${s.add('LENGTH_MEASURE_WITH_UNIT(LENGTH_MEASURE(3.),$)')})`);
+    position(0.05, compartment('B', noUnit));
+    const m = read('datum-frames.stp', s.text(AP242));
+
+    const frames = m.pmi.filter((p) => p.kind === 'tolerance').sort((a, b) => a.value[0] - b.value[0]).map((p) => p.datums);
+    const mmc = ['maximumMaterial'];
+    assert.deepEqual(frames.slice(0, 3), [
+      [[{ name: 'A' }], [{ name: 'B' }], [{ name: 'C', modifiers: ['basic', 'translation'] }]],
+      [[{ name: 'A', modifiers: mmc }, { name: 'B' }], [{ name: 'C' }]],
+      [[{ name: 'D' }], [{ name: 'E', modifiers: mmc }, { name: 'F', modifiers: [...mmc, 'freeState'] }]],
+    ]);
+    const [[a]] = frames[3];
+    assert.deepEqual([a.name, a.modifiers, a.sizeType], ['A', ['plane', 'dofX', 'dofY'], 'diameter']);
+    near(a.size, 12.7, 1e-9, 'datum size in mm');
+    assert.deepEqual(frames[4], [[{ name: 'B' }]]);
   },
 
   'assembly PMI across files: external element references (EXTERNAL_ANCHOR, product_definition_reference)'() {

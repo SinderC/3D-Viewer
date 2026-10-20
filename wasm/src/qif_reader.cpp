@@ -1431,19 +1431,21 @@ private:
     }
   }
 
-  // A datum of a reference frame: simple (A), or compound (B-C, as drawn).
-  static std::string datumLabel(const LDOM_Element& datum, const std::map<int, std::string>& labels)
+  // A frame compartment: one datum, or the datums of a compound (common) datum A-B.
+  static std::vector<std::string> frameCompartment(const LDOM_Element&               datum,
+                                                   const std::map<int, std::string>& labels)
   {
+    std::vector<std::string> out;
     const auto label = [&](const LDOM_Element& simple) {
       const auto it = labels.find(idOf(child(simple, "DatumDefinitionId")));
-      return it == labels.end() ? std::string() : it->second;
+      if (it != labels.end() && !it->second.empty())
+        out.push_back(it->second);
     };
     if (const LDOM_Element simple = child(datum, "SimpleDatum"); !simple.isNull())
-      return label(simple);
-    std::string out;
-    for (const LDOM_Element& part : elements(child(datum, "CompoundDatum")))
-      if (const std::string l = label(child(part, "SimpleDatum")); !l.empty())
-        out += (out.empty() ? "" : "-") + l;
+      label(simple);
+    else
+      for (const LDOM_Element& part : elements(child(datum, "CompoundDatum")))
+        label(child(part, "SimpleDatum"));
     return out;
   }
 
@@ -1489,8 +1491,8 @@ private:
         item.value = {measure(tol, false)};
         if (const int frame = idOf(child(def, "DatumReferenceFrameId")); myById.count(frame))
           for (const LDOM_Element& d : elements(child(lookup(frame), "Datums")))
-            if (const std::string label = datumLabel(d, datumLabels); !label.empty())
-              item.datums.push_back(label);
+            if (std::vector<std::string> compartment = frameCompartment(d, datumLabels); !compartment.empty())
+              item.datums.push_back(std::move(compartment));
       }
       else
       {
