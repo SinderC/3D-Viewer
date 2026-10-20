@@ -161,6 +161,13 @@ function styled(s, item, [r, g, b], context) {
   return s.add(`STYLED_ITEM('',(${style}),${item})`);
 }
 
+// Black continuous lines, for PMI presentations.
+function curveStyle(s) {
+  const font = "DRAUGHTING_PRE_DEFINED_CURVE_FONT('continuous')";
+  const style = s.add(`CURVE_STYLE('',${font},POSITIVE_LENGTH_MEASURE(0.5),DRAUGHTING_PRE_DEFINED_COLOUR('black'))`);
+  return s.add(`PRESENTATION_STYLE_ASSIGNMENT((${style}))`);
+}
+
 // A 1-unit block (inch: in inches) for GD&T: a shape aspect on one of its faces, and a length in its unit.
 function tolerancedBlock(s, inch = false) {
   const ctx = context(s, inch);
@@ -491,9 +498,8 @@ const tests = {
     // Presentation only, as in the PMI RP's example: the association's definition is the CPSA. A line
     // between the two instances' faces, in the coordinates of the top assembly.
     const line = s.add(`POLYLINE('',(${pt(s, [10, 5, 12])},${pt(s, [40, 5, 12])}))`);
-    const curveStyle = s.add("CURVE_STYLE('',DRAUGHTING_PRE_DEFINED_CURVE_FONT('continuous'),POSITIVE_LENGTH_MEASURE(0.5),DRAUGHTING_PRE_DEFINED_COLOUR('black'))");
     const lines = s.add(`GEOMETRIC_CURVE_SET('',(${line}))`);
-    const shown = s.add(`ANNOTATION_CURVE_OCCURRENCE('Dimension.1',(${s.add(`PRESENTATION_STYLE_ASSIGNMENT((${curveStyle}))`)}),${lines})`);
+    const shown = s.add(`ANNOTATION_CURVE_OCCURRENCE('Dimension.1',(${curveStyle(s)}),${lines})`);
     const model = s.add(`DRAUGHTING_MODEL('',(${shown}),${ctx})`);
     s.add(`DRAUGHTING_MODEL_ITEM_ASSOCIATION('Dimension.1',$,${at('p', mlrd('m3', [first, inSub]))},${model},${shown})`);
     const m = read('assembly-pmi.stp', s.text(AP214));
@@ -526,6 +532,64 @@ const tests = {
     assert.deepEqual(drawn.nodes, [named('top')]);
     assert.deepEqual(drawn.nodeFaces, [[0, s1b1, plusX[0]]]);
     assert.deepEqual([...new Float32Array(m.geometry, ...drawn.segments)], [10, 5, 12, 40, 5, 12]);
+  },
+
+  'PMI presentation: every subset of a draughting callout, polyline then tessellated (PMI RP 8.3, 8.3.1)'() {
+    // A flatness frame |⏥|0.1| above the block, in the plane y = 0 (read from the front), with a leader
+    // to the top face. Frame and symbol are polylines, the value tessellated text; the leader leaves the
+    // frame's plane, so it is a subset of its own.
+    const s = new Step();
+    const { ctx, length, aspect } = tolerancedBlock(s);
+    const tol = s.add(`FLATNESS_TOLERANCE('flat','',${length(0.1)},${aspect('top')})`);
+    const front = (...xz) => xz.map(([x, z]) => [x, 0, z]);
+    const frame = [front([1.4, 1.4], [2.6, 1.4], [2.6, 1.8], [1.4, 1.8], [1.4, 1.4]), front([1.8, 1.4], [1.8, 1.8])];
+    const symbol = [front([1.48, 1.5], [1.68, 1.5], [1.72, 1.7], [1.52, 1.7], [1.48, 1.5])];
+    const value = [
+      front([1.95, 1.5], [2.1, 1.5], [2.1, 1.7], [1.95, 1.7], [1.95, 1.5]), // 0
+      front([2.17, 1.5], [2.2, 1.5], [2.2, 1.53], [2.17, 1.53], [2.17, 1.5]), // .
+      front([2.3, 1.64], [2.35, 1.7], [2.35, 1.5]), // 1
+    ];
+    const tip = [0.5, 0.5, 1];
+    const leader = [[[1.4, 0, 1.6], [0.5, 0, 1.6], tip], [[0.46, 0.42, 1.09], tip, [0.54, 0.42, 1.09]]];
+
+    const style = curveStyle(s);
+    const real = (xyz) => `(${xyz.map((v) => v.toFixed(2)).join(',')})`;
+    const point = (xyz) => s.add(`CARTESIAN_POINT('',${real(xyz)})`);
+    const subset = (name, polylines) => {
+      const curves = polylines.map((p) => s.add(`POLYLINE('',${list(p.map(point))})`));
+      return s.add(`ANNOTATION_CURVE_OCCURRENCE('${name}',(${style}),${s.add(`GEOMETRIC_CURVE_SET('',${list(curves)})`)})`);
+    };
+    const coords = value.flat().map(real);
+    let n = 0;
+    const indices = value.map((p) => list(p.map(() => ++n)));
+    const curveSet = s.add(`TESSELLATED_CURVE_SET('',${s.add(`COORDINATES_LIST('',${n},${list(coords)})`)},${list(indices)})`);
+    const text = s.add(`TESSELLATED_GEOMETRIC_SET('',(${curveSet}))`);
+    const subsets = [subset('frame', frame), subset('symbol', symbol), subset('leader', leader)];
+    subsets.push(s.add(`TESSELLATED_ANNOTATION_OCCURRENCE('value',(${style}),${text})`));
+    const callout = s.add(`DRAUGHTING_CALLOUT('flat',${list(subsets)})`);
+    const model = s.add(`DRAUGHTING_MODEL('',(${callout}),${ctx})`);
+    s.add(`DRAUGHTING_MODEL_ITEM_ASSOCIATION('flat',$,${tol},${model},${callout})`);
+    const m = read('callout-subsets.stp', s.text(AP242));
+
+    const flat = m.pmi.find((p) => p.type === 'Flatness');
+    assert.ok(flat?.segments, JSON.stringify(m.pmi));
+    // Polylines come back sampled in pieces: every drawn point is on a line of the callout, and every
+    // corner of every subset is drawn
+    const xyz = [...new Float32Array(m.geometry, ...flat.segments)];
+    const drawn = Array.from({ length: xyz.length / 3 }, (_, i) => xyz.slice(i * 3, i * 3 + 3));
+    const polylines = [...frame, ...symbol, ...leader, ...value];
+    const lines = polylines.flatMap((p) => p.slice(1).map((b, i) => [p[i], b]));
+    const sub = (a, b) => a.map((v, i) => v - b[i]);
+    const dot = (a, b) => a.reduce((sum, v, i) => sum + v * b[i], 0);
+    const distance = (q, [a, b]) => {
+      const t = Math.min(1, Math.max(0, dot(sub(q, a), sub(b, a)) / dot(sub(b, a), sub(b, a))));
+      const d = sub(q, a.map((v, i) => v + t * (b[i] - v)));
+      return Math.sqrt(dot(d, d));
+    };
+    // the sampler may cut a corner by a fraction of its deflection
+    const near = (q, a) => Math.hypot(...sub(q, a)) < 1e-3;
+    assert.deepEqual(drawn.filter((q) => !lines.some((l) => distance(q, l) < 1e-5)), [], 'drawn off the callout');
+    assert.deepEqual(polylines.flat().filter((c) => !drawn.some((q) => near(q, c))), [], 'corners not drawn');
   },
 
   'tolerance zone form, modifiers, projected, unequal and maximum tolerance, in inches (PMI RP 6.9)'() {
