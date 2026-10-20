@@ -6,6 +6,7 @@
 #include <gp_Ax1.hxx>
 #include <gp_Dir.hxx>
 
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -15,8 +16,9 @@ struct DatumRef
 {
   std::string              name;
   std::vector<std::string> modifiers; // e.g. maximumMaterial, basic, dofX
-  std::string              sizeType;  // modifier with value: diameter, distance, projected or spherical
+  std::string              sizeType;  // datum feature simulator size: diameter, distance or spherical
   double                   size = 0;
+  std::optional<double>    projected; // projected datum length (Ⓟ)
   // Situation features of [PT] [SL] [PL]: point, line or plane, as a point and a direction (the
   // line's, the plane's normal; none for a point)
   std::vector<std::pair<std::string, gp_Ax1>> situations;

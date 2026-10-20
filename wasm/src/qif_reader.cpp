@@ -1457,11 +1457,23 @@ private:
   {
     if (const LDOM_Element simple = child(e, "SimpleDatum"); !simple.isNull())
     {
-      const auto it = labels.find(idOf(child(simple, "DatumDefinitionId")));
-      if (it != labels.end() && !it->second.empty())
-        out.push_back(datumRef(it->second, simple, inherited));
+      // A definition without a label keeps its place in the frame too
+      const int  id = idOf(child(simple, "DatumDefinitionId"));
+      const auto it = labels.find(id);
+      const bool ok = it != labels.end() && !it->second.empty();
+      out.push_back(datumRef(ok ? it->second : "datum " + std::to_string(id), simple, inherited));
       return;
     }
+    // A datum feature without a datum label (DMIS): named by its feature, so the frame keeps its
+    // compartments in place. The measured one may have a material modifier.
+    for (const char* tag : {"NominalDatumFeature", "MeasuredDatumFeature"})
+      if (const LDOM_Element feature = child(e, tag); !feature.isNull())
+      {
+        const int   id   = idOf(child(feature, "FeatureNominalId"));
+        std::string name = myById.count(id) ? token(child(lookup(id), "Name")) : std::string();
+        out.push_back(datumRef(name.empty() ? "feature " + std::to_string(id) : name, feature, inherited));
+        return;
+      }
     const LDOM_Element compound = child(e, "CompoundDatum");
     std::vector<std::string> modifiers = inherited;
     if (const std::string reduced = datumEnum(token(child(compound, "ReducedDatum")));
@@ -1513,10 +1525,7 @@ private:
         d.size     = measure(size, false);
       }
     if (const LDOM_Element projected = child(simple, "ProjectedDatum"); !projected.isNull())
-    {
-      d.sizeType = "projected";
-      d.size     = measure(projected, false);
-    }
+      d.projected = measure(projected, false);
     if (isTrue(child(child(simple, "DatumTranslation"), "DatumTranslationAllowed")))
       d.modifiers.push_back("translation");
     for (const char* tag : {"DiameterModifier", "SectionModifier", "ReducedDatum"})

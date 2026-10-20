@@ -124,8 +124,10 @@ export interface DatumRef {
   name: string;
   modifiers?: DatumModifier[];
   /** Datum reference modifier with value (PMI RP Figure 65), in mm. */
-  sizeType?: 'diameter' | 'distance' | 'projected' | 'spherical';
+  sizeType?: 'diameter' | 'distance' | 'spherical';
   size?: number;
+  /** Projected datum length (Ⓟ), in mm. */
+  projected?: number;
   /** Situation features of [PT] [SL] [PL] (PMI RP Figure 66): a point, or a line or plane through
    * `origin` along `direction` (the plane's normal), in the owner's coordinates. */
   situations?: { type: 'point' | 'line' | 'plane'; origin: Vec3; direction?: Vec3 }[];

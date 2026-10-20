@@ -30,9 +30,9 @@
   (type, nominal, tolerances, datums; for geometric tolerances also the zone form Ø/SØ, modifiers
   such as Ⓜ Ⓛ Ⓕ CZ, unequally disposed zone (Ⓤ), projected zone length, runout zone angle, maximum
   tolerance and unit basis, and the datum reference frame in precedence order with common datums
-  (A-B, nested ones flattened), datum modifiers such as Ⓜ BSC ▷ [PL] [Ø10] [x,y], the frame's axis
-  system and the situation features of [PT] [SL] [PL], the last two listed in the info panel, not
-  drawn). Not read: names of zone forms without a symbol, non-uniform zones, affected planes and the
+  (A-B, nested ones flattened), datum modifiers such as Ⓜ BSC ▷ [PL] [Ø10] [x,y] (OCCT keeps one
+  modifier with a value per datum, so not both a size and [Ⓟ]), the frame's axis system and the
+  situation features of [PT] [SL] [PL], the last two listed in the info panel, not drawn). Not read: names of zone forms without a symbol, non-uniform zones, affected planes and the
   ISO 1101 association modifiers. Assembly PMI on particular component
   instances is drawn once in the assembly, also when the components are in other files (AP242
   external element references).
@@ -61,11 +61,11 @@ B-rep geometry, so every measurement works.
   coefficient). Bodies the file hides (auxiliary geometry) are hidden.
 - **PMI:** characteristics (dimensions and geometric tolerances) with their nominal, tolerance or
   limits, datum reference frame (precedence, compound datums A-B, nested ones flattened, and datum
-  modifiers such as Ⓜ Ⓛ Ⓡ BSC ▷ [Ø3] [x,y] [Tx] [CF] [PL] [Ⓟ 5]) and
-  referenced faces, edges and vertices; datums, datum targets and notes. Drawn as the file places them
-  (`PMIDisplay`: frames, leaders, witness lines, graphics and text). Text uses one font of our own
-  (osifont), not the font the file names, so its width may differ slightly from the exporter's
-  frames. Saved views with their direction and the PMI they show.
+  modifiers such as Ⓜ Ⓛ Ⓡ BSC ▷ [Ø3] [x,y] [Tx] [CF] [PL] [Ⓟ 5]; a datum feature without a label is
+  named by its feature) and referenced faces, edges and vertices; datums, datum targets and notes.
+  Drawn as the file places them (`PMIDisplay`: frames, leaders, witness lines, graphics and text).
+  Text uses one font of our own (osifont), not the font the file names, so its width may differ
+  slightly from the exporter's frames. Saved views with their direction and the PMI they show.
 - Files without model geometry (measurement plans, results, rules) are rejected with a message.
 - Not supported: mesh faces, point clouds, polynomial spline curves and surfaces, external QIF
   references; of drawn PMI, areas given as loops, flag and weld symbol frames.

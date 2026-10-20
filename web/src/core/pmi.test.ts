@@ -78,6 +78,9 @@ describe('pmiLabel', () => {
       ]),
     );
     expect(pmiLabel(tol([[{ name: 'A', modifiers: ['dofTx', 'dofRz'] }]]), 'mm')).toBe('Position 0.100 mm | A [Tx,Rz]');
+    const sized = tol([[{ name: 'A', sizeType: 'diameter', size: 3, projected: 5 }]]);
+    expect(pmiLabel(sized, 'mm')).toBe('Position 0.100 mm | A [Ø3.000 mm] [Ⓟ 5.000 mm]');
+    expect(pmiInfo(sized, 'mm')).toContainEqual(['Datum modifiers', 'A: diameter 3.000 mm, projected 5.000 mm']);
     expect(pmiInfo(tol([[{ name: 'A', modifiers: ['dofTx', 'dofRz'] }]]), 'mm')).toContainEqual(['Datum modifiers', 'A: degrees of freedom Tx, Rz']);
     // QIF's ISO modifiers without a STEP equivalent
     expect(pmiLabel(tol([[{ name: 'A', modifiers: ['datumFixed', 'constrainSubsequent'] }]]), 'mm')).toBe('Position 0.100 mm | A [DF] <>');

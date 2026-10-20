@@ -76,16 +76,25 @@ const tests = {
       frame(205, [
         `<CompoundDatum n="2"><Datum><CompoundDatum n="2"><Datum>${datum('A', '<MaterialModifier>MAXIMUM</MaterialModifier><ReducedDatum>PL</ReducedDatum>')}<SequenceNumber>2</SequenceNumber></Datum><Datum>${datum('D')}<SequenceNumber>1</SequenceNumber></Datum></CompoundDatum><SequenceNumber>2</SequenceNumber></Datum><Datum>${datum('C')}<SequenceNumber>1</SequenceNumber></Datum><ReducedDatum>PL</ReducedDatum></CompoundDatum>`,
       ]),
+      // Datum features without a datum label, named by their feature (or its id): PLANE1 Ⓜ | feature 999 | B
+      frame(206, [
+        '<MeasuredDatumFeature><FeatureNominalId>150</FeatureNominalId><MaterialModifier>MAXIMUM</MaterialModifier></MeasuredDatumFeature>',
+        '<NominalDatumFeature><FeatureNominalId>999</FeatureNominalId></NominalDatumFeature>',
+        datum('B'),
+      ]),
+      // A simulator size and a projected datum: A [Ø3] [Ⓟ 5]
+      frame(207, [datum('A', '<DatumFeatureSimulatorModifier><DiametricalSize>3</DiametricalSize></DatumFeatureSimulatorModifier><ProjectedDatum>5</ProjectedDatum>')]),
     ];
     const definitionsXml = (frameId, value, i) =>
       `<PositionCharacteristicDefinition id="${300 + i}"><ToleranceValue>${value}</ToleranceValue><DatumReferenceFrameId>${frameId}</DatumReferenceFrameId></PositionCharacteristicDefinition>`;
     const nominals = (i) =>
       `<PositionCharacteristicNominal id="${400 + i}"><CharacteristicDefinitionId>${300 + i}</CharacteristicDefinitionId></PositionCharacteristicNominal>`;
-    const values = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6];
+    const values = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8];
     const m = read(
       'datum-frames.qif',
       qif(`<DatumDefinitions n="${labels.length}">${definitions.join('')}</DatumDefinitions>
   <DatumReferenceFrames n="${frames.length}">${frames.join('')}</DatumReferenceFrames>
+  <Features><FeatureNominals n="1"><PlaneFeatureNominal id="150"><Name>PLANE1</Name></PlaneFeatureNominal></FeatureNominals></Features>
   <Characteristics>
     <CharacteristicDefinitions n="${values.length}">${values.map((v, i) => definitionsXml(200 + i, v, i)).join('')}</CharacteristicDefinitions>
     <CharacteristicNominals n="${values.length}">${values.map((_, i) => nominals(i)).join('')}</CharacteristicNominals>
@@ -97,7 +106,7 @@ const tests = {
       [
         [[{ name: 'A' }], [{ name: 'B', modifiers: ['maximumMaterial'] }], [{ name: 'C', modifiers: ['leastMaterial', 'reciprocity'] }]],
         [[{ name: 'A' }, { name: 'B', modifiers: ['maximumMaterial'] }], [{ name: 'D' }]],
-        [[{ name: 'A', modifiers: ['minorDiameter', 'specificCrossSection', 'plane', 'contactingFeature'], sizeType: 'projected', size: 5 }]],
+        [[{ name: 'A', modifiers: ['minorDiameter', 'specificCrossSection', 'plane', 'contactingFeature'], projected: 5 }]],
         [[{ name: 'A' }], [{ name: 'B', modifiers: ['S"X'] }]],
         [
           [{ name: 'A', modifiers: ['basic', 'translation', 'dofX', 'dofY'] }],
@@ -109,6 +118,8 @@ const tests = {
           { name: 'D', modifiers: ['plane'] },
           { name: 'A', modifiers: ['maximumMaterial', 'plane'] },
         ]],
+        [[{ name: 'PLANE1', modifiers: ['maximumMaterial'] }], [{ name: 'feature 999' }], [{ name: 'B' }]],
+        [[{ name: 'A', sizeType: 'diameter', size: 3, projected: 5 }]],
       ],
     );
   },

@@ -1478,8 +1478,10 @@ private:
           d.modifiers.push_back(name);
       XCAFDimTolObjects_DatumModifWithValue type;
       obj->GetModifierWithValue(type, d.size);
-      static const char* const kSizeTypes[] = {"", "diameter", "distance", "projected", "spherical"};
-      if (size_t(type) < sizeof kSizeTypes / sizeof *kSizeTypes)
+      static const char* const kSizeTypes[] = {"", "diameter", "distance", "", "spherical"}; // Projected: above
+      if (type == XCAFDimTolObjects_DatumModifWithValue_Projected)
+        d.projected = d.size;
+      else if (size_t(type) < sizeof kSizeTypes / sizeof *kSizeTypes)
         d.sizeType = kSizeTypes[size_t(type)];
       for (const auto& [modifier, axis] : obj->GetSituationFeatures())
         if (const char* name = datumModifier(modifier))
@@ -2739,6 +2741,8 @@ std::string toJson(const Source& src, const Builder& b)
           }
           if (!d.sizeType.empty())
             o << ",\"sizeType\":\"" << d.sizeType << "\",\"size\":" << d.size;
+          if (d.projected)
+            o << ",\"projected\":" << *d.projected;
           if (!d.situations.empty())
           {
             o << ",\"situations\":[";

@@ -59,7 +59,7 @@ const DATUM_MODIFIERS: Record<Exclude<DatumModifier, `dof${string}`>, [symbol: s
   point: ['[PT]', 'situation point'],
   translation: ['▷', 'translation'],
 };
-const DATUM_SIZES: Record<NonNullable<DatumRef['sizeType']>, [symbol: string, name: string]> = { diameter: ['Ø', 'diameter'], distance: ['', 'distance'], projected: ['Ⓟ ', 'projected'], spherical: ['SØ', 'spherical diameter'] };
+const DATUM_SIZES: Record<NonNullable<DatumRef['sizeType']>, [symbol: string, name: string]> = { diameter: ['Ø', 'diameter'], distance: ['', 'distance'], spherical: ['SØ', 'spherical diameter'] };
 
 // ASME u v w x y z in lower case, ISO Rx … Tz as they are
 const dofs = (d: DatumRef) =>
@@ -73,6 +73,8 @@ function datumModifiers(d: DatumRef, unit: UnitId, names = false): string[] {
   });
   const size = d.sizeType && d.size !== undefined ? DATUM_SIZES[d.sizeType] : undefined;
   if (size) out.push(names ? `${size[1]} ${formatLength(d.size!, unit)}` : `[${size[0]}${formatLength(d.size!, unit)}]`);
+  if (d.projected !== undefined)
+    out.push(names ? `projected ${formatLength(d.projected, unit)}` : `[Ⓟ ${formatLength(d.projected, unit)}]`);
   const free = dofs(d);
   if (free.length) out.push(names ? `degrees of freedom ${free.join(', ')}` : `[${free.join(',')}]`);
   return out;
