@@ -573,7 +573,7 @@ const tests = {
     const start = () => ((s = new Step()), (block = tolerancedBlock(s)));
 
     // ISO 1101 association modifiers (Table 14): Position Ø0.1 UF, Flatness 0.05 Ⓖ. OCCT has no
-    // value for them and reads each as Ⓜ.
+    // value for them; they are dropped (they were read as Ⓜ).
     start();
     const pos = s.add(
       `( GEOMETRIC_TOLERANCE('Position UF','',${block.length(0.1)},${block.aspect('top')}) ` +
@@ -620,6 +620,7 @@ const tests = {
       const m = read(name, text);
       const tolerances = m.pmi.filter((p) => p.kind === 'tolerance').map((p) => [p.type, p.value[0], p.zone]);
       assert.deepEqual(rounded(tolerances), rounded(expected), name);
+      assert.ok(!m.pmi.some((p) => p.modifiers), `${name}: no modifiers`);
       if (process.env.VERBOSE) console.log(`     ${name}: ${JSON.stringify(m.pmi.map(({ type, zone, modifiers }) => ({ type, zone, modifiers })))}`);
     }
   },

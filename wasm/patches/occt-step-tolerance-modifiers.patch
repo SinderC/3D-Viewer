@@ -1,0 +1,326 @@
+Changes to OCCT (V8_0_1) for the Open CAD Viewer. Applied by wasm/scripts/build-occt.sh.
+
+- STEP: a geometric tolerance modifier OCCT has no enumerator for (the ISO 1101 association
+  and parameter modifiers of PMI RP Table 14, e.g. UNITED_FEATURE, ASSOCIATED_LEAST_SQUARE_FEATURE)
+  is dropped. The six RWStepDimTol readers of modifier lists left such a value at their default,
+  MAXIMUM_MATERIAL_REQUIREMENT, so it was read as Ⓜ. The failure is still reported on the entity.
+  OCCT PR #1611 (IR branch) keeps the same default.
+
+diff --git a/src/DataExchange/TKDESTEP/RWStepDimTol/RWStepDimTol_RWGeoTolAndGeoTolWthDatRefAndGeoTolWthMaxTol.cxx b/src/DataExchange/TKDESTEP/RWStepDimTol/RWStepDimTol_RWGeoTolAndGeoTolWthDatRefAndGeoTolWthMaxTol.cxx
+index d0d5062e..af0a0ced 100644
+--- a/src/DataExchange/TKDESTEP/RWStepDimTol/RWStepDimTol_RWGeoTolAndGeoTolWthDatRefAndGeoTolWthMaxTol.cxx
++++ b/src/DataExchange/TKDESTEP/RWStepDimTol/RWStepDimTol_RWGeoTolAndGeoTolWthDatRefAndGeoTolWthMaxTol.cxx
+@@ -94,10 +94,12 @@ void RWStepDimTol_RWGeoTolAndGeoTolWthDatRefAndGeoTolWthMaxTol::ReadStep(
+   {
+     int nb0    = data->NbParams(sub);
+     aModifiers = new NCollection_HArray1<StepDimTol_GeometricToleranceModifier>(1, nb0);
++    int aNbKnown = 0;
+     int num2   = sub;
+     for (int i0 = 1; i0 <= nb0; i0++)
+     {
+       StepDimTol_GeometricToleranceModifier anIt0 = StepDimTol_GTMMaximumMaterialRequirement;
++      bool                                  isKnown = true;
+       if (data->ParamType(num2, i0) == Interface_ParamEnum)
+       {
+         const char* text = data->ParamCValue(num2, i0);
+@@ -163,14 +165,34 @@ void RWStepDimTol_RWGeoTolAndGeoTolWthDatRefAndGeoTolWthMaxTol::ReadStep(
+         }
+         else
+         {
++          isKnown = false;
+           ach->AddFail("Parameter #5 (modifiers) has not allowed value");
+         }
+       }
+       else
+       {
++        isKnown = false;
+         ach->AddFail("Parameter #5 (modifier) is not set of enumerations");
+       }
+-      aModifiers->SetValue(i0, anIt0);
++      if (isKnown)
++      {
++        aModifiers->SetValue(++aNbKnown, anIt0);
++      }
++    }
++    // Values OCCT has no enumerator for (e.g. the ISO 1101 association modifiers) are dropped,
++    // not read as maximum material requirement
++    if (aNbKnown < nb0)
++    {
++      occ::handle<NCollection_HArray1<StepDimTol_GeometricToleranceModifier>> aKnown;
++      if (aNbKnown > 0)
++      {
++        aKnown = new NCollection_HArray1<StepDimTol_GeometricToleranceModifier>(1, aNbKnown);
++        for (int i = 1; i <= aNbKnown; i++)
++        {
++          aKnown->SetValue(i, aModifiers->Value(i));
++        }
++      }
++      aModifiers = aKnown;
+     }
+   }
+   occ::handle<StepDimTol_GeometricToleranceWithModifiers> aGTWM =
+diff --git a/src/DataExchange/TKDESTEP/RWStepDimTol/RWStepDimTol_RWGeoTolAndGeoTolWthDatRefAndGeoTolWthMod.cxx b/src/DataExchange/TKDESTEP/RWStepDimTol/RWStepDimTol_RWGeoTolAndGeoTolWthDatRefAndGeoTolWthMod.cxx
+index d36226b9..cbc72625 100644
+--- a/src/DataExchange/TKDESTEP/RWStepDimTol/RWStepDimTol_RWGeoTolAndGeoTolWthDatRefAndGeoTolWthMod.cxx
++++ b/src/DataExchange/TKDESTEP/RWStepDimTol/RWStepDimTol_RWGeoTolAndGeoTolWthDatRefAndGeoTolWthMod.cxx
+@@ -84,10 +84,12 @@ void RWStepDimTol_RWGeoTolAndGeoTolWthDatRefAndGeoTolWthMod::ReadStep(
+   {
+     int nb0    = data->NbParams(sub);
+     aModifiers = new NCollection_HArray1<StepDimTol_GeometricToleranceModifier>(1, nb0);
++    int aNbKnown = 0;
+     int num2   = sub;
+     for (int i0 = 1; i0 <= nb0; i0++)
+     {
+       StepDimTol_GeometricToleranceModifier anIt0 = StepDimTol_GTMMaximumMaterialRequirement;
++      bool                                  isKnown = true;
+       if (data->ParamType(num2, i0) == Interface_ParamEnum)
+       {
+         const char* text = data->ParamCValue(num2, i0);
+@@ -153,14 +155,34 @@ void RWStepDimTol_RWGeoTolAndGeoTolWthDatRefAndGeoTolWthMod::ReadStep(
+         }
+         else
+         {
++          isKnown = false;
+           ach->AddFail("Parameter #5 (modifiers) has not allowed value");
+         }
+       }
+       else
+       {
++        isKnown = false;
+         ach->AddFail("Parameter #5 (modifier) is not set of enumerations");
+       }
+-      aModifiers->SetValue(i0, anIt0);
++      if (isKnown)
++      {
++        aModifiers->SetValue(++aNbKnown, anIt0);
++      }
++    }
++    // Values OCCT has no enumerator for (e.g. the ISO 1101 association modifiers) are dropped,
++    // not read as maximum material requirement
++    if (aNbKnown < nb0)
++    {
++      occ::handle<NCollection_HArray1<StepDimTol_GeometricToleranceModifier>> aKnown;
++      if (aNbKnown > 0)
++      {
++        aKnown = new NCollection_HArray1<StepDimTol_GeometricToleranceModifier>(1, aNbKnown);
++        for (int i = 1; i <= aNbKnown; i++)
++        {
++          aKnown->SetValue(i, aModifiers->Value(i));
++        }
++      }
++      aModifiers = aKnown;
+     }
+   }
+   occ::handle<StepDimTol_GeometricToleranceWithModifiers> aGTWM =
+diff --git a/src/DataExchange/TKDESTEP/RWStepDimTol/RWStepDimTol_RWGeoTolAndGeoTolWthMaxTol.cxx b/src/DataExchange/TKDESTEP/RWStepDimTol/RWStepDimTol_RWGeoTolAndGeoTolWthMaxTol.cxx
+index c16a5a75..95445163 100644
+--- a/src/DataExchange/TKDESTEP/RWStepDimTol/RWStepDimTol_RWGeoTolAndGeoTolWthMaxTol.cxx
++++ b/src/DataExchange/TKDESTEP/RWStepDimTol/RWStepDimTol_RWGeoTolAndGeoTolWthMaxTol.cxx
+@@ -68,10 +68,12 @@ void RWStepDimTol_RWGeoTolAndGeoTolWthMaxTol::ReadStep(
+   {
+     int nb0    = data->NbParams(sub);
+     aModifiers = new NCollection_HArray1<StepDimTol_GeometricToleranceModifier>(1, nb0);
++    int aNbKnown = 0;
+     int num2   = sub;
+     for (int i0 = 1; i0 <= nb0; i0++)
+     {
+       StepDimTol_GeometricToleranceModifier anIt0 = StepDimTol_GTMMaximumMaterialRequirement;
++      bool                                  isKnown = true;
+       if (data->ParamType(num2, i0) == Interface_ParamEnum)
+       {
+         const char* text = data->ParamCValue(num2, i0);
+@@ -137,14 +139,34 @@ void RWStepDimTol_RWGeoTolAndGeoTolWthMaxTol::ReadStep(
+         }
+         else
+         {
++          isKnown = false;
+           ach->AddFail("Parameter #5 (modifiers) has not allowed value");
+         }
+       }
+       else
+       {
++        isKnown = false;
+         ach->AddFail("Parameter #5 (modifier) is not set of enumerations");
+       }
+-      aModifiers->SetValue(i0, anIt0);
++      if (isKnown)
++      {
++        aModifiers->SetValue(++aNbKnown, anIt0);
++      }
++    }
++    // Values OCCT has no enumerator for (e.g. the ISO 1101 association modifiers) are dropped,
++    // not read as maximum material requirement
++    if (aNbKnown < nb0)
++    {
++      occ::handle<NCollection_HArray1<StepDimTol_GeometricToleranceModifier>> aKnown;
++      if (aNbKnown > 0)
++      {
++        aKnown = new NCollection_HArray1<StepDimTol_GeometricToleranceModifier>(1, aNbKnown);
++        for (int i = 1; i <= aNbKnown; i++)
++        {
++          aKnown->SetValue(i, aModifiers->Value(i));
++        }
++      }
++      aModifiers = aKnown;
+     }
+   }
+   occ::handle<StepDimTol_GeometricToleranceWithModifiers> aGTWM =
+diff --git a/src/DataExchange/TKDESTEP/RWStepDimTol/RWStepDimTol_RWGeoTolAndGeoTolWthMod.cxx b/src/DataExchange/TKDESTEP/RWStepDimTol/RWStepDimTol_RWGeoTolAndGeoTolWthMod.cxx
+index 42273b86..2a8d8b60 100644
+--- a/src/DataExchange/TKDESTEP/RWStepDimTol/RWStepDimTol_RWGeoTolAndGeoTolWthMod.cxx
++++ b/src/DataExchange/TKDESTEP/RWStepDimTol/RWStepDimTol_RWGeoTolAndGeoTolWthMod.cxx
+@@ -58,10 +58,12 @@ void RWStepDimTol_RWGeoTolAndGeoTolWthMod::ReadStep(
+   {
+     int nb0    = data->NbParams(sub);
+     aModifiers = new NCollection_HArray1<StepDimTol_GeometricToleranceModifier>(1, nb0);
++    int aNbKnown = 0;
+     int num2   = sub;
+     for (int i0 = 1; i0 <= nb0; i0++)
+     {
+       StepDimTol_GeometricToleranceModifier anIt0 = StepDimTol_GTMMaximumMaterialRequirement;
++      bool                                  isKnown = true;
+       if (data->ParamType(num2, i0) == Interface_ParamEnum)
+       {
+         const char* text = data->ParamCValue(num2, i0);
+@@ -127,14 +129,34 @@ void RWStepDimTol_RWGeoTolAndGeoTolWthMod::ReadStep(
+         }
+         else
+         {
++          isKnown = false;
+           ach->AddFail("Parameter #5 (modifiers) has not allowed value");
+         }
+       }
+       else
+       {
++        isKnown = false;
+         ach->AddFail("Parameter #5 (modifier) is not set of enumerations");
+       }
+-      aModifiers->SetValue(i0, anIt0);
++      if (isKnown)
++      {
++        aModifiers->SetValue(++aNbKnown, anIt0);
++      }
++    }
++    // Values OCCT has no enumerator for (e.g. the ISO 1101 association modifiers) are dropped,
++    // not read as maximum material requirement
++    if (aNbKnown < nb0)
++    {
++      occ::handle<NCollection_HArray1<StepDimTol_GeometricToleranceModifier>> aKnown;
++      if (aNbKnown > 0)
++      {
++        aKnown = new NCollection_HArray1<StepDimTol_GeometricToleranceModifier>(1, aNbKnown);
++        for (int i = 1; i <= aNbKnown; i++)
++        {
++          aKnown->SetValue(i, aModifiers->Value(i));
++        }
++      }
++      aModifiers = aKnown;
+     }
+   }
+   occ::handle<StepDimTol_GeometricToleranceWithModifiers> aGTWM =
+diff --git a/src/DataExchange/TKDESTEP/RWStepDimTol/RWStepDimTol_RWGeometricToleranceWithMaximumTolerance.cxx b/src/DataExchange/TKDESTEP/RWStepDimTol/RWStepDimTol_RWGeometricToleranceWithMaximumTolerance.cxx
+index 64a856e4..953ee4d8 100644
+--- a/src/DataExchange/TKDESTEP/RWStepDimTol/RWStepDimTol_RWGeometricToleranceWithMaximumTolerance.cxx
++++ b/src/DataExchange/TKDESTEP/RWStepDimTol/RWStepDimTol_RWGeometricToleranceWithMaximumTolerance.cxx
+@@ -74,10 +74,12 @@ void RWStepDimTol_RWGeometricToleranceWithMaximumTolerance::ReadStep(
+   {
+     int nb0    = data->NbParams(sub5);
+     aModifiers = new NCollection_HArray1<StepDimTol_GeometricToleranceModifier>(1, nb0);
++    int aNbKnown = 0;
+     int num2   = sub5;
+     for (int i0 = 1; i0 <= nb0; i0++)
+     {
+       StepDimTol_GeometricToleranceModifier anIt0 = StepDimTol_GTMMaximumMaterialRequirement;
++      bool                                  isKnown = true;
+       if (data->ParamType(num2, i0) == Interface_ParamEnum)
+       {
+         const char* text = data->ParamCValue(num2, i0);
+@@ -143,14 +145,34 @@ void RWStepDimTol_RWGeometricToleranceWithMaximumTolerance::ReadStep(
+         }
+         else
+         {
++          isKnown = false;
+           ach->AddFail("Parameter #5 (modifiers) has not allowed value");
+         }
+       }
+       else
+       {
++        isKnown = false;
+         ach->AddFail("Parameter #5 (modifier) is not set of enumerations");
+       }
+-      aModifiers->SetValue(i0, anIt0);
++      if (isKnown)
++      {
++        aModifiers->SetValue(++aNbKnown, anIt0);
++      }
++    }
++    // Values OCCT has no enumerator for (e.g. the ISO 1101 association modifiers) are dropped,
++    // not read as maximum material requirement
++    if (aNbKnown < nb0)
++    {
++      occ::handle<NCollection_HArray1<StepDimTol_GeometricToleranceModifier>> aKnown;
++      if (aNbKnown > 0)
++      {
++        aKnown = new NCollection_HArray1<StepDimTol_GeometricToleranceModifier>(1, aNbKnown);
++        for (int i = 1; i <= aNbKnown; i++)
++        {
++          aKnown->SetValue(i, aModifiers->Value(i));
++        }
++      }
++      aModifiers = aKnown;
+     }
+   }
+ 
+diff --git a/src/DataExchange/TKDESTEP/RWStepDimTol/RWStepDimTol_RWGeometricToleranceWithModifiers.cxx b/src/DataExchange/TKDESTEP/RWStepDimTol/RWStepDimTol_RWGeometricToleranceWithModifiers.cxx
+index 5a5f4423..d0a1a506 100644
+--- a/src/DataExchange/TKDESTEP/RWStepDimTol/RWStepDimTol_RWGeometricToleranceWithModifiers.cxx
++++ b/src/DataExchange/TKDESTEP/RWStepDimTol/RWStepDimTol_RWGeometricToleranceWithModifiers.cxx
+@@ -74,10 +74,12 @@ void RWStepDimTol_RWGeometricToleranceWithModifiers::ReadStep(
+   {
+     int nb0    = data->NbParams(sub5);
+     aModifiers = new NCollection_HArray1<StepDimTol_GeometricToleranceModifier>(1, nb0);
++    int aNbKnown = 0;
+     int num2   = sub5;
+     for (int i0 = 1; i0 <= nb0; i0++)
+     {
+       StepDimTol_GeometricToleranceModifier anIt0 = StepDimTol_GTMMaximumMaterialRequirement;
++      bool                                  isKnown = true;
+       if (data->ParamType(num2, i0) == Interface_ParamEnum)
+       {
+         const char* text = data->ParamCValue(num2, i0);
+@@ -143,14 +145,34 @@ void RWStepDimTol_RWGeometricToleranceWithModifiers::ReadStep(
+         }
+         else
+         {
++          isKnown = false;
+           ach->AddFail("Parameter #5 (modifiers) has not allowed value");
+         }
+       }
+       else
+       {
++        isKnown = false;
+         ach->AddFail("Parameter #5 (modifier) is not set of enumerations");
+       }
+-      aModifiers->SetValue(i0, anIt0);
++      if (isKnown)
++      {
++        aModifiers->SetValue(++aNbKnown, anIt0);
++      }
++    }
++    // Values OCCT has no enumerator for (e.g. the ISO 1101 association modifiers) are dropped,
++    // not read as maximum material requirement
++    if (aNbKnown < nb0)
++    {
++      occ::handle<NCollection_HArray1<StepDimTol_GeometricToleranceModifier>> aKnown;
++      if (aNbKnown > 0)
++      {
++        aKnown = new NCollection_HArray1<StepDimTol_GeometricToleranceModifier>(1, aNbKnown);
++        for (int i = 1; i <= aNbKnown; i++)
++        {
++          aKnown->SetValue(i, aModifiers->Value(i));
++        }
++      }
++      aModifiers = aKnown;
+     }
+   }
+ 
