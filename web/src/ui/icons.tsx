@@ -1,223 +1,78 @@
-// 16px icons drawn in the current text colour.
-// Paths from Font Awesome Free 7.3.1 (solid, regular), CC BY 4.0: https://fontawesome.com/license/free
-// Icons marked "modified" are composed from or altered Font Awesome paths.
-import type { ReactNode } from 'react';
+// 16px Lucide icons (https://lucide.dev, ISC) drawn in the current text colour.
+import {
+  Check,
+  ChevronDown,
+  ChevronRight as LucideChevronRight,
+  Eye,
+  FileUp,
+  Gem,
+  Ghost,
+  Grid3x3,
+  Icon,
+  Info,
+  Lock,
+  Maximize,
+  Palette,
+  Ruler,
+  RulerDimensionLine,
+  ScanSearch,
+  Sun,
+  Target,
+  Video,
+  X,
+  type IconNode,
+  type LucideIcon,
+} from 'lucide-react';
 
-// Font Awesome paths sit on a 512-high grid and may overshoot it slightly, hence overflow.
-// pad adds empty space around the glyph to draw it smaller.
-function Icon({ width = 512, pad = 0, children }: { width?: number; pad?: number; children: ReactNode }) {
-  return (
-    <svg
-      viewBox={`${-pad} ${-pad} ${width + 2 * pad} ${512 + 2 * pad}`}
-      width="16"
-      height="16"
-      fill="currentColor"
-      overflow="visible"
-      aria-hidden="true"
-    >
-      {children}
-    </svg>
-  );
-}
+const SIZE = 16;
+const STROKE = 1.75;
 
-// Chevrons sit next to other icons, so they are drawn at half size.
-const CHEVRON_PAD = 192;
+const icon = (Glyph: LucideIcon) => () => <Glyph size={SIZE} strokeWidth={STROKE} />;
 
-// cube; the first subpath alone is its silhouette.
-const CUBE_OUTLINE =
-  'M224.3-2.5c19.8-11.4 44.2-11.4 64 0L464.2 99c19.8 11.4 32 32.6 32 55.4l0 203c0 22.9-12.2 44-32 55.4L288.3 514.5c-19.8 11.4-44.2 11.4-64 0L48.5 413c-19.8-11.4-32-32.6-32-55.4l0-203c0-22.9 12.2-44 32-55.4L224.3-2.5z';
-const CUBE = CUBE_OUTLINE + 'm207.8 360l0-166.1-143.8 83 0 166.1 143.8-83z';
-// expand
-const CORNERS =
-  'M32 32C14.3 32 0 46.3 0 64l0 96c0 17.7 14.3 32 32 32s32-14.3 32-32l0-64 64 0c17.7 0 32-14.3 32-32s-14.3-32-32-32L32 32zM64 352c0-17.7-14.3-32-32-32S0 334.3 0 352l0 96c0 17.7 14.3 32 32 32l96 0c17.7 0 32-14.3 32-32s-14.3-32-32-32l-64 0 0-64zM320 32c-17.7 0-32 14.3-32 32s14.3 32 32 32l64 0 0 64c0 17.7 14.3 32 32 32s32-14.3 32-32l0-96c0-17.7-14.3-32-32-32l-96 0zM448 352c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 64-64 0c-17.7 0-32 14.3-32 32s14.3 32 32 32l96 0c17.7 0 32-14.3 32-32l0-96z';
+// Lucide's box, split up so the display modes can drop edges or fill the faces.
+const BOX_OUTLINE = 'M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z';
+const BOX_EDGES: IconNode = [
+  ['path', { d: 'm3.3 7 8.7 5 8.7-5', key: 'edges' }],
+  ['path', { d: 'M12 22V12', key: 'edge' }],
+];
+const SHADED: IconNode = [['path', { d: BOX_OUTLINE, fill: 'currentColor', fillOpacity: 0.35, key: 'outline' }]];
 
-// chevron-down
-export const Chevron = () => (
-  <Icon width={448} pad={CHEVRON_PAD}>
-    <path d="M201.4 406.6c12.5 12.5 32.8 12.5 45.3 0l192-192c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L224 338.7 54.6 169.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3l192 192z" />
-  </Icon>
-);
+const custom = (node: IconNode) => () => <Icon iconNode={node} size={SIZE} strokeWidth={STROKE} />;
 
-// chevron-right
-export const ChevronRight = () => (
-  <Icon width={320} pad={CHEVRON_PAD}>
-    <path d="M311.1 233.4c12.5 12.5 12.5 32.8 0 45.3l-192 192c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L243.2 256 73.9 86.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l192 192z" />
-  </Icon>
-);
-
-// check
-export const CheckIcon = () => (
-  <Icon width={448}>
-    <path d="M434.8 70.1c14.3 10.4 17.5 30.4 7.1 44.7l-256 352c-5.5 7.6-14 12.3-23.4 13.1s-18.5-2.7-25.1-9.3l-128-128c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l101.5 101.5 234-321.7c10.4-14.3 30.4-17.5 44.7-7.1z" />
-  </Icon>
-);
-
-// bullseye
-export const IsolateIcon = () => (
-  <Icon>
-    <path d="M448 256a192 192 0 1 0 -384 0 192 192 0 1 0 384 0zM0 256a256 256 0 1 1 512 0 256 256 0 1 1 -512 0zm256 80a80 80 0 1 0 0-160 80 80 0 1 0 0 160zm0-224a144 144 0 1 1 0 288 144 144 0 1 1 0-288zM224 256a32 32 0 1 1 64 0 32 32 0 1 1 -64 0z" />
-  </Icon>
-);
-
-// circle-info
-export const PropertiesIcon = () => (
-  <Icon>
-    <path d="M256 512a256 256 0 1 0 0-512 256 256 0 1 0 0 512zM224 160a32 32 0 1 1 64 0 32 32 0 1 1 -64 0zm-8 64l48 0c13.3 0 24 10.7 24 24l0 88 8 0c13.3 0 24 10.7 24 24s-10.7 24-24 24l-80 0c-13.3 0-24-10.7-24-24s10.7-24 24-24l24 0 0-64-24 0c-13.3 0-24-10.7-24-24s10.7-24 24-24z" />
-  </Icon>
-);
-
-// expand
-export const FitIcon = () => (
-  <Icon width={448}>
-    <path d={CORNERS} />
-  </Icon>
-);
-
-// expand, modified: a filled square in the middle.
-export const ZoomSelectionIcon = () => (
-  <Icon width={448}>
-    <path d={CORNERS} />
-    <path d="M168 200h112v112H168z" />
-  </Icon>
-);
-
-// video
-export const ViewsIcon = () => (
-  <Icon width={576}>
-    <path d="M96 64c-35.3 0-64 28.7-64 64l0 256c0 35.3 28.7 64 64 64l256 0c35.3 0 64-28.7 64-64l0-256c0-35.3-28.7-64-64-64L96 64zM464 336l73.5 58.8c4.2 3.4 9.4 5.2 14.8 5.2 13.1 0 23.7-10.6 23.7-23.7l0-240.6c0-13.1-10.6-23.7-23.7-23.7-5.4 0-10.6 1.8-14.8 5.2L464 176 464 336z" />
-  </Icon>
-);
-
-// cube
-export const ShadedEdgesIcon = () => (
-  <Icon>
-    <path d={CUBE} />
-  </Icon>
-);
-
-// cube, modified: the silhouette alone.
-export const ShadedIcon = () => (
-  <Icon>
-    <path d={CUBE_OUTLINE} />
-  </Icon>
-);
-
-// cube, modified: its outline and front edges as lines.
-export const WireframeIcon = () => (
-  <Icon>
-    <path
-      d="M256 28 458 144v224L256 484 54 368V144zM54 144l202 116 202-116M256 260v224"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="48"
-      strokeLinejoin="round"
-    />
-  </Icon>
-);
-
-// gem: a shiny material.
-export const RealisticIcon = () => (
-  <Icon>
-    <path d="M116.7 33.8c4.5-6.1 11.7-9.8 19.3-9.8l240 0c7.6 0 14.8 3.6 19.3 9.8l112 152c6.8 9.2 6.1 21.9-1.5 30.4l-232 256c-4.5 5-11 7.9-17.8 7.9s-13.2-2.9-17.8-7.9l-232-256c-7.7-8.5-8.3-21.2-1.5-30.4l112-152zm38.5 39.8c-3.3 2.5-4.2 7-2.1 10.5L210.5 179.8 63.3 192c-4.1 .3-7.3 3.8-7.3 8s3.2 7.6 7.3 8l192 16c.4 0 .9 0 1.3 0l192-16c4.1-.3 7.3-3.8 7.3-8s-3.2-7.6-7.3-8l-147.2-12.3 57.4-95.6c2.1-3.5 1.2-8.1-2.1-10.5s-7.9-2-10.7 1L256 172.2 165.9 74.6c-2.8-3-7.4-3.4-10.7-1z" />
-  </Icon>
-);
-
-// sun: the studio style's warm key light.
-export const StudioIcon = () => (
-  <Icon width={576}>
-    <path d="M288-32c8.4 0 16.3 4.4 20.6 11.7L364.1 72.3 468.9 46c8.2-2 16.9 .4 22.8 6.3S500 67 498 75.1l-26.3 104.7 92.7 55.5c7.2 4.3 11.7 12.2 11.7 20.6s-4.4 16.3-11.7 20.6L471.7 332.1 498 436.8c2 8.2-.4 16.9-6.3 22.8S477 468 468.9 466l-104.7-26.3-55.5 92.7c-4.3 7.2-12.2 11.7-20.6 11.7s-16.3-4.4-20.6-11.7L211.9 439.7 107.2 466c-8.2 2-16.8-.4-22.8-6.3S76 445 78 436.8l26.2-104.7-92.6-55.5C4.4 272.2 0 264.4 0 256s4.4-16.3 11.7-20.6L104.3 179.9 78 75.1c-2-8.2 .3-16.8 6.3-22.8S99 44 107.2 46l104.7 26.2 55.5-92.6 1.8-2.6c4.5-5.7 11.4-9.1 18.8-9.1zm0 144a144 144 0 1 0 0 288 144 144 0 1 0 0-288zm0 240a96 96 0 1 1 0-192 96 96 0 1 1 0 192z" />
-  </Icon>
-);
-
-// table-cells
-export const GridIcon = () => (
-  <Icon width={448}>
-    <path d="M384 96l0 64-64 0 0-64 64 0zm0 128l0 64-64 0 0-64 64 0zm0 128l0 64-64 0 0-64 64 0zM256 288l-64 0 0-64 64 0 0 64zm-64 64l64 0 0 64-64 0 0-64zm-64-64l-64 0 0-64 64 0 0 64zM64 352l64 0 0 64-64 0 0-64zm0-192l0-64 64 0 0 64-64 0zm128 0l0-64 64 0 0 64-64 0zM64 32C28.7 32 0 60.7 0 96L0 416c0 35.3 28.7 64 64 64l320 0c35.3 0 64-28.7 64-64l0-320c0-35.3-28.7-64-64-64L64 32z" />
-  </Icon>
-);
-
-// arrows-left-right-to-line: a dimension between extension lines.
-export const PmiIcon = () => (
-  <Icon width={576}>
-    <path d="M32 96C14.3 96 0 110.3 0 128L0 384c0 17.7 14.3 32 32 32s32-14.3 32-32l0-256c0-17.7-14.3-32-32-32zM390.6 342.6l64-64c12.5-12.5 12.5-32.8 0-45.3l-64-64c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3l9.4 9.4-133.5 0 9.4-9.4c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-64 64c-6 6-9.4 14.1-9.4 22.6s3.4 16.6 9.4 22.6l64 64c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3l-9.4-9.4 133.5 0-9.4 9.4c-12.5 12.5-12.5 32.8 0 45.3s32.8 12.5 45.3 0zM576 128c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 256c0 17.7 14.3 32 32 32s32-14.3 32-32l0-256z" />
-  </Icon>
-);
-
-// square (regular), modified: the kept left half filled, a cutting plane through the middle and the cut-away
-// right half dotted.
-export const SectionIcon = () => (
-  <Icon width={448}>
-    <path d="M64 32H224V480H64C28.7 480 0 451.3 0 416V96C0 60.7 28.7 32 64 32zM200 0h48v512h-48z" />
-    <path
-      d="M248 56H384a40 40 0 0 1 40 40V416a40 40 0 0 1-40 40H248"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="48"
-      strokeLinecap="round"
-      strokeDasharray="0 77.7"
-      strokeDashoffset="-48"
-    />
-  </Icon>
-);
-
-// ruler
-export const MeasureIcon = () => (
-  <Icon width={576}>
-    <path d="M209.1 516.2c-18.7 18.7-49.1 18.7-67.9 0L28.1 403.1c-18.7-18.7-18.7-49.1 0-67.9l17-17 73.5 73.5c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-73.5-73.5 33.9-33.9 50.9 50.9c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-50.9-50.9 33.9-33.9 73.5 73.5c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-73.5-73.5 33.9-33.9 50.9 50.9c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-50.9-50.9 33.9-33.9 73.5 73.5c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-73.5-73.5 17-17c18.7-18.7 49.1-18.7 67.9 0L548.5 108.9c18.7 18.7 18.7 49.1 0 67.9L209.1 516.2z" />
-  </Icon>
-);
-
-// palette
-export const AppearanceIcon = () => (
-  <Icon>
-    <path d="M512 256c0 .9 0 1.8 0 2.7-.4 36.5-33.6 61.3-70.1 61.3L344 320c-26.5 0-48 21.5-48 48 0 3.4 .4 6.7 1 9.9 2.1 10.2 6.5 20 10.8 29.9 6.1 13.8 12.1 27.5 12.1 42 0 31.8-21.6 60.7-53.4 62-3.5 .1-7 .2-10.6 .2-141.4 0-256-114.6-256-256S114.6 0 256 0 512 114.6 512 256zM128 288a32 32 0 1 0 -64 0 32 32 0 1 0 64 0zm0-96a32 32 0 1 0 0-64 32 32 0 1 0 0 64zM288 96a32 32 0 1 0 -64 0 32 32 0 1 0 64 0zm96 96a32 32 0 1 0 0-64 32 32 0 1 0 0 64z" />
-  </Icon>
-);
-
-// cube, modified: three of them pulled apart, like cubes exploded.
-export const ExplodeIcon = () => (
-  <Icon>
-    {[
-      [138, -10],
-      [-12, 268],
-      [288, 268],
-    ].map(([x, y]) => (
-      <path key={x} transform={`translate(${x} ${y}) scale(0.46)`} d={CUBE} />
-    ))}
-  </Icon>
-);
-
-// ghost
-export const GhostIcon = () => (
-  <Icon width={384}>
-    <path d="M40.1 467.1l-11.2 9C25.7 478.6 21.8 480 17.8 480 8 480 0 472 0 462.2L0 192C0 86 86 0 192 0S384 86 384 192l0 270.2c0 9.8-8 17.8-17.8 17.8-4 0-7.9-1.4-11.1-3.9l-11.2-9c-13.4-10.7-32.8-9-44.1 3.9L269.3 506c-3.3 3.8-8.2 6-13.3 6s-9.9-2.2-13.3-6l-26.6-30.5c-12.7-14.6-35.4-14.6-48.2 0L141.3 506c-3.3 3.8-8.2 6-13.3 6s-9.9-2.2-13.3-6L84.2 471c-11.3-12.9-30.7-14.6-44.1-3.9zM160 192a32 32 0 1 0 -64 0 32 32 0 1 0 64 0zm96 32a32 32 0 1 0 0-64 32 32 0 1 0 0 64z" />
-  </Icon>
-);
-
-// eye
-export const ShowAllIcon = () => (
-  <Icon width={576}>
-    <path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6-46.8 43.5-78.1 95.4-93 131.1-3.3 7.9-3.3 16.7 0 24.6 14.9 35.7 46.2 87.7 93 131.1 47.1 43.7 111.8 80.6 192.6 80.6s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1 3.3-7.9 3.3-16.7 0-24.6-14.9-35.7-46.2-87.7-93-131.1-47.1-43.7-111.8-80.6-192.6-80.6zM144 256a144 144 0 1 1 288 0 144 144 0 1 1 -288 0zm144-64c0 35.3-28.7 64-64 64-11.5 0-22.3-3-31.7-8.4-1 10.9-.1 22.1 2.9 33.2 13.7 51.2 66.4 81.6 117.6 67.9s81.6-66.4 67.9-117.6c-12.2-45.7-55.5-74.8-101.1-70.8 5.3 9.3 8.4 20.1 8.4 31.7z" />
-  </Icon>
-);
-
-// file-arrow-up
-export const OpenFileIcon = () => (
-  <Icon width={384}>
-    <path d="M0 64C0 28.7 28.7 0 64 0L213.5 0c17 0 33.3 6.7 45.3 18.7L365.3 125.3c12 12 18.7 28.3 18.7 45.3L384 448c0 35.3-28.7 64-64 64L64 512c-35.3 0-64-28.7-64-64L0 64zm208-5.5l0 93.5c0 13.3 10.7 24 24 24L325.5 176 208 58.5zM209 263c-9.4-9.4-24.6-9.4-33.9 0l-64 64c-9.4 9.4-9.4 24.6 0 33.9s24.6 9.4 33.9 0l23-23 0 86.1c0 13.3 10.7 24 24 24s24-10.7 24-24l0-86.1 23 23c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-64-64z" />
-  </Icon>
-);
-
-// lock
-export const LockIcon = () => (
-  <Icon width={384}>
-    <path d="M128 96l0 64 128 0 0-64c0-35.3-28.7-64-64-64s-64 28.7-64 64zM64 160l0-64C64 25.3 121.3-32 192-32S320 25.3 320 96l0 64c35.3 0 64 28.7 64 64l0 224c0 35.3-28.7 64-64 64L64 512c-35.3 0-64-28.7-64-64L0 224c0-35.3 28.7-64 64-64z" />
-  </Icon>
-);
-
-// xmark
-export const CloseIcon = () => (
-  <Icon width={384}>
-    <path d="M55.1 73.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3L147.2 256 9.9 393.4c-12.5 12.5-12.5 32.8 0 45.3s32.8 12.5 45.3 0L192.5 301.3 329.9 438.6c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L237.8 256 375.1 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L192.5 210.7 55.1 73.4z" />
-  </Icon>
-);
+export const Chevron = icon(ChevronDown);
+export const ChevronRight = icon(LucideChevronRight);
+export const CheckIcon = icon(Check);
+export const IsolateIcon = icon(Target);
+export const PropertiesIcon = icon(Info);
+export const FitIcon = icon(Maximize);
+export const ZoomSelectionIcon = icon(ScanSearch);
+export const ViewsIcon = icon(Video);
+export const ShadedEdgesIcon = custom([...SHADED, ...BOX_EDGES]);
+// The silhouette alone: no edges are drawn.
+export const ShadedIcon = custom(SHADED);
+export const WireframeIcon = custom([['path', { d: BOX_OUTLINE, key: 'outline' }], ...BOX_EDGES]);
+// A shiny material.
+export const RealisticIcon = icon(Gem);
+// The studio style's warm key light.
+export const StudioIcon = icon(Sun);
+export const GridIcon = icon(Grid3x3);
+export const PmiIcon = icon(RulerDimensionLine);
+// Lucide's square-split-horizontal with the kept left half filled.
+export const SectionIcon = custom([
+  ['path', { d: 'M12 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7Z', fill: 'currentColor', key: 'kept' }],
+  ['path', { d: 'M12 2v20', key: 'plane' }],
+  ['path', { d: 'M16 3h3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-3', key: 'cut' }],
+]);
+export const MeasureIcon = icon(Ruler);
+export const AppearanceIcon = icon(Palette);
+// The box's three faces, shrunk and pushed out from its centre.
+export const ExplodeIcon = custom([
+  ['path', { d: 'M12 2.25 18.3 5.75 12 9.25 5.7 5.75Z', key: 'top' }],
+  ['path', { d: 'M3.32 9.88 9.62 13.38v7l-6.3-3.5Z', key: 'left' }],
+  ['path', { d: 'M20.68 9.88 14.38 13.38v7l6.3-3.5Z', key: 'right' }],
+]);
+export const GhostIcon = icon(Ghost);
+export const ShowAllIcon = icon(Eye);
+export const OpenFileIcon = icon(FileUp);
+export const LockIcon = icon(Lock);
+export const CloseIcon = icon(X);
