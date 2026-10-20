@@ -11,7 +11,7 @@ import { EDGE_STRIDE, FACE_STRIDE, faceTriangles, type Model, type Proto } from 
 import type { ElementRef } from '../core/pmi';
 import type { UnitId } from '../core/units';
 import { Measure, type EdgePick, type FacePick, type MeasureMode, type Pick } from './measure';
-import { ensureBoundsTree, isShown, LINE_PX } from './objects';
+import { EDGE_PX, ensureBoundsTree, isShown, LINE_PX } from './objects';
 import { boxUvs } from './boxUv';
 import { applyExplode, explodeOffsets, type ExplodeItem } from './explode';
 import { toGlb, toStl } from './export';
@@ -196,7 +196,8 @@ export class Viewer {
 
   private nodeObjects: THREE.Object3D[] = [];
   private meshes: THREE.Mesh[] = [];
-  private edgeLines: THREE.LineSegments[] = [];
+  private edgeLines: THREE.LineSegments[] = []; // hidden, for picking: LineSegments2 picks by its width on screen
+  private edges: LineSegments2[] = []; // what is drawn
   private materials: THREE.Material[] = [];
   private lookMaterials = new Map<string, THREE.Material>(); // for appearances and colours, by lookMaterial's key
   private defaultMaterial: THREE.Material | null = null; // for parts the file gives no colour
@@ -235,7 +236,7 @@ export class Viewer {
     new LineMaterial({ vertexColors: true, linewidth: LINE_PX, depthTest: false }),
   );
 
-  private readonly edgeMaterial = new THREE.LineBasicMaterial({ color: EDGE_COLOR });
+  private readonly edgeMaterial = new LineMaterial({ color: EDGE_COLOR, linewidth: EDGE_PX });
   private readonly ghostMaterial = new THREE.MeshStandardMaterial({
     color: DEFAULT_COLOR,
     transparent: true,
@@ -359,7 +360,8 @@ export class Viewer {
       // No bounds tree yet: it is built when a pick or a section first needs it (ensureBoundsTree).
       const e = new THREE.BufferGeometry();
       e.setAttribute('position', new THREE.BufferAttribute(p.edges, 3));
-      return { faces: g, edges: e };
+      // Shares the edge positions; only the drawn copy goes to the GPU.
+      return { faces: g, edges: e, wideEdges: p.edges.length ? new LineSegmentsGeometry().setPositions(p.edges) : null };
     });
 
     const build = (id: number, parent: THREE.Object3D, inheritedColor: number) => {
@@ -381,10 +383,18 @@ export class Viewer {
         this.meshes.push(mesh);
 
         const lines = new THREE.LineSegments(geometries[node.proto].edges, this.edgeMaterial);
+        lines.visible = false;
         lines.raycast = () => {}; // picked explicitly in pickEdge()
         lines.userData = { nodeId: id, proto };
         obj.add(lines);
         this.edgeLines.push(lines);
+        const wide = geometries[node.proto].wideEdges;
+        if (wide) {
+          const edges = new LineSegments2(wide, this.edgeMaterial);
+          edges.raycast = () => {};
+          obj.add(edges);
+          this.edges.push(edges);
+        }
       }
       node.children.forEach((c) => build(c, obj, color));
     };
@@ -523,6 +533,7 @@ export class Viewer {
     this.nodeObjects = [];
     this.meshes = [];
     this.edgeLines = [];
+    this.edges = [];
     this.materials = [];
     this.defaultMaterial = null;
     this.explodeItems = [];
@@ -580,7 +591,7 @@ export class Viewer {
     const faces = style !== 'wireframe';
     // Invisible materials are still raycast, so wireframe parts stay pickable.
     for (const m of [...this.materials, ...this.lookMaterials.values()]) m.visible = faces;
-    this.edgeLines.forEach((l) => (l.visible = style === 'shadedEdges' || style === 'wireframe'));
+    this.edges.forEach((l) => (l.visible = style === 'shadedEdges' || style === 'wireframe'));
     this.edgeMaterial.color.set(faces ? EDGE_COLOR : this.theme.wire);
     this.setPhotographic(photographic(style) ? style : null);
     this.invalidate('caps', 'realistic');
@@ -1036,6 +1047,8 @@ export class Viewer {
     this.renderer.setSize(w, h);
     this.effects?.setSize(w, h, this.renderer.getPixelRatio());
     this.pivotMarker.material.resolution.set(w, h);
+    this.edgeMaterial.resolution.set(w, h);
+    this.pmi.setSize(w, h);
     this.measure.setSize(w, h);
     this.elements.setSize(w, h);
     this.hoverElements.setSize(w, h);

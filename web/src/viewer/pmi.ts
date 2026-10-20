@@ -1,17 +1,20 @@
 // PMI presentations (lines, and filled areas such as text), drawn with every instance of the part
 // (or, for assembly PMI, the assembly) that owns them. What PMI refers to is drawn by ElementHighlight.
 import * as THREE from 'three';
+import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
+import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
 import type { Model } from '../core/model';
-import { isShown } from './objects';
+import { isShown, PMI_PX, SELECTED_PMI_PX } from './objects';
 import { SELECTED_COLOR } from './selection';
 
 export class PmiLayer {
-  private readonly line = new THREE.LineBasicMaterial();
-  private readonly selectedLine = new THREE.LineBasicMaterial({ color: SELECTED_COLOR });
+  private readonly line = new LineMaterial({ linewidth: PMI_PX });
+  private readonly selectedLine = new LineMaterial({ color: SELECTED_COLOR, linewidth: SELECTED_PMI_PX });
   private readonly fill = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
   private readonly selectedFill = new THREE.MeshBasicMaterial({ color: SELECTED_COLOR, side: THREE.DoubleSide });
   private owners: THREE.Object3D[][] = []; // per prototype: the node objects that instance it
-  private objects: (THREE.LineSegments | THREE.Mesh)[][] = []; // per PMI item: lines and fill per instance
+  private objects: (LineSegments2 | THREE.Mesh)[][] = []; // per PMI item: lines and fill per instance
   private selected: number[] = [];
 
   /** Adds the PMI of `model` under its owners' node objects (or `root` for model coordinates). */
@@ -25,28 +28,44 @@ export class PmiLayer {
         : item.proto >= 0
           ? this.owners[item.proto]
           : [root];
-      const make = <T extends THREE.LineSegments | THREE.Mesh>(positions: Float32Array, create: (g: THREE.BufferGeometry) => T) => {
-        if (!positions.length) return [];
-        const geometry = new THREE.BufferGeometry();
-        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-        return owners.map((owner) => {
-          const o = create(geometry);
+      const make = <T extends THREE.Object3D>(create: () => T): T[] =>
+        owners.map((owner) => {
+          const o = create();
           o.raycast = () => {}; // picked explicitly in pick()
           o.userData.pmi = index;
           owner.add(o);
           return o;
         });
-      };
-      return [
-        ...make(item.segments, (g) => new THREE.LineSegments(g, this.line)),
-        ...make(item.triangles, (g) => new THREE.Mesh(g, this.fill)),
-      ];
+      const objects: (LineSegments2 | THREE.Mesh)[] = [];
+      if (item.segments.length) {
+        const wide = new LineSegmentsGeometry().setPositions(item.segments);
+        const thin = positionGeometry(item.segments);
+        objects.push(
+          ...make(() => {
+            const o = new LineSegments2(wide, this.line);
+            // LineSegments2 picks by its width on screen; a hidden thin twin keeps pick()'s world threshold.
+            const twin = new THREE.LineSegments(thin, this.line);
+            twin.visible = false;
+            twin.raycast = () => {};
+            twin.userData.pmi = index;
+            o.add(twin);
+            return o;
+          }),
+        );
+      }
+      if (item.triangles.length) {
+        const fill = positionGeometry(item.triangles);
+        objects.push(...make(() => new THREE.Mesh(fill, this.fill)));
+      }
+      return objects;
     });
   }
 
   private paint(index: number, selected: boolean): void {
-    for (const o of this.objects[index] ?? [])
-      o.material = o instanceof THREE.Mesh ? (selected ? this.selectedFill : this.fill) : selected ? this.selectedLine : this.line;
+    for (const o of this.objects[index] ?? []) {
+      if (o instanceof LineSegments2) o.material = selected ? this.selectedLine : this.line;
+      else o.material = selected ? this.selectedFill : this.fill;
+    }
   }
 
   setVisible(visible: boolean, hidden: ReadonlySet<number>): void {
@@ -66,8 +85,8 @@ export class PmiLayer {
     for (const objects of this.objects)
       for (const o of objects) {
         if (!isShown(o)) continue;
-        if (o instanceof THREE.Mesh) THREE.Mesh.prototype.raycast.call(o, raycaster, hits);
-        else THREE.LineSegments.prototype.raycast.call(o, raycaster, hits);
+        if (o instanceof LineSegments2) THREE.LineSegments.prototype.raycast.call(o.children[0] as THREE.LineSegments, raycaster, hits);
+        else THREE.Mesh.prototype.raycast.call(o, raycaster, hits);
       }
     const nearest = hits.reduce<THREE.Intersection | undefined>((a, h) => (!a || h.distance < a.distance ? h : a), undefined);
     return nearest ? { index: nearest.object.userData.pmi as number, distance: nearest.distance } : null;
@@ -85,6 +104,12 @@ export class PmiLayer {
     return box;
   }
 
+  /** The canvas size in CSS pixels, which the line widths are relative to. */
+  setSize(width: number, height: number): void {
+    this.line.resolution.set(width, height);
+    this.selectedLine.resolution.set(width, height);
+  }
+
   setColor(color: number): void {
     this.line.color.set(color);
     this.fill.color.set(color);
@@ -94,6 +119,7 @@ export class PmiLayer {
     for (const objects of this.objects)
       for (const o of objects) {
         o.geometry.dispose(); // shared by an item's instances; disposing twice is harmless
+        for (const twin of o.children) (twin as THREE.LineSegments).geometry.dispose();
         o.removeFromParent();
       }
     this.objects = [];
@@ -105,4 +131,10 @@ export class PmiLayer {
     this.clear();
     for (const m of [this.line, this.selectedLine, this.fill, this.selectedFill]) m.dispose();
   }
+}
+
+function positionGeometry(positions: Float32Array): THREE.BufferGeometry {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  return geometry;
 }
