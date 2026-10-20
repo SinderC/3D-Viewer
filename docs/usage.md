@@ -8,6 +8,10 @@ Open a file with **File › Open**, Cmd/Ctrl+O, or by dropping it on the window.
 - Parts are listed with the assembly structure and colours from the file, with name search.
 - Show, hide or isolate parts. Hidden parts can be shown as translucent ghosts.
 - **Properties** shows the bounding-box size of the model and of the selected part.
+- The tree sits in the **Navigator** on the left, with tabs for PMI and saved views when the file has them.
+- **View › Navigator over view** draws the Navigator over the 3D view at a fixed width. Only
+  the rows and the search bar have a backing; drag, click or scroll elsewhere in the Navigator to work the
+  view. The wheel over a row scrolls the tree. Off by default; not in narrow windows.
 
 ## View
 

@@ -230,6 +230,43 @@ input[type='checkbox'] { accent-color: var(--accent); margin: 0; }
 .viewport canvas { display: block; }
 .viewport:is([data-tool='measure'], [data-tool='sectionFace']) canvas { cursor: crosshair; }
 
+/* View › Navigator over view: the stage spans the side column and the sidebar floats over it at a
+   fixed width. Only its rows and controls are tinted and take input; the space around them reaches the view.
+   Wheel over a row scrolls the tree (the scroll chain still includes .tree); elsewhere it zooms. */
+.app.side-overlay {
+  --side: min(280px, 40vw);
+  --overlay: color-mix(in srgb, var(--surface-1) 80%, transparent);
+}
+.app.side-overlay .stage { grid-column: side-start / stage-end; }
+.app.side-overlay .sidebar {
+  z-index: 1;
+  border-right: 0;
+  background: none;
+  pointer-events: none;
+  text-shadow: 0 0 2px var(--surface-1);
+}
+.app.side-overlay .sidebar .splitter { display: none; }
+/* Above the floating tree when a long one reaches them. */
+.app.side-overlay :is(.viewbar, .notice) { z-index: 2; }
+.app.side-overlay .sidebar :is(.tabs, .tree-bar, .row, .list-actions, .group, .hint) { pointer-events: auto; }
+.app.side-overlay .sidebar :is(.tree-bar, .list-actions, .group, .hint) {
+  width: fit-content;
+  max-width: calc(100% - 12px);
+  border-radius: var(--radius-s);
+  background: var(--overlay);
+}
+.app.side-overlay .sidebar .tree-bar { width: auto; padding: 4px; margin: 4px 6px; }
+.app.side-overlay .group, .app.side-overlay .hint { margin-inline: 6px; padding: 2px 8px; }
+.app.side-overlay .list-actions { margin: 2px 6px 6px; padding: 4px 6px; }
+/* Framed like the view bar, and full-strength labels: the control has no panel around it to set it off. */
+.app.side-overlay .tabs { margin-inline: 6px; background: var(--surface-1); border: 1px solid var(--hairline); box-shadow: var(--shadow-1); }
+.app.side-overlay .tabs button { color: var(--text); }
+.app.side-overlay .tabs button[aria-selected='true'] { background: var(--accent-fill); color: var(--accent); box-shadow: none; }
+.app.side-overlay .row { width: fit-content; max-width: calc(100% - 12px); background-color: var(--overlay); }
+.app.side-overlay .row:hover { background-color: var(--surface-2); }
+.app.side-overlay .row.selected { background-color: var(--accent-fill); }
+.app.side-overlay .row.related { background-image: linear-gradient(var(--accent-tint), var(--accent-tint)); }
+
 .overlay {
   position: absolute;
   inset: 0;

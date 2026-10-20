@@ -15,6 +15,9 @@ export const UP_AXES: Record<UpAxis, string> = { z: '+Z', y: '+Y', x: '+X', '-z'
 export interface ViewPrefs {
   sidebar: boolean;
   toggleSidebar: () => void;
+  /** Navigator (left sidebar) drawn over the 3D view instead of beside it. */
+  overlay: boolean;
+  toggleOverlay: () => void;
   props: boolean;
   toggleProps: () => void;
   cube: boolean;
@@ -59,7 +62,10 @@ export function ViewMenu({ state, dispatch, viewer, prefs, narrow }: Props) {
   const loaded = state.status === 'ready';
   return (
     <Menu title="View" label="View" className="menu-trigger" bar>
-      <MenuItem label="Sidebar" checked={prefs.sidebar} onClick={prefs.toggleSidebar} />
+      <MenuItem label="Navigator" checked={prefs.sidebar} onClick={prefs.toggleSidebar} />
+      {!narrow && (
+        <MenuItem label="Navigator over view" checked={prefs.overlay} disabled={!prefs.sidebar} onClick={prefs.toggleOverlay} />
+      )}
       {!narrow && <MenuItem label="Properties" checked={prefs.props} onClick={prefs.toggleProps} />}
       <hr className="menu-sep" />
       <MenuItem label="View cube" checked={prefs.cube} onClick={prefs.toggleCube} />

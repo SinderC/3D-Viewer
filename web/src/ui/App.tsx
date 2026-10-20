@@ -47,6 +47,9 @@ function useMediaQuery(query: string): boolean {
   return matches;
 }
 
+// Off by default, so not a useStoredFlag.
+const OVERLAY = { on: true, off: false };
+
 const STAGES: Record<string, string> = { read: 'Parsing', transfer: 'Translating', mesh: 'Meshing' };
 
 export function App() {
@@ -61,6 +64,7 @@ export function App() {
   const [barSize, setBarSize] = useStored('viewbar-size', BAR_SIZES, 'regular');
   const [upAxis, setUpAxis] = useStored('up-axis', UP_AXES, 'z');
   const [showSidebar, toggleSidebar] = useStoredFlag('sidebar');
+  const [sideOverlay, setSideOverlay] = useStored('sidebar-overlay', OVERLAY, 'off');
   const [showProps, toggleProps] = useStoredFlag('properties');
   const [showCube, toggleCube] = useStoredFlag('viewcube');
   const [showAxes, toggleAxes] = useStoredFlag('axes');
@@ -70,6 +74,8 @@ export function App() {
   const prefs: ViewPrefs = {
     sidebar: showSidebar,
     toggleSidebar,
+    overlay: sideOverlay === 'on',
+    toggleOverlay: () => setSideOverlay(sideOverlay === 'on' ? 'off' : 'on'),
     props: showProps,
     toggleProps,
     cube: showCube,
@@ -194,6 +200,8 @@ export function App() {
         'app',
         !propsPanel && 'no-props',
         !showSidebar && 'no-side',
+        // Narrow windows stack the sidebar under the viewer, so there is nothing to overlay.
+        showSidebar && sideOverlay === 'on' && !narrow && 'side-overlay',
         !showCube && 'no-cube',
         !showAxes && 'no-axes',
       ]
