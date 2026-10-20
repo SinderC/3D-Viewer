@@ -14,7 +14,6 @@ import {
   Maximize,
   Palette,
   Ruler,
-  RulerDimensionLine,
   ScanSearch,
   Sun,
   Target,
@@ -56,7 +55,12 @@ export const RealisticIcon = icon(Gem);
 // The studio style's warm key light.
 export const StudioIcon = icon(Sun);
 export const GridIcon = icon(Grid3x3);
-export const PmiIcon = icon(RulerDimensionLine);
+// The GD&T position symbol in a frame cell, so PMI doesn't read as another ruler.
+export const PmiIcon = custom([
+  ['rect', { x: 3, y: 3, width: 18, height: 18, rx: 2, key: 'frame' }],
+  ['circle', { cx: 12, cy: 12, r: 5, key: 'circle' }],
+  ['path', { d: 'M12 5.5v13M5.5 12h13', key: 'cross' }],
+]);
 // Lucide's square-split-horizontal with the kept left half filled.
 export const SectionIcon = custom([
   ['path', { d: 'M12 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7Z', fill: 'currentColor', key: 'kept' }],
