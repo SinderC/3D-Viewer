@@ -15,12 +15,16 @@ Changes to OCCT (V8_0_1) for the Open CAD Viewer. Applied by wasm/scripts/build-
 - STEP, XCAF: situation features of [PT] [SL] [PL] (PMI RP Figure 66), linked to a datum reference
   by a shape_aspect_relationship named 'point/line/plane situation feature', are read into
   XCAFDimTolObjects_DatumObject::GetSituationFeatures and stored on the datum's label.
+- STEP, XCAF: a datum reference's projected length (a datum_reference_modifier_with_value of type
+  .PROJECTED.) is read into XCAFDimTolObjects_DatumObject::GetProjectedLength and stored on the
+  datum's label. It shared the one modifier with value, so a datum with both a size and a
+  projected length (PMI RP Figure 65) kept the last one read.
 - XCAF: a datum object's modifier with value, its value and its position are initialised.
   XCAFDoc_Datum::GetObject sets them only when the label has them, so a datum without a modifier
   with value returned whatever was in memory.
 
 diff --git a/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx b/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx
-index b62a678b..63b932e6 100644
+index b62a678b..d55f7ab9 100644
 --- a/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx
 +++ b/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx
 @@ -70,6 +70,16 @@
@@ -40,32 +44,35 @@ index b62a678b..63b932e6 100644
  #include <StepDimTol_DatumSystem.hxx>
  #include <StepDimTol_FlatnessTolerance.hxx>
  #include <StepDimTol_GeometricTolerance.hxx>
-@@ -3482,6 +3492,8 @@ bool STEPCAFControl_Reader::setDatumToXCAF(
+@@ -3482,6 +3492,9 @@ bool STEPCAFControl_Reader::setDatumToXCAF(
    const NCollection_Sequence<XCAFDimTolObjects_DatumSingleModif>& theXCAFModifiers,
    const XCAFDimTolObjects_DatumModifWithValue                     theXCAFModifWithVal,
    const double                                                    theModifValue,
++  const double                                                    theProjectedLength,
 +  const NCollection_Sequence<std::pair<XCAFDimTolObjects_DatumSingleModif, gp_Ax1>>&
 +                                                                  theSituationFeatures,
    const occ::handle<TDocStd_Document>&                            theDoc,
    const occ::handle<XSControl_WorkSession>&                       theWS,
    const StepData_Factors&                                         theLocalFactors)
-@@ -3799,6 +3811,7 @@ bool STEPCAFControl_Reader::setDatumToXCAF(
+@@ -3799,6 +3812,8 @@ bool STEPCAFControl_Reader::setDatumToXCAF(
        {
          aDatTargetObj->SetModifierWithValue(theXCAFModifWithVal, theModifValue);
        }
++      aDatTargetObj->SetProjectedLength(theProjectedLength);
 +      aDatTargetObj->SetSituationFeatures(theSituationFeatures);
        aDGTTool->SetDatumToGeomTol(aDatL, theGDTL);
        aDatTargetObj->IsDatumTarget(true);
        aDatTargetObj->SetDatumTargetNumber(aDT->TargetId()->IntegerValue());
-@@ -3837,6 +3850,7 @@ bool STEPCAFControl_Reader::setDatumToXCAF(
+@@ -3837,6 +3852,8 @@ bool STEPCAFControl_Reader::setDatumToXCAF(
      {
        aDatObj->SetModifierWithValue(theXCAFModifWithVal, theModifValue);
      }
++    aDatObj->SetProjectedLength(theProjectedLength);
 +    aDatObj->SetSituationFeatures(theSituationFeatures);
      aDGTTool->SetDatumToGeomTol(aDatL, theGDTL);
      if (aDatObj->GetPresentation().IsNull())
      {
-@@ -3850,6 +3864,168 @@ bool STEPCAFControl_Reader::setDatumToXCAF(
+@@ -3850,6 +3867,176 @@ bool STEPCAFControl_Reader::setDatumToXCAF(
    return true;
  }
  
@@ -76,11 +83,13 @@ index b62a678b..63b932e6 100644
 +  XCAFDimTolObjects_DatumModifWithValue                                       ModifWithVal =
 +    XCAFDimTolObjects_DatumModifWithValue_None;
 +  double                                                                      ModifValue = 0.;
++  double                                                                      ProjectedLength = 0.;
 +  NCollection_Sequence<std::pair<XCAFDimTolObjects_DatumSingleModif, gp_Ax1>> SituationFeatures;
 +};
 +
 +// Adds a datum reference's modifiers. A modifier with value whose length has no usable unit is
-+// left out.
++// left out. A projected length is kept apart, so a datum can have it beside a size (CAx-IF PMI RP
++// Figure 65).
 +static void readDatumModifiers(
 +  const occ::handle<NCollection_HArray1<StepDimTol_DatumReferenceModifier>>& theStepModifiers,
 +  const StepData_Factors&                                                    theLocalFactors,
@@ -116,10 +125,16 @@ index b62a678b..63b932e6 100644
 +    }
 +    STEPConstruct_UnitContext anUnitCtx;
 +    anUnitCtx.ComputeFactors(anUnit.NamedUnit(), theLocalFactors);
-+    theMods.ModifWithVal =
++    const XCAFDimTolObjects_DatumModifWithValue aType =
 +      (XCAFDimTolObjects_DatumModifWithValue)(aWithVal->ModifierType() + 1);
-+    theMods.ModifValue =
-+      aWithVal->ModifierValue()->ValueComponent() * anUnitCtx.LengthFactor();
++    const double aValue = aWithVal->ModifierValue()->ValueComponent() * anUnitCtx.LengthFactor();
++    if (aType == XCAFDimTolObjects_DatumModifWithValue_Projected)
++    {
++      theMods.ProjectedLength = aValue;
++      continue;
++    }
++    theMods.ModifWithVal = aType;
++    theMods.ModifValue   = aValue;
 +  }
 +}
 +
@@ -234,7 +249,7 @@ index b62a678b..63b932e6 100644
  //=================================================================================================
  
  bool STEPCAFControl_Reader::readDatumsAP242(const occ::handle<Standard_Transient>&    theEnt,
-@@ -3887,8 +4063,10 @@ bool STEPCAFControl_Reader::readDatumsAP242(const occ::handle<Standard_Transient
+@@ -3887,8 +4074,10 @@ bool STEPCAFControl_Reader::readDatumsAP242(const occ::handle<Standard_Transient
              if (theGDTL.FindAttribute(XCAFDoc_GeomTolerance::GetID(), aTol))
              {
                occ::handle<XCAFDimTolObjects_GeomToleranceObject> anObj = aTol->GetObject();
@@ -247,7 +262,7 @@ index b62a678b..63b932e6 100644
                if (!aGeomAx2.IsNull())
                {
                  anObj->SetAxis(aGeomAx2->Ax2());
-@@ -3905,141 +4083,55 @@ bool STEPCAFControl_Reader::readDatumsAP242(const occ::handle<Standard_Transient
+@@ -3905,141 +4094,56 @@ bool STEPCAFControl_Reader::readDatumsAP242(const occ::handle<Standard_Transient
            aDS->Constituents();
          if (!aDRCA.IsNull())
          {
@@ -335,6 +350,7 @@ index b62a678b..63b932e6 100644
 +                               theMods.Modifiers,
 +                               theMods.ModifWithVal,
 +                               theMods.ModifValue,
++                               theMods.ProjectedLength,
 +                               theMods.SituationFeatures,
                                 theDoc,
                                 theWS,
@@ -424,7 +440,7 @@ index b62a678b..63b932e6 100644
            }
          }
 diff --git a/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.hxx b/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.hxx
-index 826c0f14..1ffc7656 100644
+index 826c0f14..40c21323 100644
 --- a/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.hxx
 +++ b/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.hxx
 @@ -32,6 +32,9 @@
@@ -437,10 +453,11 @@ index 826c0f14..1ffc7656 100644
  
  class XSControl_WorkSession;
  class TDataStd_NamedData;
-@@ -453,6 +456,8 @@ private:
+@@ -453,6 +456,9 @@ private:
      const NCollection_Sequence<XCAFDimTolObjects_DatumSingleModif>& theXCAFModifiers,
      const XCAFDimTolObjects_DatumModifWithValue                     theXCAFModifWithVal,
      const double                                                    theModifValue,
++    const double                                                    theProjectedLength,
 +    const NCollection_Sequence<std::pair<XCAFDimTolObjects_DatumSingleModif, gp_Ax1>>&
 +                                                                    theSituationFeatures,
      const occ::handle<TDocStd_Document>&                            theDoc,
@@ -465,10 +482,10 @@ index fd37c14b..0178386b 100644
  
  //=================================================================================================
 diff --git a/src/DataExchange/TKXCAF/XCAFDimTolObjects/XCAFDimTolObjects_DatumObject.cxx b/src/DataExchange/TKXCAF/XCAFDimTolObjects/XCAFDimTolObjects_DatumObject.cxx
-index ac10d822..cec93505 100644
+index ac10d822..3227c603 100644
 --- a/src/DataExchange/TKXCAF/XCAFDimTolObjects/XCAFDimTolObjects_DatumObject.cxx
 +++ b/src/DataExchange/TKXCAF/XCAFDimTolObjects/XCAFDimTolObjects_DatumObject.cxx
-@@ -19,11 +19,14 @@ IMPLEMENT_STANDARD_RTTIEXT(XCAFDimTolObjects_DatumObject, Standard_Transient)
+@@ -19,11 +19,15 @@ IMPLEMENT_STANDARD_RTTIEXT(XCAFDimTolObjects_DatumObject, Standard_Transient)
  
  XCAFDimTolObjects_DatumObject::XCAFDimTolObjects_DatumObject()
  {
@@ -479,6 +496,7 @@ index ac10d822..cec93505 100644
 -  myHasPntText = false;
 +  myModifierWithValue = XCAFDimTolObjects_DatumModifWithValue_None;
 +  myValueOfModifier   = 0.0;
++  myProjectedLength   = 0.0;
 +  myPosition          = 0;
 +  myIsDTarget         = false;
 +  myIsValidDT         = false;
@@ -488,16 +506,17 @@ index ac10d822..cec93505 100644
  }
  
  //=================================================================================================
-@@ -53,6 +56,7 @@ XCAFDimTolObjects_DatumObject::XCAFDimTolObjects_DatumObject(
+@@ -53,6 +57,8 @@ XCAFDimTolObjects_DatumObject::XCAFDimTolObjects_DatumObject(
    myPresentation      = theObj->myPresentation;
    mySemanticName      = theObj->mySemanticName;
    myPresentationName  = theObj->myPresentationName;
++  myProjectedLength   = theObj->myProjectedLength;
 +  mySituationFeatures = theObj->mySituationFeatures;
  }
  
  //=================================================================================================
 diff --git a/src/DataExchange/TKXCAF/XCAFDimTolObjects/XCAFDimTolObjects_DatumObject.hxx b/src/DataExchange/TKXCAF/XCAFDimTolObjects/XCAFDimTolObjects_DatumObject.hxx
-index 28c1f919..c8a3d619 100644
+index 28c1f919..0a98146a 100644
 --- a/src/DataExchange/TKXCAF/XCAFDimTolObjects/XCAFDimTolObjects_DatumObject.hxx
 +++ b/src/DataExchange/TKXCAF/XCAFDimTolObjects/XCAFDimTolObjects_DatumObject.hxx
 @@ -26,7 +26,10 @@
@@ -511,10 +530,17 @@ index 28c1f919..c8a3d619 100644
  class XCAFDimTolObjects_DatumObject;
  
  //! Access object to store datum
-@@ -179,6 +182,22 @@ public:
+@@ -179,6 +182,29 @@ public:
    //! etc)
    bool HasDatumTargetParams() { return myIsValidDT; }
  
++  //! Returns the projected length of the datum feature, 0 if it has none. It is kept apart from the
++  //! modifier with value, so a datum can have it beside a size (CAx-IF PMI RP Figure 65).
++  double GetProjectedLength() const { return myProjectedLength; }
++
++  //! Sets the projected length of the datum feature, 0 for none.
++  void SetProjectedLength(const double theLength) { myProjectedLength = theLength; }
++
 +  //! Returns the situation features the datum is reduced to ([PT] [SL] [PL], CAx-IF PMI RP
 +  //! Figure 66): the modifier (Point, Line or Plane) and the point, the line or the plane's normal
 +  //! through its location.
@@ -534,30 +560,38 @@ index 28c1f919..c8a3d619 100644
    //! Dumps the content of me into the stream
    Standard_EXPORT void DumpJson(Standard_OStream& theOStream, int theDepth = -1) const;
  
-@@ -207,6 +226,7 @@ private:
+@@ -207,6 +233,8 @@ private:
    TopoDS_Shape                                             myPresentation;
    occ::handle<TCollection_HAsciiString>                    mySemanticName;
    occ::handle<TCollection_HAsciiString>                    myPresentationName;
++  double                                                   myProjectedLength;
 +  NCollection_Sequence<std::pair<XCAFDimTolObjects_DatumSingleModif, gp_Ax1>> mySituationFeatures;
  };
  
  #endif // _XCAFDimTolObjects_DatumObject_HeaderFile
 diff --git a/src/DataExchange/TKXCAF/XCAFDoc/XCAFDoc_Datum.cxx b/src/DataExchange/TKXCAF/XCAFDoc/XCAFDoc_Datum.cxx
-index ca4abc71..863bc808 100644
+index ca4abc71..0cc794b4 100644
 --- a/src/DataExchange/TKXCAF/XCAFDoc/XCAFDoc_Datum.cxx
 +++ b/src/DataExchange/TKXCAF/XCAFDoc/XCAFDoc_Datum.cxx
-@@ -53,6 +53,7 @@ enum ChildLab
+@@ -53,6 +53,8 @@ enum ChildLab
    ChildLab_Pnt,
    ChildLab_PntText,
    ChildLab_Presentation,
 +  ChildLab_SituationFeatures,
++  ChildLab_ProjectedLength,
    ChildLab_End
  };
  
-@@ -342,6 +343,28 @@ void XCAFDoc_Datum::SetObject(const occ::handle<XCAFDimTolObjects_DatumObject>&
+@@ -342,6 +344,34 @@ void XCAFDoc_Datum::SetObject(const occ::handle<XCAFDimTolObjects_DatumObject>&
      }
    }
  
++  if (theObject->GetProjectedLength() > 0.)
++  {
++    TDataStd_Real::Set(Label().FindChild(ChildLab_ProjectedLength),
++                       theObject->GetProjectedLength());
++  }
++
 +  // situation features: their modifiers, and per feature its location and direction
 +  const NCollection_Sequence<std::pair<XCAFDimTolObjects_DatumSingleModif, gp_Ax1>>& aFeatures =
 +    theObject->GetSituationFeatures();
@@ -583,10 +617,17 @@ index ca4abc71..863bc808 100644
    TopoDS_Shape aPresentation = theObject->GetPresentation();
    if (!aPresentation.IsNull())
    {
-@@ -415,6 +438,25 @@ occ::handle<XCAFDimTolObjects_DatumObject> XCAFDoc_Datum::GetObject() const
+@@ -415,6 +445,32 @@ occ::handle<XCAFDimTolObjects_DatumObject> XCAFDoc_Datum::GetObject() const
      anObj->SetPosition(aPosition->Get());
    }
  
++  occ::handle<TDataStd_Real> aProjected;
++  if (Label().FindChild(ChildLab_ProjectedLength)
++        .FindAttribute(TDataStd_Real::GetID(), aProjected))
++  {
++    anObj->SetProjectedLength(aProjected->Get());
++  }
++
 +  occ::handle<TDataStd_IntegerArray> aFeatTypes;
 +  occ::handle<TDataStd_RealArray>    aFeatAxes;
 +  const TDF_Label                    aLFeat = Label().FindChild(ChildLab_SituationFeatures);

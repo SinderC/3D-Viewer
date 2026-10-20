@@ -1478,11 +1478,12 @@ private:
           d.modifiers.push_back(name);
       XCAFDimTolObjects_DatumModifWithValue type;
       obj->GetModifierWithValue(type, d.size);
-      static const char* const kSizeTypes[] = {"", "diameter", "distance", "", "spherical"}; // Projected: above
-      if (type == XCAFDimTolObjects_DatumModifWithValue_Projected)
-        d.projected = d.size;
-      else if (size_t(type) < sizeof kSizeTypes / sizeof *kSizeTypes)
+      // the patched reader keeps a projected length apart, never as the modifier with value
+      static const char* const kSizeTypes[] = {"", "diameter", "distance", "", "spherical"};
+      if (size_t(type) < sizeof kSizeTypes / sizeof *kSizeTypes)
         d.sizeType = kSizeTypes[size_t(type)];
+      if (obj->GetProjectedLength() > 0)
+        d.projected = obj->GetProjectedLength();
       for (const auto& [modifier, axis] : obj->GetSituationFeatures())
         if (const char* name = datumModifier(modifier))
           d.situations.emplace_back(name, axis);

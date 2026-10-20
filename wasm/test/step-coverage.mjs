@@ -656,9 +656,10 @@ const tests = {
     position(0.02, compartment([['A', simple('MAXIMUM_MATERIAL_REQUIREMENT')], ['B']]), compartment('C'));
     // D | (E-F Ⓕ) Ⓜ: the compartment's modifier applies to both
     position(0.03, compartment('D'), compartment([['E'], ['F', simple('FREE_STATE')]], ...simple('MAXIMUM_MATERIAL_REQUIREMENT')));
-    // A [PL] [Ø0.5] [x,y] (RP Figure 65, Table 15)
+    // A [PL] [Ø0.5] [Ⓟ 1] [x,y] (RP Figure 65, Table 15): OCCT kept one modifier with a value
     const withValue = s.add(`DATUM_REFERENCE_MODIFIER_WITH_VALUE(.CIRCULAR_OR_CYLINDRICAL.,${length(0.5)})`);
-    position(0.04, compartment('A', ...simple('PLANE'), withValue, ...simple('DEGREE_OF_FREEDOM_CONSTRAINT_X', 'DEGREE_OF_FREEDOM_CONSTRAINT_Y')));
+    const projected = s.add(`DATUM_REFERENCE_MODIFIER_WITH_VALUE(.PROJECTED.,${length(1)})`);
+    position(0.04, compartment('A', ...simple('PLANE'), withValue, projected, ...simple('DEGREE_OF_FREEDOM_CONSTRAINT_X', 'DEGREE_OF_FREEDOM_CONSTRAINT_Y')));
     // B with a distance in no unit: left out, not read as [0]
     const noUnit = s.add(`DATUM_REFERENCE_MODIFIER_WITH_VALUE(.DISTANCE.,${s.add('LENGTH_MEASURE_WITH_UNIT(LENGTH_MEASURE(3.),$)')})`);
     position(0.05, compartment('B', noUnit));
@@ -672,6 +673,8 @@ const tests = {
     situation(reduced, 'plane', s.add(`PLANE('',${axis(s, [0, 0, 1])})`));
     situation(reduced, 'line', s.add(`LINE('',${pt(s, [0, 0.5, 0])},${s.add(`VECTOR('',${dir(s, [1, 0, 0])},1.)`)})`));
     position(0.08, reduced);
+    // B [Ⓟ 2] without a size
+    position(0.09, compartment('B', s.add(`DATUM_REFERENCE_MODIFIER_WITH_VALUE(.PROJECTED.,${length(2)})`)));
     const m = read('datum-frames.stp', s.text(AP242));
 
     const frames = m.pmi.filter((p) => p.kind === 'tolerance').sort((a, b) => a.value[0] - b.value[0]).map((p) => p.datums);
@@ -684,6 +687,7 @@ const tests = {
     const [[a]] = frames[3];
     assert.deepEqual([a.name, a.modifiers, a.sizeType], ['A', ['plane', 'dofX', 'dofY'], 'diameter']);
     near(a.size, 12.7, 1e-9, 'datum size in mm');
+    near(a.projected, 25.4, 1e-9, 'datum projected length in mm');
     assert.deepEqual(frames[4], [[{ name: 'B' }]]);
     assert.deepEqual(frames[5], [[
       { name: 'A', modifiers: mmc },
@@ -698,6 +702,9 @@ const tests = {
       v.forEach((c, i) => close(axes[key][i], c, `datum axes ${key}`)));
     const [[reducedA]] = frames[7];
     assert.deepEqual(reducedA.situations.map((f) => f.type), ['plane', 'line']);
+    const [[projectedB]] = frames[8];
+    assert.deepEqual([projectedB.name, projectedB.size, projectedB.sizeType], ['B', undefined, undefined]);
+    near(projectedB.projected, 50.8, 1e-9, 'datum projected length without a size, in mm');
     const [plane, line] = reducedA.situations;
     [[plane.origin, [0, 0, 25.4]], [plane.direction, [0, 0, 1]], [line.origin, [0, 12.7, 0]], [line.direction, [1, 0, 0]]]
       .forEach(([actual, expected]) => expected.forEach((c, i) => close(actual[i], c, 'situation feature')));
