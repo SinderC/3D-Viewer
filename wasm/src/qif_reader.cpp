@@ -1439,56 +1439,105 @@ private:
     }
   }
 
-  // A frame compartment: one datum, or the datums of a compound (common) datum A-B, each with its
-  // modifiers (ISO 23952 5.17.6.2 and the ISO elements of DatumType), named as for STEP.
+  // A frame compartment: one datum, or the datums of a compound (common) datum A-B, nested ones
+  // flattened, each with its modifiers (IntermediatesPMI.xsd DatumType), named as for STEP.
   std::vector<DatumRef> frameCompartment(const LDOM_Element& datum, const std::map<int, std::string>& labels) const
   {
     std::vector<DatumRef> out;
-    const auto label = [&](const LDOM_Element& simple) {
-      const auto it = labels.find(idOf(child(simple, "DatumDefinitionId")));
-      if (it == labels.end() || it->second.empty())
-        return;
-      DatumRef d{it->second};
-      const std::string material = token(child(simple, "MaterialModifier"));
-      if (material == "MAXIMUM" || material == "MAXIMUM_RPR")
-        d.modifiers.push_back("maximumMaterial");
-      else if (material == "LEAST" || material == "LEAST_RPR")
-        d.modifiers.push_back("leastMaterial");
-      if (material.size() > 4 && material.compare(material.size() - 4, 4, "_RPR") == 0)
-        d.modifiers.push_back("reciprocity");
-      // Enumerations: the schema's values are not at hand, so known symbols and names are mapped
-      // and anything else is kept as written.
-      static const std::map<std::string, std::string> kEnums = {
-        {"ACS", "anyCrossSection"}, {"ANY_CROSS_SECTION", "anyCrossSection"},
-        {"ALS", "anyLongitudinalSection"}, {"ANY_LONGITUDINAL_SECTION", "anyLongitudinalSection"},
-        {"SCS", "specificCrossSection"}, {"SPECIFIC_CROSS_SECTION", "specificCrossSection"},
-        {"PD", "pitchDiameter"}, {"PITCH_DIAMETER", "pitchDiameter"},
-        {"MD", "majorDiameter"}, {"MAJOR_DIAMETER", "majorDiameter"},
-        {"LD", "minorDiameter"}, {"MINOR_DIAMETER", "minorDiameter"},
-        {"PT", "point"}, {"POINT", "point"}, {"SL", "line"}, {"LINE", "line"}, {"PL", "plane"}, {"PLANE", "plane"}};
-      for (const char* tag : {"SectionModifier", "DiameterModifier", "ReducedDatum"})
-        if (const std::string v = token(child(simple, tag)); !v.empty())
-          d.modifiers.push_back(kEnums.count(v) ? kEnums.at(v) : v);
-      static const std::pair<const char*, const char*> kFlags[] = {
-        {"ContactingFeature", "contactingFeature"}, {"DistanceVariable", "distanceVariable"},
-        {"DatumFixed", "datumFixed"}, {"ConstrainOrientation", "orientation"},
-        {"ConstrainSubsequent", "constrainSubsequent"}};
-      for (const auto& [tag, name] : kFlags)
-        if (const std::string v = token(child(simple, tag)); v == "true" || v == "1")
-          d.modifiers.push_back(name);
-      if (const LDOM_Element projected = child(simple, "ProjectedDatum"); !projected.isNull())
-      {
-        d.sizeType = "projected";
-        d.size     = measure(projected, false);
-      }
-      out.push_back(std::move(d));
-    };
-    if (const LDOM_Element simple = child(datum, "SimpleDatum"); !simple.isNull())
-      label(simple);
-    else
-      for (const LDOM_Element& part : elements(child(datum, "CompoundDatum")))
-        label(child(part, "SimpleDatum"));
+    addDatums(datum, labels, {}, out);
     return out;
+  }
+
+  // The datums of the SimpleDatum or CompoundDatum in e (a DatumWithPrecedence or SequencedDatum),
+  // a compound's in its sequence; inherited: the modifiers of the compounds around them.
+  void addDatums(const LDOM_Element&               e,
+                 const std::map<int, std::string>& labels,
+                 const std::vector<std::string>&   inherited,
+                 std::vector<DatumRef>&            out) const
+  {
+    if (const LDOM_Element simple = child(e, "SimpleDatum"); !simple.isNull())
+    {
+      const auto it = labels.find(idOf(child(simple, "DatumDefinitionId")));
+      if (it != labels.end() && !it->second.empty())
+        out.push_back(datumRef(it->second, simple, inherited));
+      return;
+    }
+    const LDOM_Element compound = child(e, "CompoundDatum");
+    std::vector<std::string> modifiers = inherited;
+    if (const std::string reduced = datumEnum(token(child(compound, "ReducedDatum")));
+        !reduced.empty() && std::find(modifiers.begin(), modifiers.end(), reduced) == modifiers.end())
+      modifiers.push_back(reduced);
+    std::vector<std::pair<int, LDOM_Element>> members;
+    for (const LDOM_Element& m : elements(compound))
+      if (tagOf(m) == "Datum")
+        members.emplace_back(std::atoi(token(child(m, "SequenceNumber")).c_str()), m);
+    std::stable_sort(members.begin(), members.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+    for (const auto& [sequence, m] : members)
+      addDatums(m, labels, modifiers, out);
+  }
+
+  // The schema's codes of the datum enumerations (PD, ACS, PT, ...) mapped to the STEP modifier
+  // names; others as written
+  static std::string datumEnum(const std::string& v)
+  {
+    static const std::map<std::string, std::string> kNames = {
+      {"ACS", "anyCrossSection"}, {"ALS", "anyLongitudinalSection"}, {"SCS", "specificCrossSection"},
+      {"PD", "pitchDiameter"}, {"MD", "majorDiameter"}, {"LD", "minorDiameter"},
+      {"PT", "point"}, {"SL", "line"}, {"PL", "plane"}};
+    const auto it = kNames.find(v);
+    return it == kNames.end() ? v : it->second;
+  }
+
+  DatumRef datumRef(const std::string& name, const LDOM_Element& simple, const std::vector<std::string>& inherited) const
+  {
+    DatumRef d{name};
+    const std::string material = token(child(simple, "MaterialModifier"));
+    if (material == "MAXIMUM" || material == "MAXIMUM_RPR")
+      d.modifiers.push_back("maximumMaterial");
+    else if (material == "LEAST" || material == "LEAST_RPR")
+      d.modifiers.push_back("leastMaterial");
+    if (material == "MAXIMUM_RPR" || material == "LEAST_RPR")
+      d.modifiers.push_back("reciprocity");
+    const auto isTrue = [&](const LDOM_Element& e) {
+      const std::string v = token(e);
+      return v == "true" || v == "1";
+    };
+    // [BASIC], or a size: datum feature simulator (ASME) or projected datum (ISO)
+    const LDOM_Element simulator = child(simple, "DatumFeatureSimulatorModifier");
+    if (!child(simulator, "BasicSize").isNull())
+      d.modifiers.push_back("basic");
+    for (const auto& [tag, type] : {std::pair{"LinearSize", "distance"}, {"DiametricalSize", "diameter"}})
+      if (const LDOM_Element size = child(simulator, tag); !size.isNull())
+      {
+        d.sizeType = type;
+        d.size     = measure(size, false);
+      }
+    if (const LDOM_Element projected = child(simple, "ProjectedDatum"); !projected.isNull())
+    {
+      d.sizeType = "projected";
+      d.size     = measure(projected, false);
+    }
+    if (isTrue(child(child(simple, "DatumTranslation"), "DatumTranslationAllowed")))
+      d.modifiers.push_back("translation");
+    for (const char* tag : {"DiameterModifier", "SectionModifier", "ReducedDatum"})
+      if (const std::string v = token(child(simple, tag)); !v.empty())
+        d.modifiers.push_back(datumEnum(v));
+    static const std::pair<const char*, const char*> kFlags[] = {
+      {"ContactingFeature", "contactingFeature"}, {"DistanceVariable", "distanceVariable"},
+      {"DatumFixed", "datumFixed"}, {"ConstrainOrientation", "orientation"},
+      {"ConstrainSubsequent", "constrainSubsequent"}};
+    for (const auto& [tag, flag] : kFlags)
+      if (isTrue(child(simple, tag)))
+        d.modifiers.push_back(flag);
+    // ASME U V W X Y Z, ISO Rx Ry Rz Tx Ty Tz
+    for (const LDOM_Element& dof : elements(child(simple, "DegreesOfFreedom")))
+      if (const std::string v = token(dof); !v.empty())
+        d.modifiers.push_back("dof" + v);
+    // The compounds' modifiers after the datum's own, once
+    for (const std::string& m : inherited)
+      if (std::find(d.modifiers.begin(), d.modifiers.end(), m) == d.modifiers.end())
+        d.modifiers.push_back(m);
+    return d;
   }
 
   void readPmi(FilePmi& pmi)
@@ -1534,7 +1583,7 @@ private:
         if (const int frame = idOf(child(def, "DatumReferenceFrameId")); myById.count(frame))
         {
           // In precedence order, not document order; other precedences after these, as listed
-          static const std::vector<std::string> kOrder = {"PRIMARY", "SECONDARY", "TERTIARY", "QUATERNARY", "QUINARY"};
+          static const std::vector<std::string> kOrder = {"PRIMARY", "SECONDARY", "TERTIARY", "QUATERNARY", "QUINARY", "SENARY"};
           std::vector<std::pair<size_t, std::vector<DatumRef>>> ranked;
           for (const LDOM_Element& d : elements(child(lookup(frame), "Datums")))
             if (std::vector<DatumRef> compartment = frameCompartment(d, datumLabels); !compartment.empty())

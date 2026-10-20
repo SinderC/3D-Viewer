@@ -62,16 +62,26 @@ const tests = {
       ]),
       // ISO elements of DatumType: projected datum 5 mm, [SCS], [LD], [CF], [PL]
       frame(202, [
-        datum('A', '<ProjectedDatum>5</ProjectedDatum><SectionModifier>SCS</SectionModifier><DiameterModifier>LD</DiameterModifier><ContactingFeature>1</ContactingFeature><ReducedDatum>PL</ReducedDatum>'),
+        datum('A', '<ProjectedDatum>5</ProjectedDatum><DiameterModifier>LD</DiameterModifier><SectionModifier>SCS</SectionModifier><ContactingFeature>1</ContactingFeature><ReducedDatum>PL</ReducedDatum>'),
       ]),
-      // Listed SECONDARY first; a value not known here, kept as written (and escaped in the JSON)
+      // Listed SECONDARY first; a value not in the schema, kept as written (and escaped in the JSON)
       frame(203, [datum('B', '<SectionModifier>S&quot;X</SectionModifier>'), datum('A')], ['SECONDARY', 'PRIMARY']),
+      // ASME: A [BASIC] ▷ [x,y], B [Ø3]; ISO degrees of freedom on C
+      frame(204, [
+        datum('A', '<DatumFeatureSimulatorModifier><BasicSize>BASIC</BasicSize></DatumFeatureSimulatorModifier><DatumTranslation><DatumTranslationAllowed>true</DatumTranslationAllowed></DatumTranslation><DegreesOfFreedom n="2"><DegreeOfFreedom>X</DegreeOfFreedom><DegreeOfFreedom>Y</DegreeOfFreedom></DegreesOfFreedom>'),
+        datum('B', '<DatumFeatureSimulatorModifier><DiametricalSize>3</DiametricalSize></DatumFeatureSimulatorModifier>'),
+        datum('C', '<DegreesOfFreedom n="2"><ISODegreeOfFreedom>Tx</ISODegreeOfFreedom><ISODegreeOfFreedom>Rz</ISODegreeOfFreedom></DegreesOfFreedom>'),
+      ]),
+      // A nested compound datum [PL], listed out of sequence: (C-(D-A Ⓜ [PL])) [PL]
+      frame(205, [
+        `<CompoundDatum n="2"><Datum><CompoundDatum n="2"><Datum>${datum('A', '<MaterialModifier>MAXIMUM</MaterialModifier><ReducedDatum>PL</ReducedDatum>')}<SequenceNumber>2</SequenceNumber></Datum><Datum>${datum('D')}<SequenceNumber>1</SequenceNumber></Datum></CompoundDatum><SequenceNumber>2</SequenceNumber></Datum><Datum>${datum('C')}<SequenceNumber>1</SequenceNumber></Datum><ReducedDatum>PL</ReducedDatum></CompoundDatum>`,
+      ]),
     ];
     const definitionsXml = (frameId, value, i) =>
       `<PositionCharacteristicDefinition id="${300 + i}"><ToleranceValue>${value}</ToleranceValue><DatumReferenceFrameId>${frameId}</DatumReferenceFrameId></PositionCharacteristicDefinition>`;
     const nominals = (i) =>
       `<PositionCharacteristicNominal id="${400 + i}"><CharacteristicDefinitionId>${300 + i}</CharacteristicDefinitionId></PositionCharacteristicNominal>`;
-    const values = [0.1, 0.2, 0.3, 0.4];
+    const values = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6];
     const m = read(
       'datum-frames.qif',
       qif(`<DatumDefinitions n="${labels.length}">${definitions.join('')}</DatumDefinitions>
@@ -87,8 +97,18 @@ const tests = {
       [
         [[{ name: 'A' }], [{ name: 'B', modifiers: ['maximumMaterial'] }], [{ name: 'C', modifiers: ['leastMaterial', 'reciprocity'] }]],
         [[{ name: 'A' }, { name: 'B', modifiers: ['maximumMaterial'] }], [{ name: 'D' }]],
-        [[{ name: 'A', modifiers: ['specificCrossSection', 'minorDiameter', 'plane', 'contactingFeature'], sizeType: 'projected', size: 5 }]],
+        [[{ name: 'A', modifiers: ['minorDiameter', 'specificCrossSection', 'plane', 'contactingFeature'], sizeType: 'projected', size: 5 }]],
         [[{ name: 'A' }], [{ name: 'B', modifiers: ['S"X'] }]],
+        [
+          [{ name: 'A', modifiers: ['basic', 'translation', 'dofX', 'dofY'] }],
+          [{ name: 'B', sizeType: 'diameter', size: 3 }],
+          [{ name: 'C', modifiers: ['dofTx', 'dofRz'] }],
+        ],
+        [[
+          { name: 'C', modifiers: ['plane'] },
+          { name: 'D', modifiers: ['plane'] },
+          { name: 'A', modifiers: ['maximumMaterial', 'plane'] },
+        ]],
       ],
     );
   },

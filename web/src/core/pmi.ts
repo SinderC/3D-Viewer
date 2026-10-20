@@ -61,7 +61,9 @@ const DATUM_MODIFIERS: Record<Exclude<DatumModifier, `dof${string}`>, [symbol: s
 };
 const DATUM_SIZES: Record<NonNullable<DatumRef['sizeType']>, [symbol: string, name: string]> = { diameter: ['Ø', 'diameter'], distance: ['', 'distance'], projected: ['Ⓟ ', 'projected'], spherical: ['SØ', 'spherical diameter'] };
 
-const dofs = (d: DatumRef) => (d.modifiers ?? []).filter((m) => m.startsWith('dof')).map((m) => m.slice(3).toLowerCase());
+// ASME u v w x y z in lower case, ISO Rx … Tz as they are
+const dofs = (d: DatumRef) =>
+  (d.modifiers ?? []).filter((m) => m.startsWith('dof')).map((m) => (m.length === 4 ? m.slice(3).toLowerCase() : m.slice(3)));
 
 // A datum's modifiers as symbols (names), in frame order: modifiers, size, degrees of freedom.
 function datumModifiers(d: DatumRef, unit: UnitId, names = false): string[] {

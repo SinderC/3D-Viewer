@@ -77,6 +77,8 @@ describe('pmiLabel', () => {
         ['Datum axes (part)', 'origin (1.0000 in, 0.0000 in, 0.0000 in), X (0, -1, 0), Z (0, 0, 1)'],
       ]),
     );
+    expect(pmiLabel(tol([[{ name: 'A', modifiers: ['dofTx', 'dofRz'] }]]), 'mm')).toBe('Position 0.100 mm | A [Tx,Rz]');
+    expect(pmiInfo(tol([[{ name: 'A', modifiers: ['dofTx', 'dofRz'] }]]), 'mm')).toContainEqual(['Datum modifiers', 'A: degrees of freedom Tx, Rz']);
     // QIF's ISO modifiers without a STEP equivalent
     expect(pmiLabel(tol([[{ name: 'A', modifiers: ['datumFixed', 'constrainSubsequent'] }]]), 'mm')).toBe('Position 0.100 mm | A [DF] <>');
     const inch: DatumRef = { name: 'A', modifiers: ['point'], sizeType: 'spherical', size: 25.4 };
