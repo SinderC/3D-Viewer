@@ -86,6 +86,21 @@ function datumFrame(p: PmiItem, unit: UnitId): string | undefined {
   return p.datums?.length ? p.datums.map((c) => compartment(c, unit)).join(' | ') : undefined;
 }
 
+const point = (v: number[], unit: UnitId) => `(${v.map((c) => formatLength(c, unit)).join(', ')})`;
+const direction = (v: number[]) => `(${v.map((c) => +c.toFixed(4)).join(', ')})`;
+
+// Situation features, for the info panel: A: plane at (…) normal (…).
+function situations(p: PmiItem, unit: UnitId): string | undefined {
+  const list = (p.datums ?? []).flat().flatMap((d) =>
+    (d.situations ?? []).map(
+      (f) =>
+        `${d.name}: ${f.type} at ${point(f.origin, unit)}` +
+        (f.direction ? ` ${f.type === 'plane' ? 'normal' : 'direction'} ${direction(f.direction)}` : ''),
+    ),
+  );
+  return list.join('; ') || undefined;
+}
+
 // Datum modifiers by name, for the info panel: B: maximum material; C: basic.
 function datumModifierNames(p: PmiItem, unit: UnitId): string | undefined {
   const list = (p.datums ?? []).flat().flatMap((d) => {
@@ -209,6 +224,13 @@ export function pmiInfo(p: PmiItem, unit: UnitId): [string, string][] {
     ['Maximum', p.maxValue && formatLength(p.maxValue[0], unit)],
     ['Datums', datumFrame(p, unit)],
     ['Datum modifiers', datumModifierNames(p, unit)],
+    // In the part's coordinates: one PMI item is shown on every instance of its part
+    ['Situation features (part)', situations(p, unit)],
+    [
+      'Datum axes (part)',
+      p.datumAxes &&
+        `origin ${point(p.datumAxes.origin, unit)}, X ${direction(p.datumAxes.x)}, Z ${direction(p.datumAxes.z)}`,
+    ],
     ['Faces', count(p, 'face') ? String(count(p, 'face')) : undefined],
     ['Edges', count(p, 'edge') ? String(count(p, 'edge')) : undefined],
     ['Vertices', count(p, 'vertex') ? String(count(p, 'vertex')) : undefined],

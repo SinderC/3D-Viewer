@@ -3,108 +3,469 @@ Changes to OCCT (V8_0_1) for the Open CAD Viewer. Applied by wasm/scripts/build-
 - STEP: in a common datum (A-B, PMI RP 6.9.8) the modifiers of one datum_reference_element were
   added to the compartment's list and so also given to every later element: A Ⓜ-B read as
   A Ⓜ-B Ⓜ, and A Ⓜ-B Ⓜ gave B Ⓜ twice. Each element now gets the compartment's modifiers and
-  its own.
+  its own. The datums of a compartment are read from its base, not from every entity it shares.
+- STEP: nested common datums (an element whose base is another common_datum_list) are read,
+  flattened into the compartment; each datum gets the modifiers of the elements it is nested in.
 - STEP: a datum reference modifier with value whose length has no usable unit is left out; OCCT
-  kept its type with the value 0, e.g. [Ø0].
+  kept its type with the value 0, e.g. [Ø0]. A simple datum reference modifier not in the schema
+  is dropped; it read as .ANY_CROSS_SECTION.
+- STEP: a common datum element nested in itself (a malformed file) is read once.
+- STEP: the axis system of a datum system (PMI RP Figure 64) is converted with the units of the
+  representation it is given in; it was read unconverted, so inch files kept inch values.
+- STEP, XCAF: situation features of [PT] [SL] [PL] (PMI RP Figure 66), linked to a datum reference
+  by a shape_aspect_relationship named 'point/line/plane situation feature', are read into
+  XCAFDimTolObjects_DatumObject::GetSituationFeatures and stored on the datum's label.
 - XCAF: a datum object's modifier with value, its value and its position are initialised.
   XCAFDoc_Datum::GetObject sets them only when the label has them, so a datum without a modifier
   with value returned whatever was in memory.
 
 diff --git a/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx b/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx
-index b62a678b..5e57fd16 100644
+index b62a678b..63b932e6 100644
 --- a/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx
 +++ b/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx
-@@ -3927,11 +3927,6 @@ bool STEPCAFControl_Reader::readDatumsAP242(const occ::handle<Standard_Transient
-                 }
-                 else if (aModif->Value(m).CaseNumber() == 1)
-                 {
+@@ -70,6 +70,16 @@
+ #include <StepDimTol_DatumFeature.hxx>
+ #include <StepDimTol_DatumReference.hxx>
+ #include <StepDimTol_DatumReferenceElement.hxx>
++#include <StepDimTol_DatumReferenceModifierWithValue.hxx>
++#include <StepDimTol_GeneralDatumReference.hxx>
++#include <StepGeom_Line.hxx>
++#include <Geom_Line.hxx>
++
++#include <gp.hxx>
++
++#include <algorithm>
++#include <functional>
++#include <vector>
+ #include <StepDimTol_DatumSystem.hxx>
+ #include <StepDimTol_FlatnessTolerance.hxx>
+ #include <StepDimTol_GeometricTolerance.hxx>
+@@ -3482,6 +3492,8 @@ bool STEPCAFControl_Reader::setDatumToXCAF(
+   const NCollection_Sequence<XCAFDimTolObjects_DatumSingleModif>& theXCAFModifiers,
+   const XCAFDimTolObjects_DatumModifWithValue                     theXCAFModifWithVal,
+   const double                                                    theModifValue,
++  const NCollection_Sequence<std::pair<XCAFDimTolObjects_DatumSingleModif, gp_Ax1>>&
++                                                                  theSituationFeatures,
+   const occ::handle<TDocStd_Document>&                            theDoc,
+   const occ::handle<XSControl_WorkSession>&                       theWS,
+   const StepData_Factors&                                         theLocalFactors)
+@@ -3799,6 +3811,7 @@ bool STEPCAFControl_Reader::setDatumToXCAF(
+       {
+         aDatTargetObj->SetModifierWithValue(theXCAFModifWithVal, theModifValue);
+       }
++      aDatTargetObj->SetSituationFeatures(theSituationFeatures);
+       aDGTTool->SetDatumToGeomTol(aDatL, theGDTL);
+       aDatTargetObj->IsDatumTarget(true);
+       aDatTargetObj->SetDatumTargetNumber(aDT->TargetId()->IntegerValue());
+@@ -3837,6 +3850,7 @@ bool STEPCAFControl_Reader::setDatumToXCAF(
+     {
+       aDatObj->SetModifierWithValue(theXCAFModifWithVal, theModifValue);
+     }
++    aDatObj->SetSituationFeatures(theSituationFeatures);
+     aDGTTool->SetDatumToGeomTol(aDatL, theGDTL);
+     if (aDatObj->GetPresentation().IsNull())
+     {
+@@ -3850,6 +3864,168 @@ bool STEPCAFControl_Reader::setDatumToXCAF(
+   return true;
+ }
+ 
++// What a datum reference (compartment or common datum element) gives its datums.
++struct DatumReferenceModifiers
++{
++  NCollection_Sequence<XCAFDimTolObjects_DatumSingleModif>                    Modifiers;
++  XCAFDimTolObjects_DatumModifWithValue                                       ModifWithVal =
++    XCAFDimTolObjects_DatumModifWithValue_None;
++  double                                                                      ModifValue = 0.;
++  NCollection_Sequence<std::pair<XCAFDimTolObjects_DatumSingleModif, gp_Ax1>> SituationFeatures;
++};
++
++// Adds a datum reference's modifiers. A modifier with value whose length has no usable unit is
++// left out.
++static void readDatumModifiers(
++  const occ::handle<NCollection_HArray1<StepDimTol_DatumReferenceModifier>>& theStepModifiers,
++  const StepData_Factors&                                                    theLocalFactors,
++  DatumReferenceModifiers&                                                   theMods)
++{
++  if (theStepModifiers.IsNull())
++  {
++    return;
++  }
++  for (int i = theStepModifiers->Lower(); i <= theStepModifiers->Upper(); i++)
++  {
++    const StepDimTol_DatumReferenceModifier& aModif = theStepModifiers->Value(i);
++    if (aModif.CaseNumber() == 2)
++    {
++      // a value not in the schema is -1
++      const int aValue = aModif.SimpleDatumReferenceModifierMember()->Int();
++      if (aValue >= 0)
++      {
++        theMods.Modifiers.Append((XCAFDimTolObjects_DatumSingleModif)aValue);
++      }
++      continue;
++    }
++    const occ::handle<StepDimTol_DatumReferenceModifierWithValue> aWithVal =
++      aModif.DatumReferenceModifierWithValue();
++    if (aWithVal.IsNull() || aWithVal->ModifierValue().IsNull())
++    {
++      continue;
++    }
++    StepBasic_Unit anUnit = aWithVal->ModifierValue()->UnitComponent();
++    if (anUnit.IsNull() || anUnit.CaseNum(anUnit.Value()) != 1)
++    {
++      continue;
++    }
++    STEPConstruct_UnitContext anUnitCtx;
++    anUnitCtx.ComputeFactors(anUnit.NamedUnit(), theLocalFactors);
++    theMods.ModifWithVal =
++      (XCAFDimTolObjects_DatumModifWithValue)(aWithVal->ModifierType() + 1);
++    theMods.ModifValue =
++      aWithVal->ModifierValue()->ValueComponent() * anUnitCtx.LengthFactor();
++  }
++}
++
++// The factors of a representation's own units, for geometry given in it.
++static StepData_Factors representationFactors(const occ::handle<StepRepr_Representation>&   theRep,
++                                              const occ::handle<Transfer_TransientProcess>& theTP,
++                                              const StepData_Factors& theLocalFactors)
++{
++  StepData_Factors aFactors = theLocalFactors;
++  if (!theRep.IsNull())
++  {
++    XSAlgo_ShapeProcessor::PrepareForTransfer();
++    STEPControl_ActorRead anActor(theTP->Model());
++    anActor.PrepareUnits(theRep, theTP, aFactors);
++  }
++  return aFactors;
++}
++
++// Adds the situation features of a datum reference: the point, line or plane it is related to by
++// a shape_aspect_relationship named 'point/line/plane situation feature', through a geometric
++// item usage (CAx-IF PMI RP Figure 66).
++static void readSituationFeatures(
++  const occ::handle<StepRepr_ShapeAspect>&      theRef,
++  const occ::handle<Transfer_TransientProcess>& theTP,
++  const StepData_Factors&                       theLocalFactors,
++  NCollection_Sequence<std::pair<XCAFDimTolObjects_DatumSingleModif, gp_Ax1>>& theFeatures)
++{
++  const Interface_Graph& aGraph = theTP->Graph();
++  for (Interface_EntityIterator anIter = aGraph.Sharings(theRef); anIter.More(); anIter.Next())
++  {
++    const occ::handle<StepRepr_ShapeAspectRelationship> aSAR =
++      occ::down_cast<StepRepr_ShapeAspectRelationship>(anIter.Value());
++    if (aSAR.IsNull() || aSAR->Name().IsNull() || aSAR->RelatingShapeAspect() != theRef
++        || aSAR->RelatedShapeAspect().IsNull())
++    {
++      continue;
++    }
++    TCollection_AsciiString aName = aSAR->Name()->String();
++    aName.LeftAdjust();
++    aName.RightAdjust();
++    aName.LowerCase();
++    XCAFDimTolObjects_DatumSingleModif aType;
++    if (aName == "point situation feature")
++    {
++      aType = XCAFDimTolObjects_DatumSingleModif_Point;
++    }
++    else if (aName == "line situation feature")
++    {
++      aType = XCAFDimTolObjects_DatumSingleModif_Line;
++    }
++    else if (aName == "plane situation feature")
++    {
++      aType = XCAFDimTolObjects_DatumSingleModif_Plane;
++    }
++    else
++    {
++      continue;
++    }
++    for (Interface_EntityIterator anIterSA = aGraph.Sharings(aSAR->RelatedShapeAspect());
++         anIterSA.More();
++         anIterSA.Next())
++    {
++      const occ::handle<StepAP242_ItemIdentifiedRepresentationUsage> aUsage =
++        occ::down_cast<StepAP242_ItemIdentifiedRepresentationUsage>(anIterSA.Value());
++      if (aUsage.IsNull() || aUsage->IsKind(STANDARD_TYPE(StepAP242_DraughtingModelItemAssociation))
++          || aUsage->NbIdentifiedItem() < 1)
++      {
++        continue;
++      }
++      const occ::handle<StepRepr_RepresentationItem> anItem = aUsage->IdentifiedItemValue(1);
++      const StepData_Factors                         aFactors =
++        representationFactors(aUsage->UsedRepresentation(), theTP, theLocalFactors);
++      gp_Ax1                                         anAxis;
++      bool                                           isRead = false;
++      if (const occ::handle<StepGeom_Plane> aPlane = occ::down_cast<StepGeom_Plane>(anItem))
++      {
++        const occ::handle<Geom_Plane> aGeom = StepToGeom::MakePlane(aPlane, aFactors);
++        isRead = !aGeom.IsNull();
++        anAxis = isRead ? aGeom->Axis() : anAxis;
++      }
++      else if (const occ::handle<StepGeom_Line> aLine = occ::down_cast<StepGeom_Line>(anItem))
++      {
++        const occ::handle<Geom_Line> aGeom = StepToGeom::MakeLine(aLine, aFactors);
++        isRead = !aGeom.IsNull();
++        anAxis = isRead ? aGeom->Position() : anAxis;
++      }
++      else if (const occ::handle<StepGeom_Axis2Placement3d> aPlacement =
++                 occ::down_cast<StepGeom_Axis2Placement3d>(anItem))
++      {
++        const occ::handle<Geom_Axis2Placement> aGeom =
++          StepToGeom::MakeAxis2Placement(aPlacement, aFactors);
++        isRead = !aGeom.IsNull();
++        anAxis = isRead ? aGeom->Ax2().Axis() : anAxis;
++      }
++      else if (const occ::handle<StepGeom_CartesianPoint> aPoint =
++                 occ::down_cast<StepGeom_CartesianPoint>(anItem))
++      {
++        const occ::handle<Geom_CartesianPoint> aGeom =
++          StepToGeom::MakeCartesianPoint(aPoint, aFactors);
++        isRead = !aGeom.IsNull();
++        anAxis = isRead ? gp_Ax1(aGeom->Pnt(), gp::DZ()) : anAxis;
++      }
++      if (isRead)
++      {
++        theFeatures.Append({aType, anAxis});
++        break;
++      }
++    }
++  }
++}
++
+ //=================================================================================================
+ 
+ bool STEPCAFControl_Reader::readDatumsAP242(const occ::handle<Standard_Transient>&    theEnt,
+@@ -3887,8 +4063,10 @@ bool STEPCAFControl_Reader::readDatumsAP242(const occ::handle<Standard_Transient
+             if (theGDTL.FindAttribute(XCAFDoc_GeomTolerance::GetID(), aTol))
+             {
+               occ::handle<XCAFDimTolObjects_GeomToleranceObject> anObj = aTol->GetObject();
+-              const occ::handle<Geom_Axis2Placement>             aGeomAx2 =
+-                StepToGeom::MakeAxis2Placement(anAx, theLocalFactors);
++              // in the units of the representation it is used in
++              const occ::handle<Geom_Axis2Placement> aGeomAx2 = StepToGeom::MakeAxis2Placement(
++                anAx,
++                representationFactors(aAxGISUI->UsedRepresentation(), aTP, theLocalFactors));
+               if (!aGeomAx2.IsNull())
+               {
+                 anObj->SetAxis(aGeomAx2->Ax2());
+@@ -3905,141 +4083,55 @@ bool STEPCAFControl_Reader::readDatumsAP242(const occ::handle<Standard_Transient
+           aDS->Constituents();
+         if (!aDRCA.IsNull())
+         {
+-          for (int i = aDRCA->Lower(); i <= aDRCA->Upper(); i++)
+-          {
+-            occ::handle<StepDimTol_DatumReferenceCompartment> aDRC = aDRCA->Value(i);
+-            // gete modifiers
+-            occ::handle<NCollection_HArray1<StepDimTol_DatumReferenceModifier>> aModif =
+-              aDRC->Modifiers();
+-            NCollection_Sequence<XCAFDimTolObjects_DatumSingleModif> aXCAFModifiers;
+-            XCAFDimTolObjects_DatumModifWithValue                    aXCAFModifWithVal =
+-              XCAFDimTolObjects_DatumModifWithValue_None;
+-            double aModifValue = 0;
+-            if (!aModif.IsNull())
+-            {
+-              for (int m = aModif->Lower(); m <= aModif->Upper(); m++)
++          // A compartment's modifiers and situation features go to all its datums, a common datum
++          // element's to its own; nested common datums are flattened into the compartment. An
++          // element nested in itself (a malformed file) is not read again.
++          std::vector<const Standard_Transient*> aPath;
++          std::function<void(const occ::handle<StepDimTol_GeneralDatumReference>&,
++                             DatumReferenceModifiers)>
++            readReference = [&](const occ::handle<StepDimTol_GeneralDatumReference>& theRef,
++                                DatumReferenceModifiers                               theMods) {
++              if (std::find(aPath.begin(), aPath.end(), theRef.get()) != aPath.end())
+               {
+-                if (aModif->Value(m).CaseNumber() == 2)
+-                {
+-                  aXCAFModifiers.Append((XCAFDimTolObjects_DatumSingleModif)aModif->Value(m)
+-                                          .SimpleDatumReferenceModifierMember()
+-                                          ->Value());
+-                }
+-                else if (aModif->Value(m).CaseNumber() == 1)
+-                {
 -                  aXCAFModifWithVal =
 -                    (XCAFDimTolObjects_DatumModifWithValue)(aModif->Value(m)
 -                                                              .DatumReferenceModifierWithValue()
 -                                                              ->ModifierType()
 -                                                            + 1);
-                   double aVal = aModif->Value(m)
-                                   .DatumReferenceModifierWithValue()
-                                   ->ModifierValue()
-@@ -3948,6 +3943,11 @@ bool STEPCAFControl_Reader::readDatumsAP242(const occ::handle<Standard_Transient
-                   {
-                     continue;
-                   }
-+                  aXCAFModifWithVal =
-+                    (XCAFDimTolObjects_DatumModifWithValue)(aModif->Value(m)
-+                                                              .DatumReferenceModifierWithValue()
-+                                                              ->ModifierType()
-+                                                            + 1);
-                   occ::handle<StepBasic_NamedUnit> NU = anUnit.NamedUnit();
-                   STEPConstruct_UnitContext        anUnitCtx;
-                   anUnitCtx.ComputeFactors(NU, theLocalFactors);
-@@ -3978,7 +3978,12 @@ bool STEPCAFControl_Reader::readDatumsAP242(const occ::handle<Standard_Transient
+-                  double aVal = aModif->Value(m)
+-                                  .DatumReferenceModifierWithValue()
+-                                  ->ModifierValue()
+-                                  ->ValueComponent();
+-                  StepBasic_Unit anUnit = aModif->Value(m)
+-                                            .DatumReferenceModifierWithValue()
+-                                            ->ModifierValue()
+-                                            ->UnitComponent();
+-                  if (anUnit.IsNull())
+-                  {
+-                    continue;
+-                  }
+-                  if (!(anUnit.CaseNum(anUnit.Value()) == 1))
+-                  {
+-                    continue;
+-                  }
+-                  occ::handle<StepBasic_NamedUnit> NU = anUnit.NamedUnit();
+-                  STEPConstruct_UnitContext        anUnitCtx;
+-                  anUnitCtx.ComputeFactors(NU, theLocalFactors);
+-                  aModifValue = aVal * anUnitCtx.LengthFactor();
+-                }
++                return;
+               }
+-            }
+-            aPositionCounter++;
+-            Interface_EntityIterator anIterDRC = aGraph.Shareds(aDRC);
+-            for (anIterDRC.Start(); anIterDRC.More(); anIterDRC.Next())
+-            {
+-
+-              if (anIterDRC.Value()->IsKind(STANDARD_TYPE(StepDimTol_Datum)))
++              aPath.push_back(theRef.get());
++              readDatumModifiers(theRef->Modifiers(), theLocalFactors, theMods);
++              readSituationFeatures(theRef, aTP, theLocalFactors, theMods.SituationFeatures);
++              StepDimTol_DatumOrCommonDatum aBase = theRef->Base();
++              if (!aBase.Datum().IsNull())
                {
-                 occ::handle<StepDimTol_DatumReferenceElement> aDRE =
-                   occ::down_cast<StepDimTol_DatumReferenceElement>(anIterDRC.Value());
+-                occ::handle<StepDimTol_Datum> aD =
+-                  occ::down_cast<StepDimTol_Datum>(anIterDRC.Value());
+-                setDatumToXCAF(aD,
++                setDatumToXCAF(aBase.Datum(),
+                                theGDTL,
+                                aPositionCounter,
+-                               aXCAFModifiers,
+-                               aXCAFModifWithVal,
+-                               aModifValue,
++                               theMods.Modifiers,
++                               theMods.ModifWithVal,
++                               theMods.ModifValue,
++                               theMods.SituationFeatures,
+                                theDoc,
+                                theWS,
+                                theLocalFactors);
+               }
+-              else if (anIterDRC.Value()->IsKind(STANDARD_TYPE(StepDimTol_DatumReferenceElement)))
++              else if (const occ::handle<
++                         NCollection_HArray1<occ::handle<StepDimTol_DatumReferenceElement>>>
++                         anElems = aBase.CommonDatumList())
+               {
+-                occ::handle<StepDimTol_DatumReferenceElement> aDRE =
+-                  occ::down_cast<StepDimTol_DatumReferenceElement>(anIterDRC.Value());
 -                // get modifiers from group of datums
-+                // the compartment's modifiers and the element's own: those of one element of a
-+                // common datum (A-B) do not apply to the next
-+                NCollection_Sequence<XCAFDimTolObjects_DatumSingleModif> anElemModifiers =
-+                  aXCAFModifiers;
-+                XCAFDimTolObjects_DatumModifWithValue anElemModifWithVal = aXCAFModifWithVal;
-+                double                                anElemModifValue   = aModifValue;
-                 occ::handle<NCollection_HArray1<StepDimTol_DatumReferenceModifier>> aModifE =
-                   aDRE->Modifiers();
-                 if (!aModifE.IsNull())
-@@ -3987,17 +3992,12 @@ bool STEPCAFControl_Reader::readDatumsAP242(const occ::handle<Standard_Transient
+-                occ::handle<NCollection_HArray1<StepDimTol_DatumReferenceModifier>> aModifE =
+-                  aDRE->Modifiers();
+-                if (!aModifE.IsNull())
++                for (int k = anElems->Lower(); k <= anElems->Upper(); k++)
+                 {
+-                  for (int k = aModifE->Lower(); k <= aModifE->Upper(); k++)
++                  if (!anElems->Value(k).IsNull())
                    {
-                     if (aModifE->Value(k).CaseNumber() == 2)
-                     {
+-                    if (aModifE->Value(k).CaseNumber() == 2)
+-                    {
 -                      aXCAFModifiers.Append((XCAFDimTolObjects_DatumSingleModif)aModifE->Value(k)
 -                                              .SimpleDatumReferenceModifierMember()
 -                                              ->Value());
-+                      anElemModifiers.Append((XCAFDimTolObjects_DatumSingleModif)aModifE->Value(k)
-+                                               .SimpleDatumReferenceModifierMember()
-+                                               ->Value());
-                     }
-                     else if (aModifE->Value(k).CaseNumber() == 1)
-                     {
+-                    }
+-                    else if (aModifE->Value(k).CaseNumber() == 1)
+-                    {
 -                      aXCAFModifWithVal =
 -                        (XCAFDimTolObjects_DatumModifWithValue)(aModifE->Value(k)
 -                                                                  .DatumReferenceModifierWithValue()
 -                                                                  ->ModifierType()
 -                                                                + 1);
-                       double aVal = aModifE->Value(k)
-                                       .DatumReferenceModifierWithValue()
-                                       ->ModifierValue()
-@@ -4014,10 +4014,15 @@ bool STEPCAFControl_Reader::readDatumsAP242(const occ::handle<Standard_Transient
-                       {
-                         continue;
-                       }
-+                      anElemModifWithVal =
-+                        (XCAFDimTolObjects_DatumModifWithValue)(aModifE->Value(k)
-+                                                                  .DatumReferenceModifierWithValue()
-+                                                                  ->ModifierType()
-+                                                                + 1);
-                       occ::handle<StepBasic_NamedUnit> NU = anUnit.NamedUnit();
-                       STEPConstruct_UnitContext        anUnitCtx;
-                       anUnitCtx.ComputeFactors(NU, theLocalFactors);
+-                      double aVal = aModifE->Value(k)
+-                                      .DatumReferenceModifierWithValue()
+-                                      ->ModifierValue()
+-                                      ->ValueComponent();
+-                      StepBasic_Unit anUnit = aModifE->Value(k)
+-                                                .DatumReferenceModifierWithValue()
+-                                                ->ModifierValue()
+-                                                ->UnitComponent();
+-                      if (anUnit.IsNull())
+-                      {
+-                        continue;
+-                      }
+-                      if (!(anUnit.CaseNum(anUnit.Value()) == 1))
+-                      {
+-                        continue;
+-                      }
+-                      occ::handle<StepBasic_NamedUnit> NU = anUnit.NamedUnit();
+-                      STEPConstruct_UnitContext        anUnitCtx;
+-                      anUnitCtx.ComputeFactors(NU, theLocalFactors);
 -                      aModifValue = aVal * anUnitCtx.LengthFactor();
-+                      anElemModifValue = aVal * anUnitCtx.LengthFactor();
-                     }
-                   }
-                 }
-@@ -4031,9 +4036,9 @@ bool STEPCAFControl_Reader::readDatumsAP242(const occ::handle<Standard_Transient
-                     setDatumToXCAF(aD,
-                                    theGDTL,
-                                    aPositionCounter,
+-                    }
+-                  }
+-                }
+-                Interface_EntityIterator anIterDRE = aGraph.Shareds(aDRE);
+-                for (anIterDRE.Start(); anIterDRE.More(); anIterDRE.Next())
+-                {
+-                  if (anIterDRE.Value()->IsKind(STANDARD_TYPE(StepDimTol_Datum)))
+-                  {
+-                    occ::handle<StepDimTol_Datum> aD =
+-                      occ::down_cast<StepDimTol_Datum>(anIterDRE.Value());
+-                    setDatumToXCAF(aD,
+-                                   theGDTL,
+-                                   aPositionCounter,
 -                                   aXCAFModifiers,
 -                                   aXCAFModifWithVal,
 -                                   aModifValue,
-+                                   anElemModifiers,
-+                                   anElemModifWithVal,
-+                                   anElemModifValue,
-                                    theDoc,
-                                    theWS,
-                                    theLocalFactors);
+-                                   theDoc,
+-                                   theWS,
+-                                   theLocalFactors);
++                    readReference(anElems->Value(k), theMods);
+                   }
+                 }
+               }
++              aPath.pop_back();
++            };
++          for (int i = aDRCA->Lower(); i <= aDRCA->Upper(); i++)
++          {
++            aPositionCounter++;
++            if (!aDRCA->Value(i).IsNull())
++            {
++              readReference(aDRCA->Value(i), DatumReferenceModifiers());
+             }
+           }
+         }
+diff --git a/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.hxx b/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.hxx
+index 826c0f14..1ffc7656 100644
+--- a/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.hxx
++++ b/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.hxx
+@@ -32,6 +32,9 @@
+ #include <NCollection_HSequence.hxx>
+ #include <XCAFDimTolObjects_DatumSingleModif.hxx>
+ #include <XCAFDimTolObjects_DatumModifWithValue.hxx>
++#include <gp_Ax1.hxx>
++
++#include <utility>
+ 
+ class XSControl_WorkSession;
+ class TDataStd_NamedData;
+@@ -453,6 +456,8 @@ private:
+     const NCollection_Sequence<XCAFDimTolObjects_DatumSingleModif>& theXCAFModifiers,
+     const XCAFDimTolObjects_DatumModifWithValue                     theXCAFModifWithVal,
+     const double                                                    theModifValue,
++    const NCollection_Sequence<std::pair<XCAFDimTolObjects_DatumSingleModif, gp_Ax1>>&
++                                                                    theSituationFeatures,
+     const occ::handle<TDocStd_Document>&                            theDoc,
+     const occ::handle<XSControl_WorkSession>&                       theWS,
+     const StepData_Factors& theLocalFactors = StepData_Factors());
+diff --git a/src/DataExchange/TKDESTEP/StepDimTol/StepDimTol_SimpleDatumReferenceModifierMember.cxx b/src/DataExchange/TKDESTEP/StepDimTol/StepDimTol_SimpleDatumReferenceModifierMember.cxx
+index fd37c14b..0178386b 100644
+--- a/src/DataExchange/TKDESTEP/StepDimTol/StepDimTol_SimpleDatumReferenceModifierMember.cxx
++++ b/src/DataExchange/TKDESTEP/StepDimTol/StepDimTol_SimpleDatumReferenceModifierMember.cxx
+@@ -59,11 +59,9 @@ const char* StepDimTol_SimpleDatumReferenceModifierMember::EnumText() const
+ void StepDimTol_SimpleDatumReferenceModifierMember::SetEnumText(const int /*theValue*/,
+                                                                 const char* const theText)
+ {
++  // -1 for a value not in the schema: left at 0 it read as .ANY_CROSS_SECTION.
+   int aVal = tool.Value(theText);
+-  if (aVal >= 0)
+-  {
+-    SetInt(aVal);
+-  }
++  SetInt(aVal >= 0 ? aVal : -1);
+ }
+ 
+ //=================================================================================================
 diff --git a/src/DataExchange/TKXCAF/XCAFDimTolObjects/XCAFDimTolObjects_DatumObject.cxx b/src/DataExchange/TKXCAF/XCAFDimTolObjects/XCAFDimTolObjects_DatumObject.cxx
-index ac10d822..9455afaf 100644
+index ac10d822..cec93505 100644
 --- a/src/DataExchange/TKXCAF/XCAFDimTolObjects/XCAFDimTolObjects_DatumObject.cxx
 +++ b/src/DataExchange/TKXCAF/XCAFDimTolObjects/XCAFDimTolObjects_DatumObject.cxx
 @@ -19,11 +19,14 @@ IMPLEMENT_STANDARD_RTTIEXT(XCAFDimTolObjects_DatumObject, Standard_Transient)
@@ -127,3 +488,124 @@ index ac10d822..9455afaf 100644
  }
  
  //=================================================================================================
+@@ -53,6 +56,7 @@ XCAFDimTolObjects_DatumObject::XCAFDimTolObjects_DatumObject(
+   myPresentation      = theObj->myPresentation;
+   mySemanticName      = theObj->mySemanticName;
+   myPresentationName  = theObj->myPresentationName;
++  mySituationFeatures = theObj->mySituationFeatures;
+ }
+ 
+ //=================================================================================================
+diff --git a/src/DataExchange/TKXCAF/XCAFDimTolObjects/XCAFDimTolObjects_DatumObject.hxx b/src/DataExchange/TKXCAF/XCAFDimTolObjects/XCAFDimTolObjects_DatumObject.hxx
+index 28c1f919..c8a3d619 100644
+--- a/src/DataExchange/TKXCAF/XCAFDimTolObjects/XCAFDimTolObjects_DatumObject.hxx
++++ b/src/DataExchange/TKXCAF/XCAFDimTolObjects/XCAFDimTolObjects_DatumObject.hxx
+@@ -26,7 +26,10 @@
+ #include <Standard_Real.hxx>
+ #include <TopoDS_Shape.hxx>
+ #include <Standard_Transient.hxx>
++#include <gp_Ax1.hxx>
+ #include <gp_Ax2.hxx>
++
++#include <utility>
+ class XCAFDimTolObjects_DatumObject;
+ 
+ //! Access object to store datum
+@@ -179,6 +182,22 @@ public:
+   //! etc)
+   bool HasDatumTargetParams() { return myIsValidDT; }
+ 
++  //! Returns the situation features the datum is reduced to ([PT] [SL] [PL], CAx-IF PMI RP
++  //! Figure 66): the modifier (Point, Line or Plane) and the point, the line or the plane's normal
++  //! through its location.
++  const NCollection_Sequence<std::pair<XCAFDimTolObjects_DatumSingleModif, gp_Ax1>>&
++    GetSituationFeatures() const
++  {
++    return mySituationFeatures;
++  }
++
++  //! Sets the situation features the datum is reduced to.
++  void SetSituationFeatures(
++    const NCollection_Sequence<std::pair<XCAFDimTolObjects_DatumSingleModif, gp_Ax1>>& theFeatures)
++  {
++    mySituationFeatures = theFeatures;
++  }
++
+   //! Dumps the content of me into the stream
+   Standard_EXPORT void DumpJson(Standard_OStream& theOStream, int theDepth = -1) const;
+ 
+@@ -207,6 +226,7 @@ private:
+   TopoDS_Shape                                             myPresentation;
+   occ::handle<TCollection_HAsciiString>                    mySemanticName;
+   occ::handle<TCollection_HAsciiString>                    myPresentationName;
++  NCollection_Sequence<std::pair<XCAFDimTolObjects_DatumSingleModif, gp_Ax1>> mySituationFeatures;
+ };
+ 
+ #endif // _XCAFDimTolObjects_DatumObject_HeaderFile
+diff --git a/src/DataExchange/TKXCAF/XCAFDoc/XCAFDoc_Datum.cxx b/src/DataExchange/TKXCAF/XCAFDoc/XCAFDoc_Datum.cxx
+index ca4abc71..863bc808 100644
+--- a/src/DataExchange/TKXCAF/XCAFDoc/XCAFDoc_Datum.cxx
++++ b/src/DataExchange/TKXCAF/XCAFDoc/XCAFDoc_Datum.cxx
+@@ -53,6 +53,7 @@ enum ChildLab
+   ChildLab_Pnt,
+   ChildLab_PntText,
+   ChildLab_Presentation,
++  ChildLab_SituationFeatures,
+   ChildLab_End
+ };
+ 
+@@ -342,6 +343,28 @@ void XCAFDoc_Datum::SetObject(const occ::handle<XCAFDimTolObjects_DatumObject>&
+     }
+   }
+ 
++  // situation features: their modifiers, and per feature its location and direction
++  const NCollection_Sequence<std::pair<XCAFDimTolObjects_DatumSingleModif, gp_Ax1>>& aFeatures =
++    theObject->GetSituationFeatures();
++  if (!aFeatures.IsEmpty())
++  {
++    const TDF_Label                    aLFeat = Label().FindChild(ChildLab_SituationFeatures);
++    occ::handle<TDataStd_IntegerArray> aTypes =
++      TDataStd_IntegerArray::Set(aLFeat, 1, aFeatures.Length());
++    occ::handle<TDataStd_RealArray> anAxes =
++      TDataStd_RealArray::Set(aLFeat, 1, 6 * aFeatures.Length());
++    for (int i = 1; i <= aFeatures.Length(); i++)
++    {
++      const gp_Ax1& anAx = aFeatures.Value(i).second;
++      aTypes->SetValue(i, aFeatures.Value(i).first);
++      for (int k = 1; k <= 3; k++)
++      {
++        anAxes->SetValue(6 * (i - 1) + k, anAx.Location().Coord(k));
++        anAxes->SetValue(6 * (i - 1) + 3 + k, anAx.Direction().Coord(k));
++      }
++    }
++  }
++
+   TopoDS_Shape aPresentation = theObject->GetPresentation();
+   if (!aPresentation.IsNull())
+   {
+@@ -415,6 +438,25 @@ occ::handle<XCAFDimTolObjects_DatumObject> XCAFDoc_Datum::GetObject() const
+     anObj->SetPosition(aPosition->Get());
+   }
+ 
++  occ::handle<TDataStd_IntegerArray> aFeatTypes;
++  occ::handle<TDataStd_RealArray>    aFeatAxes;
++  const TDF_Label                    aLFeat = Label().FindChild(ChildLab_SituationFeatures);
++  if (aLFeat.FindAttribute(TDataStd_IntegerArray::GetID(), aFeatTypes)
++      && aLFeat.FindAttribute(TDataStd_RealArray::GetID(), aFeatAxes)
++      && aFeatAxes->Length() == 6 * aFeatTypes->Length())
++  {
++    NCollection_Sequence<std::pair<XCAFDimTolObjects_DatumSingleModif, gp_Ax1>> aFeatures;
++    for (int i = 0; i < aFeatTypes->Length(); i++)
++    {
++      const int aR = aFeatAxes->Lower() + 6 * i;
++      aFeatures.Append(
++        {(XCAFDimTolObjects_DatumSingleModif)aFeatTypes->Value(aFeatTypes->Lower() + i),
++         gp_Ax1(gp_Pnt(aFeatAxes->Value(aR), aFeatAxes->Value(aR + 1), aFeatAxes->Value(aR + 2)),
++                gp_Dir(aFeatAxes->Value(aR + 3), aFeatAxes->Value(aR + 4), aFeatAxes->Value(aR + 5)))});
++    }
++    anObj->SetSituationFeatures(aFeatures);
++  }
++
+   occ::handle<TDataStd_RealArray> aLoc, aN, aR;
+   if (Label().FindChild(ChildLab_PlaneLoc).FindAttribute(TDataStd_RealArray::GetID(), aLoc)
+       && aLoc->Length() == 3

@@ -59,6 +59,24 @@ describe('pmiLabel', () => {
     const dof: DatumRef = { name: 'A', modifiers: ['dofX', 'maximumMaterial', 'dofY', 'dofU', 'tangent' as DatumModifier] };
     expect(pmiLabel(tol([[dof]]), 'mm')).toBe('Position 0.100 mm | A Ⓜ tangent [x,y,u]');
     expect(pmiInfo(tol([[dof]]), 'mm')).toContainEqual(['Datum modifiers', 'A: maximum material, tangent, degrees of freedom x, y, u']);
+    // Situation features and the datum system's axes (RP Figures 66 and 64), in the info panel
+    const reduced: DatumRef = {
+      name: 'A',
+      modifiers: ['plane', 'point'],
+      situations: [
+        { type: 'plane', origin: [0, 0, 25.4], direction: [0, 0, 1] },
+        { type: 'point', origin: [1, 2, 3] },
+      ],
+    };
+    const datumAxes = { origin: [25.4, 0, 0], x: [0, -1, 0], z: [0, 0, 1] } satisfies PmiItem['datumAxes'];
+    const axes = { ...tol([[reduced]]), datumAxes };
+    expect(pmiLabel(axes, 'in')).toBe('Position 0.0039 in | A [PL] [PT]');
+    expect(pmiInfo(axes, 'in')).toEqual(
+      expect.arrayContaining([
+        ['Situation features (part)', 'A: plane at (0.0000 in, 0.0000 in, 1.0000 in) normal (0, 0, 1); A: point at (0.0394 in, 0.0787 in, 0.1181 in)'],
+        ['Datum axes (part)', 'origin (1.0000 in, 0.0000 in, 0.0000 in), X (0, -1, 0), Z (0, 0, 1)'],
+      ]),
+    );
     const inch: DatumRef = { name: 'A', modifiers: ['point'], sizeType: 'spherical', size: 25.4 };
     expect(pmiLabel(tol([[inch]]), 'in')).toBe('Position 0.0039 in | A [PT] [SØ1.0000 in]');
   });

@@ -625,23 +625,30 @@ const tests = {
     }
   },
 
-  'datum reference frame: precedence, common datums and datum modifiers, in inches (PMI RP 6.9.7, 6.9.8)'() {
+  'datum reference frame: precedence, common datums, modifiers, axes and situation features, in inches (PMI RP 6.9.7, 6.9.8)'() {
     const s = new Step();
-    const { part, length, aspect } = tolerancedBlock(s, true);
+    const { ctx, part, length, aspect } = tolerancedBlock(s, true);
     const top = aspect('top');
     const datum = Object.fromEntries([...'ABCDEF'].map((n) => [n, s.add(`DATUM('',$,${part.pds},.F.,'${n}')`)]));
     const modifiers = (list) => (list.length ? `(${list.join(',')})` : '$');
     const simple = (...names) => names.map((n) => `SIMPLE_DATUM_REFERENCE_MODIFIER(.${n}.)`);
-    // base: a datum letter, or a list of [letter, element modifiers] for a common datum
-    const compartment = (base, ...mods) => {
-      const ref = typeof base === 'string' ? datum[base]
-        : `COMMON_DATUM_LIST((${base.map(([n, m = []]) => s.add(`DATUM_REFERENCE_ELEMENT('',$,${part.pds},.F.,${datum[n]},${modifiers(m)})`)).join(',')}))`;
-      return s.add(`DATUM_REFERENCE_COMPARTMENT('',$,${part.pds},.F.,${ref},${modifiers(mods)})`);
-    };
-    // Position tolerances told apart by value (in inches)
+    // base: a datum letter, or a list of [base, element modifiers] for a common datum (nested if a base is a list)
+    const base = (b) => typeof b === 'string' ? datum[b]
+      : `COMMON_DATUM_LIST((${b.map(([n, m = []]) => s.add(`DATUM_REFERENCE_ELEMENT('',$,${part.pds},.F.,${base(n)},${modifiers(m)})`)).join(',')}))`;
+    const compartment = (b, ...mods) => s.add(`DATUM_REFERENCE_COMPARTMENT('',$,${part.pds},.F.,${base(b)},${modifiers(mods)})`);
+    // Position tolerances told apart by value (in inches); returns the datum system
     const position = (value, ...compartments) => {
       const system = s.add(`DATUM_SYSTEM('',$,${part.pds},.F.,(${compartments.join(',')}))`);
       s.add(`( GEOMETRIC_TOLERANCE('','',${length(value)},${top}) GEOMETRIC_TOLERANCE_WITH_DATUM_REFERENCE((${system})) POSITION_TOLERANCE() )`);
+      return system;
+    };
+    // Geometry in a constructive geometry representation, with a usage from a shape aspect (RP Figure 66)
+    const cgr = s.add(`CONSTRUCTIVE_GEOMETRY_REPRESENTATION('',(${axis(s)}),${ctx})`);
+    s.add(`CONSTRUCTIVE_GEOMETRY_REPRESENTATION_RELATIONSHIP('','',${part.sr},${cgr})`);
+    const situation = (ref, kind, item) => {
+      const sa = s.add(`SHAPE_ASPECT('','',${part.pds},.F.)`);
+      s.add(`GEOMETRIC_ITEM_SPECIFIC_USAGE('','',${sa},${cgr},${item})`);
+      s.add(`SHAPE_ASPECT_RELATIONSHIP('${kind} situation feature',$,${ref},${sa})`);
     };
     // A | B | C BSC ▷ (RP Figure 62)
     position(0.01, compartment('A'), compartment('B'), compartment('C', ...simple('BASIC', 'TRANSLATION')));
@@ -655,6 +662,16 @@ const tests = {
     // B with a distance in no unit: left out, not read as [0]
     const noUnit = s.add(`DATUM_REFERENCE_MODIFIER_WITH_VALUE(.DISTANCE.,${s.add('LENGTH_MEASURE_WITH_UNIT(LENGTH_MEASURE(3.),$)')})`);
     position(0.05, compartment('B', noUnit));
+    // A Ⓜ-(B-C Ⓛ) Ⓕ: a nested common datum, flattened
+    position(0.06, compartment([['A', simple('MAXIMUM_MATERIAL_REQUIREMENT')], [[['B'], ['C', simple('LEAST_MATERIAL_REQUIREMENT')]], simple('FREE_STATE')]]));
+    // A [x,y,z] with the datum system's axis system (RP Figure 64), at (1, 2, 3) in with x along -y
+    const dof = position(0.07, compartment('A', ...simple('DEGREE_OF_FREEDOM_CONSTRAINT_X', 'DEGREE_OF_FREEDOM_CONSTRAINT_Y', 'DEGREE_OF_FREEDOM_CONSTRAINT_Z')));
+    s.add(`GEOMETRIC_ITEM_SPECIFIC_USAGE('','',${dof},${part.sr},${axis(s, [1, 2, 3], [0, 0, 1], [0, -1, 0])})`);
+    // A [PL] [SL]: the plane z = 1 in, the line through (0, 0.5, 0) in along x
+    const reduced = compartment('A', ...simple('PLANE', 'LINE'));
+    situation(reduced, 'plane', s.add(`PLANE('',${axis(s, [0, 0, 1])})`));
+    situation(reduced, 'line', s.add(`LINE('',${pt(s, [0, 0.5, 0])},${s.add(`VECTOR('',${dir(s, [1, 0, 0])},1.)`)})`));
+    position(0.08, reduced);
     const m = read('datum-frames.stp', s.text(AP242));
 
     const frames = m.pmi.filter((p) => p.kind === 'tolerance').sort((a, b) => a.value[0] - b.value[0]).map((p) => p.datums);
@@ -668,6 +685,39 @@ const tests = {
     assert.deepEqual([a.name, a.modifiers, a.sizeType], ['A', ['plane', 'dofX', 'dofY'], 'diameter']);
     near(a.size, 12.7, 1e-9, 'datum size in mm');
     assert.deepEqual(frames[4], [[{ name: 'B' }]]);
+    assert.deepEqual(frames[5], [[
+      { name: 'A', modifiers: mmc },
+      { name: 'B', modifiers: ['freeState'] },
+      { name: 'C', modifiers: ['freeState', 'leastMaterial'] },
+    ]]);
+    // absolute: many expected components are 0
+    const close = (actual, expected, what) => assert.ok(Math.abs(actual - expected) <= 1e-9, `${what}: ${actual} is not ${expected}`);
+    const axes = m.pmi.filter((p) => p.kind === 'tolerance').sort((a, b) => a.value[0] - b.value[0])[6].datumAxes;
+    assert.ok(axes, 'datum system axes');
+    [['origin', [25.4, 50.8, 76.2]], ['x', [0, -1, 0]], ['z', [0, 0, 1]]].forEach(([key, v]) =>
+      v.forEach((c, i) => close(axes[key][i], c, `datum axes ${key}`)));
+    const [[reducedA]] = frames[7];
+    assert.deepEqual(reducedA.situations.map((f) => f.type), ['plane', 'line']);
+    const [plane, line] = reducedA.situations;
+    [[plane.origin, [0, 0, 25.4]], [plane.direction, [0, 0, 1]], [line.origin, [0, 12.7, 0]], [line.direction, [1, 0, 0]]]
+      .forEach(([actual, expected]) => expected.forEach((c, i) => close(actual[i], c, 'situation feature')));
+
+    // Malformed: a common datum element nested in itself, and a modifier not in the schema. The
+    // file still loads; the element is read once, the modifier dropped (OCCT read it as [ACS]).
+    const bad = new Step();
+    const b = tolerancedBlock(bad);
+    const datumA = bad.add(`DATUM('',$,${b.part.pds},.F.,'A')`);
+    const element = bad.add(`DATUM_REFERENCE_ELEMENT('',$,${b.part.pds},.F.,${datumA},$)`);
+    const self = `#${bad.lines.length + 1}`;
+    bad.add(`DATUM_REFERENCE_ELEMENT('',$,${b.part.pds},.F.,COMMON_DATUM_LIST((${element},${self})),$)`);
+    const badCompartments = [
+      bad.add(`DATUM_REFERENCE_COMPARTMENT('',$,${b.part.pds},.F.,COMMON_DATUM_LIST((${self})),$)`),
+      bad.add(`DATUM_REFERENCE_COMPARTMENT('',$,${b.part.pds},.F.,${datumA},(SIMPLE_DATUM_REFERENCE_MODIFIER(.BOGUS.)))`),
+    ];
+    const badSystem = bad.add(`DATUM_SYSTEM('',$,${b.part.pds},.F.,(${badCompartments.join(',')}))`);
+    bad.add(`( GEOMETRIC_TOLERANCE('','',${b.length(0.1)},${b.aspect('top')}) GEOMETRIC_TOLERANCE_WITH_DATUM_REFERENCE((${badSystem})) POSITION_TOLERANCE() )`);
+    const malformed = read('datum-frames-malformed.stp', bad.text(AP242));
+    assert.deepEqual(malformed.pmi.find((p) => p.kind === 'tolerance').datums, [[{ name: 'A' }], [{ name: 'A' }]]);
   },
 
   'assembly PMI across files: external element references (EXTERNAL_ANCHOR, product_definition_reference)'() {

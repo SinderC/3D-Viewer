@@ -113,7 +113,11 @@ export interface PmiItem {
   unequal?: [number];
   /** Datum reference frame: compartments, primary first; several datums in one are a common datum (A-B). */
   datums?: DatumRef[][];
+  /** Axis system of the datum reference frame (PMI RP Figure 64), in the owner's coordinates. */
+  datumAxes?: { origin: Vec3; x: Vec3; z: Vec3 };
 }
+
+export type Vec3 = [number, number, number];
 
 /** A datum a tolerance references, with its modifiers (PMI RP Table 15), e.g. B Ⓜ [Ø10]. */
 export interface DatumRef {
@@ -122,6 +126,9 @@ export interface DatumRef {
   /** Datum reference modifier with value (PMI RP Figure 65), in mm. */
   sizeType?: 'diameter' | 'distance' | 'projected' | 'spherical';
   size?: number;
+  /** Situation features of [PT] [SL] [PL] (PMI RP Figure 66): a point, or a line or plane through
+   * `origin` along `direction` (the plane's normal), in the owner's coordinates. */
+  situations?: { type: 'point' | 'line' | 'plane'; origin: Vec3; direction?: Vec3 }[];
 }
 
 /** Datum reference modifiers OCCT reads (PMI RP Table 15). */
@@ -172,8 +179,8 @@ export type ToleranceModifier =
 /** Saved view: the direction the camera looks, and the PMI it shows. */
 export interface SavedView {
   name: string;
-  direction: [number, number, number];
-  up: [number, number, number];
+  direction: Vec3;
+  up: Vec3;
   pmi: number[];
 }
 

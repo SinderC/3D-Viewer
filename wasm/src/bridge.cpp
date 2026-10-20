@@ -239,6 +239,9 @@ struct DatumRef
   std::vector<std::string> modifiers; // e.g. maximumMaterial, basic, dofX
   std::string              sizeType;  // modifier with value: diameter, distance, projected or spherical
   double                   size = 0;
+  // Situation features of [PT] [SL] [PL]: point, line or plane, as a point and a direction (the
+  // line's, the plane's normal; none for a point)
+  std::vector<std::pair<std::string, gp_Ax1>> situations;
 };
 
 // PMI (STEP GD&T): one dimension, geometric tolerance, datum or note, with its drawn presentation.
@@ -271,6 +274,7 @@ struct Pmi
   // Datum reference frame: compartments in precedence order; several datums in one are a
   // common datum (A-B).
   std::vector<std::vector<DatumRef>> datums;
+  std::optional<gp_Ax2>              datumAxes; // axis system of the datum reference frame, if given
 };
 
 // A saved view (STEP camera model) with the PMI it shows. OCCT keeps no camera position, so the
@@ -1220,6 +1224,8 @@ private:
       if (const std::optional<double> unequal = obj->GetUnequalDisplacement())
         p.unequal = {*unequal};
       p.datums = datumFrame(l);
+      if (obj->HasAxis())
+        p.datumAxes = obj->GetAxis();
       addPmi(l, std::move(p), obj->GetPresentation(), obj->GetPresentationName());
     }
 
@@ -1492,6 +1498,9 @@ private:
       static const char* const kSizeTypes[] = {"", "diameter", "distance", "projected", "spherical"};
       if (size_t(type) < sizeof kSizeTypes / sizeof *kSizeTypes)
         d.sizeType = kSizeTypes[size_t(type)];
+      for (const auto& [modifier, axis] : obj->GetSituationFeatures())
+        if (const char* name = datumModifier(modifier))
+          d.situations.emplace_back(name, axis);
       // A datum set up from targets (A1, A2) comes once per target: the frame names it once.
       std::vector<DatumRef>& compartment = byPosition[obj->GetPosition()];
       const auto same = [&](const DatumRef& c) { return c.name == d.name; };
@@ -2720,6 +2729,14 @@ std::string toJson(const Source& src, const Builder& b)
       o << ",\"bound\":\"" << p.bound << '"';
     if (p.angular)
       o << ",\"angular\":true";
+    if (p.datumAxes)
+    {
+      const gp_XYZ origin = p.datumAxes->Location().XYZ();
+      o << ",\"datumAxes\":{\"origin\":[" << origin.X() << ',' << origin.Y() << ',' << origin.Z() << ']';
+      xyz("x", p.datumAxes->XDirection().XYZ());
+      xyz("z", p.datumAxes->Direction().XYZ());
+      o << '}';
+    }
     if (!p.datums.empty())
     {
       o << ",\"datums\":[";
@@ -2739,6 +2756,20 @@ std::string toJson(const Source& src, const Builder& b)
           }
           if (!d.sizeType.empty())
             o << ",\"sizeType\":\"" << d.sizeType << "\",\"size\":" << d.size;
+          if (!d.situations.empty())
+          {
+            o << ",\"situations\":[";
+            for (size_t f = 0; f < d.situations.size(); ++f)
+            {
+              const auto& [type, axis] = d.situations[f];
+              o << (f ? "," : "") << "{\"type\":\"" << type << '"';
+              xyz("origin", axis.Location().XYZ());
+              if (type != "point")
+                xyz("direction", axis.Direction().XYZ());
+              o << '}';
+            }
+            o << ']';
+          }
           o << '}';
         }
         o << ']';

@@ -30,10 +30,10 @@
   (type, nominal, tolerances, datums; for geometric tolerances also the zone form Ø/SØ, modifiers
   such as Ⓜ Ⓛ Ⓕ CZ, unequally disposed zone (Ⓤ), projected zone length, runout zone angle, maximum
   tolerance and unit basis, and the datum reference frame in precedence order with common datums
-  (A-B) and datum modifiers such as Ⓜ BSC ▷ [PL] [Ø10] [x,y]). Not read: names of zone forms
-  without a symbol, non-uniform zones, affected planes, the ISO 1101 association modifiers, nested
-  common datums, the datum system's degree-of-freedom axes and the situation feature geometry of
-  [PT] [SL] [PL]. Assembly PMI on particular component
+  (A-B, nested ones flattened), datum modifiers such as Ⓜ BSC ▷ [PL] [Ø10] [x,y], the frame's axis
+  system and the situation features of [PT] [SL] [PL], the last two listed in the info panel, not
+  drawn). Not read: names of zone forms without a symbol, non-uniform zones, affected planes and the
+  ISO 1101 association modifiers. Assembly PMI on particular component
   instances is drawn once in the assembly, also when the components are in other files (AP242
   external element references).
 - **Attributes** (user-defined) of parts, and of single component instances, deep ones included.
