@@ -258,6 +258,7 @@ struct Pmi
   std::vector<double>      projected; // projected tolerance zone length, if any
   std::vector<double>      runout;    // runout tolerance zone orientation angle, if any
   std::vector<double>      maxValue;  // maximum upper tolerance, if any
+  std::vector<double>      unequal;   // displacement of an unequally disposed zone (Ⓤ), if any
   std::vector<std::string> datums;
 };
 
@@ -1205,6 +1206,8 @@ private:
         p.runout = {obj->GetValueOfZoneModifier()};
       if (obj->GetMaxValueModifier() > 0)
         p.maxValue = {obj->GetMaxValueModifier()};
+      if (const std::optional<double> unequal = obj->GetUnequalDisplacement())
+        p.unequal = {*unequal};
       LabelSequence datums;
       XCAFDoc_DimTolTool::GetDatumOfTolerLabels(l, datums);
       for (const TDF_Label& d : datums)
@@ -2658,6 +2661,7 @@ std::string toJson(const Source& src, const Builder& b)
     numbers("projected", p.projected);
     numbers("runout", p.runout);
     numbers("maxValue", p.maxValue);
+    numbers("unequal", p.unequal);
     if (!p.bound.empty())
       o << ",\"bound\":\"" << p.bound << '"';
     if (p.angular)

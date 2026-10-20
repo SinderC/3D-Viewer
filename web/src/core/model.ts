@@ -109,6 +109,8 @@ export interface PmiItem {
   runout?: [number];
   /** Maximum upper tolerance (e.g. Ø0.1 Ⓜ, 0.2 max). */
   maxValue?: [number];
+  /** Displacement of an unequally disposed tolerance zone (Ⓤ), towards material added. */
+  unequal?: [number];
   datums?: string[];
 }
 

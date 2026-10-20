@@ -71,11 +71,13 @@ export function pmiLabel(p: PmiItem, unit: UnitId): string {
   if (p.kind === 'datum') return p.type;
   if (p.kind === 'note' || !(p.value || p.range)) return p.name || p.type;
   const per = perUnit(p, unit);
-  // Frame order: value, unit basis, material modifier and its maximum, other modifiers, projected zone
+  // Frame order: value, unequal displacement, unit basis, material modifier and its maximum, other
+  // modifiers, projected zone
   const [material, others] = partition(p.modifiers ?? [], (m) => m === 'maximumMaterial' || m === 'leastMaterial');
   const parts = [
     p.type,
     nominal(p, unit),
+    p.unequal && `Ⓤ ${formatLength(p.unequal[0], unit)}`,
     per && `/ ${per}`,
     ...material.map(symbol),
     p.maxValue && `${formatLength(p.maxValue[0], unit)} max`,
@@ -141,6 +143,7 @@ export function pmiInfo(p: PmiItem, unit: UnitId): [string, string][] {
     ['Deviation', deviation(p, unit)],
     ['Per unit', p.perUnit && `${perUnit(p, unit)} ${p.unitArea ? 'area' : 'length'}`],
     ['Modifiers', p.modifiers?.map(modifierName).join(', ') || undefined],
+    ['Unequally disposed', p.unequal && formatLength(p.unequal[0], unit)],
     ['Projected zone', p.projected && formatLength(p.projected[0], unit)],
     ['Zone angle', p.runout && `${+p.runout[0].toFixed(4)}°`],
     ['Maximum', p.maxValue && formatLength(p.maxValue[0], unit)],

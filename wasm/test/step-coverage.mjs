@@ -161,6 +161,26 @@ function styled(s, item, [r, g, b], context) {
   return s.add(`STYLED_ITEM('',(${style}),${item})`);
 }
 
+// A 1-unit block (inch: in inches) for GD&T: a shape aspect on one of its faces, and a length in its unit.
+function tolerancedBlock(s, inch = false) {
+  const ctx = context(s, inch);
+  const out = {};
+  const part = product(s, ctx, 'block', [box(s, [0, 0, 0], 1, 'ADVANCED_FACE', out)], 'ADVANCED_BREP_SHAPE_REPRESENTATION');
+  const aspect = (name, face = 1) => {
+    const sa = s.add(`SHAPE_ASPECT('${name}','',${part.pds},.T.)`);
+    s.add(`GEOMETRIC_ITEM_SPECIFIC_USAGE('','',${sa},${part.sr},${out.faces[face]})`);
+    return sa;
+  };
+  let unit = s.add('( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.) )');
+  if (inch) {
+    const dims = s.add('DIMENSIONAL_EXPONENTS(1.,0.,0.,0.,0.,0.,0.)');
+    unit = s.add(`( CONVERSION_BASED_UNIT('INCH',${s.add(`LENGTH_MEASURE_WITH_UNIT(LENGTH_MEASURE(25.4),${unit})`)}) LENGTH_UNIT() NAMED_UNIT(${dims}) )`);
+  }
+  const length = (v) => s.add(`LENGTH_MEASURE_WITH_UNIT(LENGTH_MEASURE(${v}),${unit})`);
+  const zone = (tol, form) => s.add(`TOLERANCE_ZONE('','',${part.pds},.F.,(${tol}),${s.add(`TOLERANCE_ZONE_FORM('${form}')`)})`);
+  return { ctx, part, unit, aspect, length, zone };
+}
+
 const viewer = await createOcctViewer();
 // name: the file's name, also where DUMP writes it. files: other files opened with it, {name: text}.
 function readResult(name, text, files = {}) {
@@ -508,24 +528,28 @@ const tests = {
     assert.deepEqual([...new Float32Array(m.geometry, ...drawn.segments)], [10, 5, 12, 40, 5, 12]);
   },
 
-  'tolerance zone form, modifiers, projected zone and maximum tolerance, in inches (PMI RP 6.9)'() {
+  'tolerance zone form, modifiers, projected, unequal and maximum tolerance, in inches (PMI RP 6.9)'() {
     const s = new Step();
-    const ctx = context(s, true);
-    const out = {};
-    const part = product(s, ctx, 'block', [box(s, [0, 0, 0], 1, 'ADVANCED_FACE', out)], 'ADVANCED_BREP_SHAPE_REPRESENTATION');
-    const side = s.add(`SHAPE_ASPECT('top','',${part.pds},.T.)`);
-    s.add(`GEOMETRIC_ITEM_SPECIFIC_USAGE('','',${side},${part.sr},${out.faces[1]})`);
-    const mm = s.add('( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.) )');
-    const dims = s.add('DIMENSIONAL_EXPONENTS(1.,0.,0.,0.,0.,0.,0.)');
-    const inch = s.add(`( CONVERSION_BASED_UNIT('INCH',${s.add(`LENGTH_MEASURE_WITH_UNIT(LENGTH_MEASURE(25.4),${mm})`)}) LENGTH_UNIT() NAMED_UNIT(${dims}) )`);
-    const length = (v) => s.add(`LENGTH_MEASURE_WITH_UNIT(LENGTH_MEASURE(${v}),${inch})`);
+    const { part, unit: inch, aspect, length, zone: tolZone } = tolerancedBlock(s, true);
+    const side = aspect('top');
     // Position Ø0.01 Ⓜ Ⓟ 0.5, at most 0.02
     const tol = s.add(
       `( GEOMETRIC_TOLERANCE('pos','',${length(0.01)},${side}) GEOMETRIC_TOLERANCE_WITH_MAXIMUM_TOLERANCE(${length(0.02)}) ` +
         'GEOMETRIC_TOLERANCE_WITH_MODIFIERS((.MAXIMUM_MATERIAL_REQUIREMENT.,.FREE_STATE.)) POSITION_TOLERANCE() )',
     );
-    const zone = s.add(`TOLERANCE_ZONE('','',${part.pds},.F.,(${tol}),${s.add("TOLERANCE_ZONE_FORM('cylindrical or circular')")})`);
+    const zone = tolZone(tol, 'within a cylinder');
     s.add(`PROJECTED_ZONE_DEFINITION(${zone},(${side}),${side},${length(0.5)})`);
+    // Profile 0.1 Ⓤ 0.02 | A, the displacement a qualified measure as in NIST CTC 02
+    const datum = s.add(`DATUM('',$,${part.pds},.F.,'A')`);
+    const system = s.add(`DATUM_SYSTEM('',$,${part.pds},.F.,(${s.add(`DATUM_REFERENCE_COMPARTMENT('',$,${part.pds},.F.,${datum},$)`)}))`);
+    const qualified = s.add(
+      `( LENGTH_MEASURE_WITH_UNIT() MEASURE_REPRESENTATION_ITEM() MEASURE_WITH_UNIT(LENGTH_MEASURE(0.02),${inch}) ` +
+        `QUALIFIED_REPRESENTATION_ITEM((${s.add("VALUE_FORMAT_TYPE_QUALIFIER('NR2 1.2')")})) REPRESENTATION_ITEM('') )`,
+    );
+    s.add(
+      `( GEOMETRIC_TOLERANCE('profile','',${length(0.1)},${side}) GEOMETRIC_TOLERANCE_WITH_DATUM_REFERENCE((${system})) ` +
+        `SURFACE_PROFILE_TOLERANCE() UNEQUALLY_DISPOSED_GEOMETRIC_TOLERANCE(${qualified}) )`,
+    );
     const m = read('tolerance-modifiers.stp', s.text(AP242));
 
     const pos = m.pmi.find((p) => p.type === 'Position');
@@ -535,6 +559,69 @@ const tests = {
     assert.deepEqual(pos.modifiers, ['maximumMaterial', 'freeState']);
     near(pos.projected[0], 12.7, 1e-9, 'projected zone length in mm');
     near(pos.maxValue[0], 0.508, 1e-9, 'maximum tolerance in mm');
+    const profile = m.pmi.find((p) => p.type === 'Profile of a surface');
+    assert.ok(profile, JSON.stringify(m.pmi));
+    near(profile.unequal[0], 0.508, 1e-9, 'unequal displacement in mm');
+    assert.deepEqual(profile.datums, ['A']);
+  },
+
+  'tolerance zones and modifiers OCCT does not read: the tolerance is still imported (PMI RP 6.9.2, 6.9.3)'() {
+    // One file per case, as samples (DUMP); only the tolerance itself is read (TASK-163).
+    const cases = {}; // file name → [text, tolerances read as [type, value]]
+    let s;
+    let block;
+    const start = () => ((s = new Step()), (block = tolerancedBlock(s)));
+
+    // ISO 1101 association modifiers (Table 14): Position Ø0.1 UF, Flatness 0.05 Ⓖ. OCCT has no
+    // value for them and reads each as Ⓜ.
+    start();
+    const pos = s.add(
+      `( GEOMETRIC_TOLERANCE('Position UF','',${block.length(0.1)},${block.aspect('top')}) ` +
+        'GEOMETRIC_TOLERANCE_WITH_MODIFIERS((.UNITED_FEATURE.)) POSITION_TOLERANCE() )',
+    );
+    block.zone(pos, 'cylindrical or circular');
+    s.add(
+      `( FLATNESS_TOLERANCE() GEOMETRIC_TOLERANCE('Flatness G','',${block.length(0.05)},${block.aspect('side', 2)}) ` +
+        'GEOMETRIC_TOLERANCE_WITH_MODIFIERS((.ASSOCIATED_LEAST_SQUARE_FEATURE.)) )',
+    );
+    cases['tolerance-iso-modifiers.stp'] = [s.text(AP242), [['Position', 0.1, 'diameter'], ['Flatness', 0.05]]];
+
+    // Non-uniform zone (6.9.2.3): profile 0.2, the zone bounded by two side faces of the block.
+    start();
+    const nonUniform = s.add(`SURFACE_PROFILE_TOLERANCE('Profile NU','',${block.length(0.2)},${block.aspect('top')})`);
+    const bounds = [block.aspect('left', 2), block.aspect('right', 3)];
+    s.add(`NON_UNIFORM_ZONE_DEFINITION(${block.zone(nonUniform, 'non uniform')},(${bounds.join(',')}))`);
+    cases['tolerance-non-uniform.stp'] = [s.text(AP242), [['Profile of a surface', 0.2]]];
+
+    // Affected plane (6.9.2.1, Figure 53 with a plane element): straightness 0.05 in the plane of a
+    // placement, given in a constructive geometry representation. The RP text puts 'affected plane
+    // association' in the relationship's description, its figures in the name: as the figures.
+    start();
+    const straight = s.add(`STRAIGHTNESS_TOLERANCE('Straightness AP','',${block.length(0.05)},${block.aspect('top')})`);
+    const plane = axis(s, [0.5, 0.5, 1], [1, 0, 0], [0, 1, 0]);
+    const cgr = s.add(`CONSTRUCTIVE_GEOMETRY_REPRESENTATION('',(${plane}),${block.ctx})`);
+    s.add(`CONSTRUCTIVE_GEOMETRY_REPRESENTATION_RELATIONSHIP('','',${block.part.sr},${cgr})`);
+    const element = s.add(`SHAPE_ASPECT('','representative plane element',${block.part.pds},.F.)`);
+    s.add(`GEOMETRIC_ITEM_SPECIFIC_USAGE('','',${element},${cgr},${plane})`);
+    s.add(`SHAPE_ASPECT_RELATIONSHIP('affected plane association',$,${block.zone(straight, 'between two equidistant curves')},${element})`);
+    cases['tolerance-affected-plane.stp'] = [s.text(AP242), [['Straightness', 0.05]]];
+
+    // Zone forms without a symbol (Table 13)
+    start();
+    const forms = ['between two equidistant surfaces', 'within a cone', 'unknown'];
+    forms.forEach((form, i) =>
+      block.zone(s.add(`SURFACE_PROFILE_TOLERANCE('${form}','',${block.length(0.1 * (i + 1))},${block.aspect(form, i + 1)})`), form),
+    );
+    cases['tolerance-zone-forms.stp'] = [s.text(AP242), forms.map((_, i) => ['Profile of a surface', 0.1 * (i + 1)])];
+
+    // [type, value, zone]; no zone form is read for the forms without a symbol
+    const rounded = (list) => list.map(([type, v, zone]) => [type, +v.toFixed(6), zone]).sort();
+    for (const [name, [text, expected]] of Object.entries(cases)) {
+      const m = read(name, text);
+      const tolerances = m.pmi.filter((p) => p.kind === 'tolerance').map((p) => [p.type, p.value[0], p.zone]);
+      assert.deepEqual(rounded(tolerances), rounded(expected), name);
+      if (process.env.VERBOSE) console.log(`     ${name}: ${JSON.stringify(m.pmi.map(({ type, zone, modifiers }) => ({ type, zone, modifiers })))}`);
+    }
   },
 
   'assembly PMI across files: external element references (EXTERNAL_ANCHOR, product_definition_reference)'() {

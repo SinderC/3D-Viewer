@@ -61,6 +61,9 @@ describe('pmiLabel', () => {
         ['Maximum', '0.200 mm'],
       ]),
     );
+    const profile = item({ kind: 'tolerance', type: 'Profile of a surface', value: [0.5], unequal: [0.35], datums: ['A'] });
+    expect(pmiLabel(profile, 'mm')).toBe('Profile of a surface 0.500 mm Ⓤ 0.350 mm | A');
+    expect(pmiInfo(profile, 'mm')).toContainEqual(['Unequally disposed', '0.350 mm']);
     const sphere = item({ kind: 'tolerance', type: 'Position', value: [0.5], zone: 'spherical', modifiers: ['leastMaterial'] });
     expect(pmiLabel(sphere, 'mm')).toBe('Position SØ0.500 mm Ⓛ');
     const straightness = item({ kind: 'tolerance', type: 'Straightness', value: [0.05], perUnit: [25], modifiers: ['maximumMaterial'] });
