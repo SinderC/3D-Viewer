@@ -8,10 +8,12 @@ interface Props {
   model: Model;
   hidden: ReadonlySet<number>;
   selected: number | null;
+  /** Parts holding what the selected PMI refers to, and their assemblies. */
+  related: ReadonlySet<number>;
   dispatch: Dispatch<Action>;
 }
 
-export function ModelTree({ model, hidden, selected, dispatch }: Props) {
+export function ModelTree({ model, hidden, selected, related, dispatch }: Props) {
   const [expanded, setExpanded] = useState<ReadonlySet<number>>(() => new Set(model.roots));
   const [query, setQuery] = useState('');
   const search = useMemo(() => searchTree(model, query), [model, query]);
@@ -39,7 +41,7 @@ export function ModelTree({ model, hidden, selected, dispatch }: Props) {
     dispatch({ type: 'setHidden', hidden: next });
   };
 
-  const ctx: RowContext = { model, hidden, selected, expanded, dispatch, toggleExpand, toggleHidden, search, query: query.trim() };
+  const ctx: RowContext = { model, hidden, selected, related, expanded, dispatch, toggleExpand, toggleHidden, search, query: query.trim() };
   const roots = search ? model.roots.filter((id) => search.shown.has(id)) : model.roots;
   return (
     <>
@@ -82,7 +84,7 @@ interface RowContext extends Props {
 }
 
 function Row({ id, depth, ctx }: { id: number; depth: number; ctx: RowContext }) {
-  const { model, hidden, selected, expanded, dispatch, toggleExpand, toggleHidden, search, query } = ctx;
+  const { model, hidden, selected, related, expanded, dispatch, toggleExpand, toggleHidden, search, query } = ctx;
   const node = model.nodes[id];
   const open = expanded.has(id) || !!search?.expand.has(id);
   const children = search ? node.children.filter((c) => search.shown.has(c)) : node.children;
@@ -100,7 +102,7 @@ function Row({ id, depth, ctx }: { id: number; depth: number; ctx: RowContext })
         role="treeitem"
         aria-selected={isSelected}
         aria-expanded={children.length ? open : undefined}
-        className={`row${isSelected ? ' selected' : ''}${hidden.has(id) ? ' dim' : ''}`}
+        className={`row${isSelected ? ' selected' : related.has(id) ? ' related' : ''}${hidden.has(id) ? ' dim' : ''}`}
         style={{ paddingLeft: 6 + depth * 14 }}
         onClick={() => dispatch({ type: 'select', id: isSelected ? null : id })}
       >

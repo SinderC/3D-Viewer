@@ -8,6 +8,7 @@ import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeome
 import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from 'three-mesh-bvh';
 import { APPEARANCES, type AppearanceId, type PartColor } from '../core/appearances';
 import { EDGE_STRIDE, FACE_STRIDE, faceTriangles, type Model, type Proto } from '../core/model';
+import type { ElementRef } from '../core/pmi';
 import type { UnitId } from '../core/units';
 import { Measure, type EdgePick, type FacePick, type MeasureMode, type Pick } from './measure';
 import { ensureBoundsTree, isShown, LINE_PX } from './objects';
@@ -16,9 +17,10 @@ import { applyExplode, explodeOffsets, type ExplodeItem } from './explode';
 import { toGlb, toStl } from './export';
 import { Finishes, FINISH_UVS } from './finishes';
 import { PmiLayer } from './pmi';
+import { ElementHighlight, selectedSurface } from './selection';
 import { ContactShadow, Effects, type Grade } from './realistic';
 import { buildSectionCaps, disposeCaps, sectionPlane, sectionPosition } from './section';
-import { AxisTriad } from './AxisTriad';
+import { AXES as TRIAD_AXES, AxisTriad } from './AxisTriad';
 import { ViewCube } from './ViewCube';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
@@ -42,6 +44,14 @@ export interface Section {
   position: number; // 0..1 across the model bounds
   flip: boolean;
   normal?: [number, number, number]; // for 'face': the picked face's outward normal
+}
+
+/** What is drawn selected: a whole part, B-rep elements, and PMI items; and the node zoom to selection fits. */
+export interface Selection {
+  focus: number | null;
+  part: number | null;
+  elements: ElementRef[];
+  pmi: number[];
 }
 
 export type UpAxis = 'x' | '-x' | 'y' | '-y' | 'z' | '-z';
@@ -119,6 +129,12 @@ const SHADOW_MAP_SIZE = 2048;
 const ANIMATION_MS = 300;
 const CLICK_TOLERANCE_PX = 4;
 const EDGE_PICK_PX = 6;
+// Select tool: on a face, an edge, vertex or PMI line must be this near to take the click instead,
+// or small faces seen from afar cannot be picked.
+const ON_FACE_PICK_PX = 2;
+
+/** What a click in the select tool picks: a PMI item, a B-rep element, or a whole part (null: nothing). */
+type SelectTarget = { pmi: number } | { element: ElementRef } | { node: number | null };
 const PIVOT_FLASH_MS = 1000; // how long the rotation center shows after it is set
 const PIVOT_RADIUS_PX = 18; // radius of the rotation center's sphere on screen
 // Adaptive quality: when frames are slow while the camera moves, it renders fewer pixels and no
@@ -132,7 +148,12 @@ const MOVING_PIXEL_RATIO = Math.SQRT1_2; // half the pixels
 type Work = 'ghosts' | 'caps' | 'realistic';
 
 export class Viewer {
+  /** A part clicked in the select tool, or null for empty space. Parts without B-rep edges (meshes) only. */
   onPick: (nodeId: number | null) => void = () => {};
+  /** A face, edge or vertex of a B-rep part clicked in the select tool. */
+  onPickElement: (element: ElementRef) => void = () => {};
+  /** A PMI item clicked in the select tool. */
+  onPickPmi: (index: number) => void = () => {};
   /** A planar face picked with the sectionFace tool: its outward normal and the section position through it. */
   onSectionFace: (normal: [number, number, number], position: number) => void = () => {};
 
@@ -165,6 +186,9 @@ export class Viewer {
   private readonly cube: ViewCube;
   private readonly triad: AxisTriad;
   private readonly pmi = new PmiLayer();
+  private readonly elements = new ElementHighlight(this.clipping);
+  private readonly hoverElements = new ElementHighlight(this.clipping, true); // what a click would select
+  private hoverKey: string | null = null;
   private readonly ghosts = new THREE.Group(); // translucent stand-ins for hidden parts
   private ghost = false;
   private grid: THREE.GridHelper | null = null;
@@ -179,7 +203,8 @@ export class Viewer {
   private explodeItems: ExplodeItem[] = [];
   private bounds = new THREE.Box3();
   private orthoHalfHeight = 1;
-  private selected: number | null = null;
+  private selected: number | null = null; // drawn with the highlight material
+  private focus: number | null = null;
   private tool: Tool = 'select';
   private display: DisplayStyle = 'shadedEdges';
   private themeId: Theme = 'dark';
@@ -203,11 +228,11 @@ export class Viewer {
   // Rotation center picked with a right-click; null rotates about the controls' target.
   private pivot: THREE.Vector3 | null = null;
   private pivotTimer = 0;
-  // A wire sphere at the rotation center, as AutoCAD's orbit: three rings about the world axes,
-  // scaled to a constant size on screen.
+  // A wire sphere at the rotation center, as AutoCAD's orbit: three rings about the world axes, each
+  // in its axis colour (never the selection's orange), scaled to a constant size on screen.
   private readonly pivotMarker = new LineSegments2(
     ringsGeometry(),
-    new LineMaterial({ color: 0xff7d2d, linewidth: LINE_PX, depthTest: false }),
+    new LineMaterial({ vertexColors: true, linewidth: LINE_PX, depthTest: false }),
   );
 
   private readonly edgeMaterial = new THREE.LineBasicMaterial({ color: EDGE_COLOR });
@@ -218,15 +243,7 @@ export class Viewer {
     depthWrite: false,
     side: THREE.DoubleSide,
   });
-  private readonly highlight = new THREE.MeshStandardMaterial({
-    color: 0xff7d2d,
-    emissive: 0x4a240d,
-    roughness: 0.5,
-    side: THREE.DoubleSide,
-    polygonOffset: true,
-    polygonOffsetFactor: 1,
-    polygonOffsetUnits: 1,
-  });
+  private readonly highlight = selectedSurface(1);
 
   constructor(private readonly container: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -262,7 +279,7 @@ export class Viewer {
     this.scene.add(this.caps);
     this.scene.add(this.ghosts);
     this.pivotMarker.visible = false;
-    this.pivotMarker.renderOrder = 1;
+    this.pivotMarker.renderOrder = 20; // after the selection and measure highlights (10), so always on top
     this.scene.add(this.pivotMarker);
 
     this.controls = this.createControls();
@@ -303,6 +320,8 @@ export class Viewer {
     this.cube.dispose();
     this.triad.dispose();
     this.pmi.dispose();
+    this.elements.dispose();
+    this.hoverElements.dispose();
     this.capOutline.dispose();
     this.ghostMaterial.dispose();
     this.environment.dispose();
@@ -363,7 +382,7 @@ export class Viewer {
 
         const lines = new THREE.LineSegments(geometries[node.proto].edges, this.edgeMaterial);
         lines.raycast = () => {}; // picked explicitly in pickEdge()
-        lines.userData = { proto };
+        lines.userData = { nodeId: id, proto };
         obj.add(lines);
         this.edgeLines.push(lines);
       }
@@ -375,6 +394,8 @@ export class Viewer {
     this.bounds.setFromObject(this.modelRoot);
     this.explodeItems = explodeOffsets(new Set(this.meshes.map((m) => m.parent!)), this.bounds.getCenter(new THREE.Vector3()));
     this.pmi.build(model, this.nodeObjects, this.modelRoot); // after the bounds: PMI does not count for fitting
+    this.elements.build(model, this.nodeObjects);
+    this.hoverElements.build(model, this.nodeObjects);
     this.addGrid();
     this.setDisplayStyle(this.display);
     this.standardView(VIEW_DIRS.iso, this.bounds, false);
@@ -506,9 +527,13 @@ export class Viewer {
     this.defaultMaterial = null;
     this.explodeItems = [];
     this.selected = null;
+    this.focus = null;
     this.bounds.makeEmpty();
     this.measure.clear();
     this.pmi.clear();
+    this.elements.clear();
+    this.hoverElements.clear();
+    this.hoverKey = null;
     this.cube.setVisible(false);
     this.triad.setVisible(false);
     this.requestRender();
@@ -569,6 +594,8 @@ export class Viewer {
         this.ghosts,
         this.caps,
         ...this.pmi.all,
+        ...this.elements.all,
+        ...this.hoverElements.all,
         ...this.measure.objects,
         this.pivotMarker,
         ...(this.grid ? [this.grid] : []),
@@ -600,7 +627,11 @@ export class Viewer {
   private updateRealistic(): void {
     if (!photographic(this.display) || !this.effects || !this.contactShadow) return;
     const bounds = this.visibleBounds();
-    this.contactShadow.update(this.renderer, this.modelRoot, this.toUpright(bounds), this.upright, this.pmi.all);
+    this.contactShadow.update(this.renderer, this.modelRoot, this.toUpright(bounds), this.upright, [
+      ...this.pmi.all,
+      ...this.elements.all,
+      ...this.hoverElements.all,
+    ]);
     this.effects.setOcclusionRadius(0.04 * bounds.getSize(new THREE.Vector3()).length());
     this.fitSunShadow(bounds);
   }
@@ -625,11 +656,6 @@ export class Viewer {
 
   setPmi(visible: boolean, hidden: ReadonlySet<number>): void {
     this.pmi.setVisible(visible, hidden);
-    this.requestRender();
-  }
-
-  selectPmi(index: number | null): void {
-    this.pmi.select(index);
     this.requestRender();
   }
 
@@ -698,17 +724,20 @@ export class Viewer {
     this.requestRender();
   }
 
-  select(nodeId: number | null): void {
+  setSelection({ focus, part, elements, pmi }: Selection): void {
     const apply = (id: number | null, on: boolean) => {
       if (id === null) return;
       this.nodeObjects[id]?.traverse((o) => {
-        // Part meshes only: PMI meshes hang under the same nodes with their own materials.
+        // Part meshes only: PMI and highlight meshes hang under the same nodes with their own materials.
         if (o instanceof THREE.Mesh && o.userData.baseMaterial) o.material = on ? this.highlight : o.userData.baseMaterial;
       });
     };
     apply(this.selected, false);
-    this.selected = nodeId;
-    apply(nodeId, true);
+    this.selected = part;
+    apply(part, true);
+    this.focus = focus;
+    this.elements.show(elements);
+    this.pmi.select(pmi);
     this.requestRender();
   }
 
@@ -805,7 +834,7 @@ export class Viewer {
 
   /** Fit the selected node, or everything visible when nothing is selected. */
   fitSelection(): void {
-    const node = this.selected === null ? undefined : this.nodeObjects[this.selected];
+    const node = this.focus === null ? undefined : this.nodeObjects[this.focus];
     const box = node ? new THREE.Box3().setFromObject(node) : new THREE.Box3();
     this.frame(this.viewDir(), box.isEmpty() ? this.visibleBounds() : box, true);
   }
@@ -1008,6 +1037,8 @@ export class Viewer {
     this.effects?.setSize(w, h, this.renderer.getPixelRatio());
     this.pivotMarker.material.resolution.set(w, h);
     this.measure.setSize(w, h);
+    this.elements.setSize(w, h);
+    this.hoverElements.setSize(w, h);
     const aspect = w / h;
     this.perspective.aspect = aspect;
     this.perspective.updateProjectionMatrix();
@@ -1039,10 +1070,34 @@ export class Viewer {
       const pick = this.pick(this.measure.pickKind, hit, e);
       if (pick) this.measure.add(pick);
     } else {
-      this.onPick(hit ? (hit.object.userData.nodeId as number) : null);
+      const target = this.selectTarget(hit, e);
+      if ('pmi' in target) this.onPickPmi(target.pmi);
+      else if ('element' in target) this.onPickElement(target.element);
+      else this.onPick(target.node);
     }
     this.requestRender();
   };
+
+  // Select tool: PMI in front of the model; else on a part with B-rep edges, the vertex, edge or face
+  // under the cursor; else the part (meshes); else nothing.
+  private selectTarget(hit: THREE.Intersection | undefined, e: PointerEvent): SelectTarget {
+    const px = hit ? ON_FACE_PICK_PX : EDGE_PICK_PX;
+    const raycaster = this.raycaster(e.clientX, e.clientY);
+    const depth = hit?.distance ?? this.camera.position.distanceTo(this.controls.target);
+    raycaster.params.Line = { threshold: px * this.worldPerPixel(depth) };
+    const pmi = this.pmi.pick(raycaster);
+    if (pmi && (!hit || pmi.distance <= hit.distance)) return { pmi: pmi.index };
+
+    const edge = this.nearestEdge(e, hit, px);
+    const vertex = this.nearestVertex(e, hit, edge?.lines, px);
+    if (vertex) return { element: { ...vertex, kind: 'vertex' } };
+    if (edge) return { element: { node: edge.lines.userData.nodeId as number, kind: 'edge', index: edge.index } };
+    if (!hit) return { node: null };
+    const node = hit.object.userData.nodeId as number;
+    const proto = hit.object.userData.proto as Proto;
+    if (!proto.edgeStarts.length || hit.faceIndex == null) return { node };
+    return { element: { node, kind: 'face', index: lastAtOrBelow(proto.faceStarts, hit.faceIndex * 3) } };
+  }
 
   private handleHover = (e: PointerEvent): void => {
     this.hoverEvent = e;
@@ -1056,15 +1111,26 @@ export class Viewer {
     });
   };
 
-  // Highlight the edge or face a click would pick; points get no preview.
+  // Highlight the edge or face a click would pick; points get no preview. In the select tool, the
+  // vertex, edge or face; PMI and whole parts get none.
   private hover(e: PointerEvent): void {
+    if (this.tool === 'select') {
+      const target = e.buttons ? null : this.selectTarget(this.raycast(e.clientX, e.clientY), e);
+      return this.setHover(null, target && 'element' in target ? target.element : null);
+    }
     const kind = this.tool === 'sectionFace' ? 'face' : this.tool === 'measure' ? this.measure.pickKind : null;
     if (!kind || kind === 'point' || e.buttons) return this.setHover(null);
     this.setHover(this.pick(kind, this.raycast(e.clientX, e.clientY), e));
   }
 
-  private setHover(pick: Pick | null): void {
-    if (this.measure.setHover(pick)) this.requestRender();
+  private setHover(pick: Pick | null, element: ElementRef | null = null): void {
+    const key = element && `${element.node}:${element.kind}:${element.index}`;
+    const changed = key !== this.hoverKey;
+    if (changed) {
+      this.hoverKey = key;
+      this.hoverElements.show(element ? [element] : []);
+    }
+    if (this.measure.setHover(pick) || changed) this.requestRender();
   }
 
   private raycaster(clientX: number, clientY: number): THREE.Raycaster {
@@ -1119,11 +1185,52 @@ export class Viewer {
 
   // The visible B-rep edge nearest the cursor, within a few pixels.
   private pickEdge(e: PointerEvent, meshHit: THREE.Intersection | undefined): EdgePick | null {
-    const raycaster = this.raycaster(e.clientX, e.clientY);
-    // Wireframe shows hidden edges, so faces must not hide them from picking either.
+    const nearest = this.nearestEdge(e, meshHit);
+    if (!nearest) return null;
+    const { lines, index: i, point } = nearest;
+    const proto = lines.userData.proto as Proto;
+    const start = proto.edgeStarts[i] * 6;
+    const end = (proto.edgeStarts[i + 1] ?? proto.edges.length / 6) * 6;
+    const m = lines.matrixWorld;
+    const v = new THREE.Vector3();
+    const segments = new Float32Array(end - start);
+    for (let k = start; k < end; k += 3) v.fromArray(proto.edges, k).applyMatrix4(m).toArray(segments, k - start);
+
+    const d = proto.edgeData.subarray(i * EDGE_STRIDE, (i + 1) * EDGE_STRIDE);
+    return {
+      kind: 'edge',
+      point,
+      segments,
+      curve: d[0] === 1 ? 'line' : d[0] === 2 ? 'circle' : 'other',
+      length: d[1],
+      radius: d[2],
+      center: new THREE.Vector3(d[3], d[4], d[5]).applyMatrix4(m),
+      axis: new THREE.Vector3(d[6], d[7], d[8]).transformDirection(m),
+      key: `${lines.id}:${i}`,
+    };
+  }
+
+  // What hides edges and vertices behind the surface under the cursor, how far behind it they may
+  // still lie, and how near the cursor (px) they must be to count, in world units; wireframe shows
+  // hidden edges, so faces must not hide them from picking either.
+  private pickDepth(
+    meshHit: THREE.Intersection | undefined,
+    px: number,
+  ): { occluder?: THREE.Intersection; slack: number; threshold: number } {
     const occluder = this.display === 'wireframe' ? undefined : meshHit;
     const depth = occluder?.distance ?? this.camera.position.distanceTo(this.controls.target);
-    const threshold = EDGE_PICK_PX * this.worldPerPixel(depth);
+    const perPixel = this.worldPerPixel(depth);
+    return { occluder, slack: 4 * EDGE_PICK_PX * perPixel, threshold: px * perPixel };
+  }
+
+  // The visible B-rep edge nearest the cursor, within a few pixels: its lines and index in edgeStarts.
+  private nearestEdge(
+    e: PointerEvent,
+    meshHit: THREE.Intersection | undefined,
+    px = EDGE_PICK_PX,
+  ): { lines: THREE.LineSegments; index: number; point: THREE.Vector3 } | null {
+    const raycaster = this.raycaster(e.clientX, e.clientY);
+    const { occluder, slack, threshold } = this.pickDepth(meshHit, px);
     raycaster.params.Line = { threshold };
 
     const hits: THREE.Intersection[] = [];
@@ -1135,7 +1242,7 @@ export class Viewer {
         if (!lines.geometry.boundingSphere) lines.geometry.computeBoundingSphere();
         sphere.copy(lines.geometry.boundingSphere!).applyMatrix4(lines.matrixWorld);
         const nearest = raycaster.ray.origin.distanceTo(sphere.center) - sphere.radius - threshold;
-        if (nearest > occluder.distance + 4 * threshold) continue;
+        if (nearest > occluder.distance + slack) continue;
       }
       THREE.LineSegments.prototype.raycast.call(lines, raycaster, hits);
     }
@@ -1143,7 +1250,7 @@ export class Viewer {
     let bestRay = Infinity;
     for (const h of hits) {
       // Skip edges hidden behind the surface under the cursor, or cut away by the section.
-      if (occluder && h.distance > occluder.distance + 4 * threshold) continue;
+      if (occluder && h.distance > occluder.distance + slack) continue;
       if (!this.unclipped(h.point, threshold)) continue;
       const ray = raycaster.ray.distanceSqToPoint(h.point);
       if (ray < bestRay) {
@@ -1152,29 +1259,47 @@ export class Viewer {
       }
     }
     if (!best || best.index == null) return null;
-
     const lines = best.object as THREE.LineSegments;
-    const proto = lines.userData.proto as Proto;
-    const i = lastAtOrBelow(proto.edgeStarts, best.index / 2);
-    const start = proto.edgeStarts[i] * 6;
-    const end = (proto.edgeStarts[i + 1] ?? proto.edges.length / 6) * 6;
-    const m = lines.matrixWorld;
-    const v = new THREE.Vector3();
-    const segments = new Float32Array(end - start);
-    for (let k = start; k < end; k += 3) v.fromArray(proto.edges, k).applyMatrix4(m).toArray(segments, k - start);
+    return { lines, index: lastAtOrBelow((lines.userData.proto as Proto).edgeStarts, best.index / 2), point: best.point.clone() };
+  }
 
-    const d = proto.edgeData.subarray(i * EDGE_STRIDE, (i + 1) * EDGE_STRIDE);
-    return {
-      kind: 'edge',
-      point: best.point.clone(),
-      segments,
-      curve: d[0] === 1 ? 'line' : d[0] === 2 ? 'circle' : 'other',
-      length: d[1],
-      radius: d[2],
-      center: new THREE.Vector3(d[3], d[4], d[5]).applyMatrix4(m),
-      axis: new THREE.Vector3(d[6], d[7], d[8]).transformDirection(m),
-      key: `${lines.id}:${i}`,
-    };
+  // The visible B-rep vertex nearest the cursor, within px pixels, of the part under the cursor or of
+  // the part whose edge is nearest.
+  private nearestVertex(
+    e: PointerEvent,
+    meshHit: THREE.Intersection | undefined,
+    edgeLines: THREE.LineSegments | undefined,
+    px: number,
+  ): { node: number; index: number } | null {
+    const { occluder, slack, threshold } = this.pickDepth(meshHit, px);
+    const { ray } = this.raycaster(e.clientX, e.clientY);
+    const near = (2 * threshold) ** 2; // a cheap test before projecting: twice the pick distance at the surface
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const v = new THREE.Vector3();
+    let best: { node: number; index: number } | null = null;
+    let bestPx = px;
+    for (const o of new Set([meshHit?.object, edgeLines])) {
+      if (!o) continue;
+      const vertices = (o.userData.proto as Proto).vertices;
+      for (let i = 0; i < vertices.length / 3; i++) {
+        v.fromArray(vertices, i * 3).applyMatrix4(o.matrixWorld);
+        if (ray.distanceSqToPoint(v) > near) continue;
+        if (occluder && v.distanceTo(ray.origin) > occluder.distance + slack) continue;
+        if (!this.unclipped(v, threshold)) continue;
+        const px = this.screenDistance(v, e, rect);
+        if (px < bestPx) {
+          bestPx = px;
+          best = { node: o.userData.nodeId as number, index: i };
+        }
+      }
+    }
+    return best;
+  }
+
+  // Distance in CSS pixels on screen between a world point and the pointer.
+  private screenDistance(p: THREE.Vector3, e: PointerEvent, rect = this.renderer.domElement.getBoundingClientRect()): number {
+    const s = p.clone().project(this.camera);
+    return Math.hypot(((s.x + 1) / 2) * rect.width + rect.left - e.clientX, ((1 - s.y) / 2) * rect.height + rect.top - e.clientY);
   }
 
   // World-space size of one screen pixel at the given distance from the camera.
@@ -1189,13 +1314,11 @@ export class Viewer {
     if (!hit.face) return hit.point;
     const mesh = hit.object as THREE.Mesh;
     const pos = mesh.geometry.getAttribute('position');
-    const rect = this.renderer.domElement.getBoundingClientRect();
     let best = hit.point;
     let bestPx = 10;
     for (const i of [hit.face.a, hit.face.b, hit.face.c]) {
       const v = new THREE.Vector3().fromBufferAttribute(pos, i).applyMatrix4(mesh.matrixWorld);
-      const s = v.clone().project(this.camera);
-      const px = Math.hypot(((s.x + 1) / 2) * rect.width + rect.left - e.clientX, ((1 - s.y) / 2) * rect.height + rect.top - e.clientY);
+      const px = this.screenDistance(v, e);
       if (px < bestPx) {
         bestPx = px;
         best = v;
@@ -1255,12 +1378,18 @@ export class Viewer {
 // Unit circles in the XY, YZ and ZX planes, as line segments.
 function ringsGeometry(segments = 48): LineSegmentsGeometry {
   const [x, y, z] = [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)];
+  const [red, green, blue] = TRIAD_AXES.map((a) => new THREE.Color(a.color).toArray());
   const points: THREE.Vector3[] = [];
-  for (const [u, v] of [[x, y], [y, z], [z, x]]) {
+  const colors: number[] = [];
+  // Each ring turns about the third axis: XY about Z, YZ about X, ZX about Y.
+  for (const [u, v, color] of [[x, y, blue], [y, z, red], [z, x, green]] as const) {
     const at = (i: number) => u.clone().multiplyScalar(Math.cos((i / segments) * 2 * Math.PI)).addScaledVector(v, Math.sin((i / segments) * 2 * Math.PI));
-    for (let i = 0; i < segments; i++) points.push(at(i), at(i + 1));
+    for (let i = 0; i < segments; i++) {
+      points.push(at(i), at(i + 1));
+      colors.push(...color, ...color);
+    }
   }
-  return new LineSegmentsGeometry().setPositions(points.flatMap((p) => p.toArray()));
+  return new LineSegmentsGeometry().setPositions(points.flatMap((p) => p.toArray())).setColors(colors);
 }
 
 // Index of the last element <= value in an ascending array (value >= sorted[0]).

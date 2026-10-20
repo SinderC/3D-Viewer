@@ -167,6 +167,7 @@ using emscripten::val;
 
 using LabelSequence = NCollection_Sequence<TDF_Label>;
 using FaceColorMap  = NCollection_DataMap<TopoDS_Shape, int, TopTools_ShapeMapHasher>;
+using ShapeIndex    = NCollection_DataMap<TopoDS_Shape, int, TopTools_ShapeMapHasher>;
 using FaceSet       = NCollection_Map<TopoDS_Shape, TopTools_ShapeMapHasher>;
 using ShapeStyleMap = NCollection_IndexedDataMap<TopoDS_Shape, XCAFPrs_Style, TopTools_ShapeMapHasher>;
 using EdgeFacesMap  = NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>, TopTools_ShapeMapHasher>;
@@ -210,9 +211,25 @@ struct Proto
   Range              positions, normals, indices, edges;
   Range              faceStarts, faceData; // first index of each face (uint32) / kFaceStride doubles
   Range              edgeStarts, edgeData; // first segment of each edge (uint32) / kEdgeStride doubles
+  Range              vertices;             // B-rep vertices of the drawn edges, float32 xyz
   std::vector<Group> groups;
-  // B-rep face → index into faceStarts, to resolve PMI references. Not serialised.
-  NCollection_DataMap<TopoDS_Shape, int, TopTools_ShapeMapHasher> faceIndex;
+  // B-rep face, edge and vertex → index into faceStarts, edgeStarts and vertices, to resolve PMI
+  // references. Not serialised.
+  ShapeIndex faceIndex, edgeIndex, vertexIndex;
+};
+
+// What PMI refers to in a part: indices into its faceStarts, edgeStarts and vertices.
+struct Refs
+{
+  std::vector<int> faces, edges, vertices;
+  bool             empty() const { return faces.empty() && edges.empty() && vertices.empty(); }
+};
+
+// JSON keys of each list in Refs, and of its per-instance form (assembly PMI).
+const std::tuple<const char*, const char*, std::vector<int> Refs::*> kRefLists[] = {
+  {"faces", "nodeFaces", &Refs::faces},
+  {"edges", "nodeEdges", &Refs::edges},
+  {"vertices", "nodeVertices", &Refs::vertices},
 };
 
 // PMI (STEP GD&T): one dimension, geometric tolerance, datum or note, with its drawn presentation.
@@ -224,11 +241,11 @@ struct Pmi
   int                      proto = -1; // owning part; -1 = drawn in model coordinates
   Range                    segments;   // presentation lines (x0 y0 z0 x1 y1 z1 ...), float32
   Range                    triangles;  // filled presentation areas such as text glyphs, float32 xyz x3
-  std::vector<int>         faces;      // referenced faces of the owning part (faceStarts indices)
+  Refs                     refs;       // what it refers to in the owning part
   // Assembly PMI: drawn in each of these nodes (the instances of the assembly it is defined in),
-  // with its faces on the instances it refers to: per owner node and instance node, its faces
-  std::vector<int>                                    nodes;
-  std::vector<std::tuple<int, int, std::vector<int>>> nodeFaces;
+  // with what it refers to on the instances: per owner node and instance node
+  std::vector<int>                        nodes;
+  std::vector<std::tuple<int, int, Refs>> nodeRefs;
   std::vector<double>      value;      // nominal value (dimension, tolerance), if any
   std::vector<double>      plusMinus;  // lower and upper tolerance, if any
   std::vector<double>      range;      // lower and upper limit, if any
@@ -826,7 +843,7 @@ private:
     const auto colorOf   = faceStyles(def, shape, partColor, hidden);
     const bool exactOnly = myExactBodies->bodies.count(entryOf(def)) > 0;
 
-    std::vector<float>    pos, nrm, edges;
+    std::vector<float>    pos, nrm, edges, vertices;
     std::vector<uint32_t> idx, faceStarts, edgeStarts;
     std::vector<double>   faceData, edgeData;
     Proto                 proto;
@@ -886,7 +903,7 @@ private:
     }
 
     // Free edges count only on triangulated parts (JT parts with XT edges), not next to B-rep faces.
-    collectEdges(shape, !hasSurfaces, hidden, edges, edgeStarts, edgeData);
+    collectEdges(shape, !hasSurfaces, hidden, edges, edgeStarts, edgeData, proto, vertices);
 
     proto.positions  = append(pos);
     proto.normals    = append(nrm);
@@ -896,6 +913,7 @@ private:
     proto.faceData   = append(faceData);
     proto.edgeStarts = append(edgeStarts);
     proto.edgeData   = append(edgeData);
+    proto.vertices   = append(vertices);
     return proto;
   }
 
@@ -995,12 +1013,15 @@ private:
 
   // Feature edges as line segments (x0 y0 z0 x1 y1 z1 ...). Seams and degenerate edges skipped.
   // Face edges follow their face's mesh; free edges (the XT edges of JT parts) are sampled.
+  // The drawn edges and their vertices go in proto's edge and vertex index.
   void collectEdges(const TopoDS_Shape&    shape,
                     bool                   freeEdges,
                     const FaceSet&         hidden,
                     std::vector<float>&    out,
                     std::vector<uint32_t>& starts,
-                    std::vector<double>&   data) const
+                    std::vector<double>&   data,
+                    Proto&                 proto,
+                    std::vector<float>&    vertices) const
   {
     EdgeFacesMap edgeFaces;
     TopExp::MapShapesAndAncestors(shape, TopAbs_EDGE, TopAbs_FACE, edgeFaces);
@@ -1017,7 +1038,8 @@ private:
           continue; // also VRML line sets: polygon only
         if (freeDeflection == 0)
           freeDeflection = deflection(shape);
-        sampleEdge(edge, freeDeflection, out, starts, data);
+        if (sampleEdge(edge, freeDeflection, out, starts, data))
+          indexEdge(edge, int(starts.size()) - 1, proto, vertices);
         continue;
       }
       // The edge follows the mesh of a face that is drawn.
@@ -1051,10 +1073,25 @@ private:
                    {float(a.X()), float(a.Y()), float(a.Z()), float(b.X()), float(b.Y()), float(b.Z())});
       }
       appendEdgeData(edge, length, data);
+      indexEdge(edge, int(starts.size()) - 1, proto, vertices);
     }
   }
 
-  void sampleEdge(const TopoDS_Edge&     edge,
+  static void indexEdge(const TopoDS_Edge& edge, int index, Proto& proto, std::vector<float>& vertices)
+  {
+    proto.edgeIndex.TryBind(edge, index);
+    TopoDS_Vertex ends[2];
+    TopExp::Vertices(edge, ends[0], ends[1]);
+    for (const TopoDS_Vertex& v : ends)
+      if (!v.IsNull() && proto.vertexIndex.TryBind(v, int(vertices.size() / 3)))
+      {
+        const gp_Pnt p = BRep_Tool::Pnt(v);
+        vertices.insert(vertices.end(), {float(p.X()), float(p.Y()), float(p.Z())});
+      }
+  }
+
+  // Returns whether the edge had any segments.
+  bool sampleEdge(const TopoDS_Edge&     edge,
                   double                 linearDeflection,
                   std::vector<float>&    out,
                   std::vector<uint32_t>& starts,
@@ -1063,9 +1100,10 @@ private:
     const size_t at     = out.size();
     const double length = sampleCurve(edge, linearDeflection, out);
     if (out.size() == at)
-      return;
+      return false;
     starts.push_back(uint32_t(at / 6));
     appendEdgeData(edge, length, data);
+    return true;
   }
 
   // Line segments along an edge's curve, appended to out; returns their total length.
@@ -1177,17 +1215,17 @@ private:
   {
     p.name = str(name);
 
-    // The owning part and its faces, from the shapes the PMI refers to; or, for assembly PMI, the
-    // assembly and the faces on the instances it refers to.
+    // The owning part and what the PMI refers to in it; or, for assembly PMI, the assembly and
+    // what it refers to on its instances.
     if (const auto refs = myAssemblyRefs->find(entryOf(label)); refs != myAssemblyRefs->end())
-      addInstanceFaces(refs->second, p);
+      addInstanceRefs(refs->second, p);
     else
     {
       LabelSequence first, second;
       XCAFDoc_DimTolTool::GetRefShapeLabel(label, first, second);
       for (const LabelSequence* refs : {&first, &second})
         for (const TDF_Label& ref : *refs)
-          addFaces(ref, p);
+          addRefs(ref, p);
     }
 
     // OCCT makes a datum for each tolerance that references it: keep the first of each.
@@ -1234,9 +1272,9 @@ private:
     myPmi.push_back(std::move(p));
   }
 
-  // Faces of a referenced (sub-)shape, if they belong to the PMI's part. The first part referenced
-  // owns the PMI; references into other parts are not highlighted.
-  void addFaces(const TDF_Label& ref, Pmi& p) const
+  // A referenced (sub-)shape, if it belongs to the PMI's part. The first part referenced owns the
+  // PMI; references into other parts are not highlighted.
+  void addRefs(const TDF_Label& ref, Pmi& p) const
   {
     TDF_Label part = XCAFDoc_ShapeTool::IsSubShape(ref) ? ref.Father() : ref;
     if (XCAFDoc_ShapeTool::IsReference(part))
@@ -1248,16 +1286,28 @@ private:
       p.proto = it->second;
     if (p.proto != it->second)
       return;
-    const auto& faces = myProtos[size_t(p.proto)].faceIndex;
-    for (TopExp_Explorer ex(XCAFDoc_ShapeTool::GetShape(ref), TopAbs_FACE); ex.More(); ex.Next())
-      if (const int* i = faces.Seek(ex.Current()))
-        if (std::find(p.faces.begin(), p.faces.end(), *i) == p.faces.end())
-          p.faces.push_back(*i);
+    addRefs(XCAFDoc_ShapeTool::GetShape(ref), myProtos[size_t(p.proto)], p.refs);
   }
 
-  // Assembly PMI: drawn with every instance of the assembly it is defined in, and its faces on the
-  // instances (paths of component labels from that assembly) it refers to.
-  void addInstanceFaces(const std::vector<STEPCAFControl_Reader::AssemblyShapeReference>& refs, Pmi& p) const
+  // The faces of a shape, and the edges and vertices it has outside them, as drawn in a part.
+  static void addRefs(const TopoDS_Shape& shape, const Proto& proto, Refs& refs)
+  {
+    const auto add = [&](const ShapeIndex& index, TopAbs_ShapeEnum type, TopAbs_ShapeEnum outside, std::vector<int>& out) {
+      // The explorer does not avoid the shape itself, only its sub-shapes.
+      if (shape.IsNull() || shape.ShapeType() == outside)
+        return;
+      for (TopExp_Explorer ex(shape, type, outside); ex.More(); ex.Next())
+        if (const int* i = index.Seek(ex.Current()); i && std::find(out.begin(), out.end(), *i) == out.end())
+          out.push_back(*i);
+    };
+    add(proto.faceIndex, TopAbs_FACE, TopAbs_SHAPE, refs.faces);
+    add(proto.edgeIndex, TopAbs_EDGE, TopAbs_FACE, refs.edges);
+    add(proto.vertexIndex, TopAbs_VERTEX, TopAbs_EDGE, refs.vertices);
+  }
+
+  // Assembly PMI: drawn with every instance of the assembly it is defined in, and what it refers to
+  // on the instances (paths of component labels from that assembly).
+  void addInstanceRefs(const std::vector<STEPCAFControl_Reader::AssemblyShapeReference>& refs, Pmi& p) const
   {
     for (const auto& ref : refs)
     {
@@ -1274,14 +1324,11 @@ private:
         }
         if (node < 0 || myNodes[size_t(node)].proto < 0)
           continue;
-        const auto&      faceIndex = myProtos[size_t(myNodes[size_t(node)].proto)].faceIndex;
-        std::vector<int> faces;
+        Refs refs;
         for (const TDF_Label& shape : ref.Shapes)
-          for (TopExp_Explorer ex(XCAFDoc_ShapeTool::GetShape(shape), TopAbs_FACE); ex.More(); ex.Next())
-            if (const int* i = faceIndex.Seek(ex.Current()); i && std::find(faces.begin(), faces.end(), *i) == faces.end())
-              faces.push_back(*i);
-        if (!faces.empty())
-          p.nodeFaces.emplace_back(owner, node, std::move(faces));
+          addRefs(XCAFDoc_ShapeTool::GetShape(shape), myProtos[size_t(myNodes[size_t(node)].proto)], refs);
+        if (!refs.empty())
+          p.nodeRefs.emplace_back(owner, node, std::move(refs));
       }
     }
   }
@@ -1330,10 +1377,8 @@ private:
         if (const auto it = myProtoByEntry.find(entryOf(item.part)); it != myProtoByEntry.end())
           p.proto = it->second;
       if (p.proto >= 0)
-        for (const TopoDS_Shape& face : item.faces)
-          if (const int* i = myProtos[size_t(p.proto)].faceIndex.Seek(face);
-              i && std::find(p.faces.begin(), p.faces.end(), *i) == p.faces.end())
-            p.faces.push_back(*i);
+        for (const TopoDS_Shape& shape : item.shapes)
+          addRefs(shape, myProtos[size_t(p.proto)], p.refs);
       p.segments  = append(item.segments);
       p.triangles = append(item.triangles);
       myPmi.push_back(std::move(p));
@@ -2504,6 +2549,8 @@ std::string toJson(const Source& src, const Builder& b)
     writeRange(o, "edgeStarts", p.edgeStarts);
     o << ',';
     writeRange(o, "edgeData", p.edgeData);
+    o << ',';
+    writeRange(o, "vertices", p.vertices);
     o << ",\"groups\":[";
     for (size_t g = 0; g < p.groups.size(); ++g)
       o << (g ? "," : "") << '[' << p.groups[g].start << ',' << p.groups[g].count << ','
@@ -2530,25 +2577,35 @@ std::string toJson(const Source& src, const Builder& b)
     writeRange(o, "segments", p.segments);
     o << ',';
     writeRange(o, "triangles", p.triangles);
-    o << ",\"faces\":[";
-    for (size_t k = 0; k < p.faces.size(); ++k)
-      o << (k ? "," : "") << p.faces[k];
-    o << ']';
+    for (const auto& [key, nodeKey, list] : kRefLists)
+    {
+      o << ",\"" << key << "\":[";
+      for (size_t k = 0; k < (p.refs.*list).size(); ++k)
+        o << (k ? "," : "") << (p.refs.*list)[k];
+      o << ']';
+    }
     if (!p.nodes.empty())
     {
       o << ",\"nodes\":[";
       for (size_t k = 0; k < p.nodes.size(); ++k)
         o << (k ? "," : "") << p.nodes[k];
-      o << "],\"nodeFaces\":[";
-      for (size_t k = 0; k < p.nodeFaces.size(); ++k)
+      o << ']';
+      for (const auto& [key, nodeKey, list] : kRefLists)
       {
-        const auto& [owner, node, faces] = p.nodeFaces[k];
-        o << (k ? "," : "") << '[' << owner << ',' << node;
-        for (int f : faces)
-          o << ',' << f;
+        o << ",\"" << nodeKey << "\":[";
+        bool first = true;
+        for (const auto& [owner, node, refs] : p.nodeRefs)
+        {
+          if ((refs.*list).empty())
+            continue;
+          o << (first ? "" : ",") << '[' << owner << ',' << node;
+          for (int i : refs.*list)
+            o << ',' << i;
+          o << ']';
+          first = false;
+        }
         o << ']';
       }
-      o << ']';
     }
     numbers("value", p.value);
     numbers("plusMinus", p.plusMinus);

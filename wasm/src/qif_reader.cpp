@@ -46,6 +46,7 @@
 #include <Geom_ToroidalSurface.hxx>
 #include <Geom_TrimmedCurve.hxx>
 #include <LDOMParser.hxx>
+#include <NCollection_DataMap.hxx>
 #include <LDOM_Document.hxx>
 #include <LDOM_Element.hxx>
 #include <Precision.hxx>
@@ -53,7 +54,10 @@
 #include <ShapeBuild_ReShape.hxx>
 #include <ShapeFix_Shape.hxx>
 #include <TDataStd_Name.hxx>
+#include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
+#include <TopTools_ShapeMapHasher.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Compound.hxx>
 #include <TopoDS_Iterator.hxx>
@@ -933,7 +937,7 @@ public:
     else
       loosePart();
     myShapes->UpdateAssemblies();
-    if (myFinalFaces.empty())
+    if (myFinal.empty())
       throw std::runtime_error(myFailedFaces ? "None of the faces in this QIF file could be built"
                                              : "This QIF file has no model geometry (it holds a measurement plan, results or rules)");
     if (myFailedFaces)
@@ -1012,6 +1016,7 @@ private:
       return it->second;
     TopoDS_Vertex v;
     myBuilder.MakeVertex(v, xyz(lookup(ref(lookup(id), "Point")), "XYZ"), Precision::Confusion());
+    myTopoIds.Bind(v, id);
     return myVertices[id] = v;
   }
 
@@ -1042,6 +1047,7 @@ private:
     }
     myBuilder.Range(edge, c.first, c.last);
     myBuilder.SameParameter(edge, false); // 2D and 3D curves are parameterised independently
+    myTopoIds.Bind(edge, id);
     return myEdges[id] = edge;
   }
 
@@ -1217,8 +1223,8 @@ private:
   }
 
   // Fixes a built body (same parameter, tolerances, orientation) and scales it to mm; records where
-  // its faces ended up.
-  TopoDS_Shape finish(const TopoDS_Shape& built, const std::vector<int>& faceIds)
+  // its faces, edges and vertices ended up. The QIF ids of its edges and vertices go in topoIds.
+  TopoDS_Shape finish(const TopoDS_Shape& built, const std::vector<int>& faceIds, std::vector<int>& topoIds)
   {
     ShapeFix_Shape fix(built);
     fix.Perform();
@@ -1231,15 +1237,25 @@ private:
       scale.emplace(shape, t, true);
       shape = scale->Shape();
     }
+    TopTools_IndexedMapOfShape fixedShapes;
+    TopExp::MapShapes(fix.Shape(), fixedShapes);
+    const auto record = [&](int id, const TopoDS_Shape& original) {
+      // ShapeFix may replace a shape more than once, or drop it.
+      for (TopExp_Explorer ex(fix.Context()->ValueLeaf(original), original.ShapeType()); ex.More(); ex.Next())
+        if (fixedShapes.Contains(ex.Current()))
+          myFinal[id].push_back(scale ? scale->ModifiedShape(ex.Current()) : ex.Current());
+    };
     for (const int id : faceIds)
-    {
-      const auto f = myFaces.find(id);
-      if (f == myFaces.end() || !f->second)
-        continue;
-      const TopoDS_Shape fixed = fix.Context()->ValueLeaf(*f->second); // ShapeFix may replace a face more than once
-      for (TopExp_Explorer ex(fixed, TopAbs_FACE); ex.More(); ex.Next())
-        myFinalFaces[id].push_back(scale ? scale->ModifiedShape(ex.Current()) : ex.Current());
-    }
+      if (const auto f = myFaces.find(id); f != myFaces.end() && f->second)
+        record(id, *f->second);
+    TopTools_IndexedMapOfShape builtShapes;
+    TopExp::MapShapes(built, builtShapes);
+    for (int i = 1; i <= builtShapes.Extent(); ++i)
+      if (const int* id = myTopoIds.Seek(builtShapes(i)))
+      {
+        topoIds.push_back(*id);
+        record(*id, builtShapes(i));
+      }
     return shape;
   }
 
@@ -1255,16 +1271,17 @@ private:
       TopoDS_Shape     shape;
       LDOM_Element     element;
       bool             hidden;
-      std::vector<int> faceIds;
+      std::vector<int> faceIds, topoIds; // QIF faces; edges and vertices
     };
     std::vector<Built> built;
     for (const BodyRef& b : bodies)
     {
-      std::vector<int>   faceIds;
+      std::vector<int>   faceIds, topoIds;
       const TopoDS_Shape raw = body(b.element, faceIds);
       if (raw.IsNull())
         continue;
-      built.push_back({finish(raw, faceIds), b.element, b.hidden || flag(b.element, "hidden"), faceIds});
+      const TopoDS_Shape shape = finish(raw, faceIds, topoIds);
+      built.push_back({shape, b.element, b.hidden || flag(b.element, "hidden"), faceIds, topoIds});
       myBuilder.Add(compound, built.back().shape);
     }
     if (built.empty())
@@ -1283,15 +1300,18 @@ private:
           if (b.hidden)
             myColors->SetVisibility(sub, false);
         }
+      for (const int id : b.topoIds)
+        if (myFinal.count(id)) // not dropped by ShapeFix
+          myPartOf[id] = part;
       for (const int id : b.faceIds)
       {
-        if (!myFinalFaces.count(id)) // not built (logged in face)
+        if (!myFinal.count(id)) // not built (logged in face)
           continue;
-        myFacePart[id]                      = part;
+        myPartOf[id]                        = part;
         const std::optional<Quantity_Color> fc = colorOf(lookup(id));
         if (!fc)
           continue;
-        for (const TopoDS_Shape& f : myFinalFaces[id])
+        for (const TopoDS_Shape& f : myFinal[id])
           if (const TDF_Label sub = myShapes->AddSubShape(part, f); !sub.IsNull())
             myColors->SetColor(sub, *fc, XCAFDoc_ColorSurf);
       }
@@ -1386,8 +1406,8 @@ private:
   // -------------------------------------------------------------------------
   // PMI
 
-  // Faces referenced through feature nominals (or directly), as built.
-  void addFaces(const std::vector<int>& refs, FilePmiItem& item, int depth = 0)
+  // Faces, edges and vertices referenced through feature nominals (or directly), as built.
+  void addShapes(const std::vector<int>& refs, FilePmiItem& item, int depth = 0)
   {
     for (const int id : refs)
     {
@@ -1395,18 +1415,18 @@ private:
       if (it == myById.end())
         continue;
       const std::string tag = tagOf(it->second);
-      if (tag == "Face")
+      if (tag == "Face" || tag == "Edge" || tag == "Vertex")
       {
-        if (item.part.IsNull() && myFacePart.count(id))
-          item.part = myFacePart[id];
-        if (myFacePart.count(id) && myFacePart[id] == item.part)
-          for (const TopoDS_Shape& f : myFinalFaces[id])
-            item.faces.push_back(f);
+        if (item.part.IsNull() && myPartOf.count(id))
+          item.part = myPartOf[id];
+        if (myPartOf.count(id) && myPartOf[id] == item.part)
+          for (const TopoDS_Shape& s : myFinal[id])
+            item.shapes.push_back(s);
       }
       else if (depth < 2) // a feature nominal: its entities, or the features it is made of
       {
-        addFaces(ids(it->second, "EntityInternalIds"), item, depth + 1);
-        addFaces(ids(it->second, "FeatureNominalIds"), item, depth + 1);
+        addShapes(ids(it->second, "EntityInternalIds"), item, depth + 1);
+        addShapes(ids(it->second, "FeatureNominalIds"), item, depth + 1);
       }
     }
   }
@@ -1445,7 +1465,7 @@ private:
       datumLabels[id] = text(child(d, "DatumLabel"));
       item.kind       = "datum";
       item.type       = "Datum " + datumLabels[id];
-      addFaces(ids(d, "FeatureNominalIds"), item);
+      addShapes(ids(d, "FeatureNominalIds"), item);
       add(id, std::move(item));
     }
 
@@ -1501,7 +1521,7 @@ private:
           }
         }
       }
-      addFaces(ids(n, "FeatureNominalIds"), item);
+      addShapes(ids(n, "FeatureNominalIds"), item);
       add(std::atoi(attr(n, "id").c_str()), std::move(item));
     }
 
@@ -1513,7 +1533,7 @@ private:
       item.name = text(child(note, "Text"));
       if (item.name.empty())
         item.name = attr(note, "label");
-      addFaces(ids(note, "EntityInternalIds"), item);
+      addShapes(ids(note, "EntityInternalIds"), item);
       add(std::atoi(attr(note, "id").c_str()), std::move(item));
     }
 
@@ -1522,7 +1542,7 @@ private:
       FilePmiItem item;
       item.kind = "datum";
       item.type = "Datum target " + text(child(target, "DatumTargetLabel"));
-      addFaces({idOf(child(target, "FeatureNominalId"))}, item);
+      addShapes({idOf(child(target, "FeatureNominalId"))}, item);
       add(std::atoi(attr(target, "id").c_str()), std::move(item));
     }
 
@@ -1630,8 +1650,9 @@ private:
   std::set<int>                                      myInexactEdges; // curve parameter not affine to QIF's
   std::unordered_map<int, std::optional<TopoDS_Face>> myFaces;
   int                                                myFailedFaces = 0;
-  std::map<int, std::vector<TopoDS_Shape>>           myFinalFaces; // QIF face id → faces in the model
-  std::map<int, TDF_Label>                           myFacePart;
+  NCollection_DataMap<TopoDS_Shape, int, TopTools_ShapeMapHasher> myTopoIds; // built edge or vertex → QIF id
+  std::map<int, std::vector<TopoDS_Shape>>           myFinal; // QIF face, edge or vertex id → shapes in the model
+  std::map<int, TDF_Label>                           myPartOf;
   std::map<int, TDF_Label>                           myParts, myAssemblies;
 };
 

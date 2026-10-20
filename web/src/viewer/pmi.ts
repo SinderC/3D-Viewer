@@ -1,41 +1,25 @@
 // PMI presentations (lines, and filled areas such as text), drawn with every instance of the part
-// (or, for assembly PMI, the assembly) that owns them, and the faces the selected item refers to.
+// (or, for assembly PMI, the assembly) that owns them. What PMI refers to is drawn by ElementHighlight.
 import * as THREE from 'three';
-import { faceTriangles, type Model } from '../core/model';
+import type { Model } from '../core/model';
 import { isShown } from './objects';
-
-const SELECTED_COLOR = 0xff7d2d;
+import { SELECTED_COLOR } from './selection';
 
 export class PmiLayer {
   private readonly line = new THREE.LineBasicMaterial();
   private readonly selectedLine = new THREE.LineBasicMaterial({ color: SELECTED_COLOR });
   private readonly fill = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
   private readonly selectedFill = new THREE.MeshBasicMaterial({ color: SELECTED_COLOR, side: THREE.DoubleSide });
-  private readonly faceMaterial = new THREE.MeshBasicMaterial({
-    color: SELECTED_COLOR,
-    transparent: true,
-    opacity: 0.35,
-    depthWrite: false,
-    side: THREE.DoubleSide,
-    polygonOffset: true,
-    polygonOffsetFactor: -1,
-    polygonOffsetUnits: -1,
-  });
-  private model?: Model;
-  private nodeObjects: THREE.Object3D[] = [];
   private owners: THREE.Object3D[][] = []; // per prototype: the node objects that instance it
   private objects: (THREE.LineSegments | THREE.Mesh)[][] = []; // per PMI item: lines and fill per instance
-  private faces: THREE.Mesh[] = [];
-  private selected: number | null = null;
+  private selected: number[] = [];
 
   /** Adds the PMI of `model` under its owners' node objects (or `root` for model coordinates). */
   build(model: Model, nodeObjects: THREE.Object3D[], root: THREE.Object3D): void {
     this.clear();
-    this.model = model;
-    this.nodeObjects = nodeObjects;
     this.owners = model.protos.map(() => []);
     model.nodes.forEach((n) => n.proto >= 0 && nodeObjects[n.id] && this.owners[n.proto].push(nodeObjects[n.id]));
-    this.objects = model.pmi.map((item) => {
+    this.objects = model.pmi.map((item, index) => {
       const owners = item.nodes
         ? item.nodes.map((n) => nodeObjects[n]).filter(Boolean)
         : item.proto >= 0
@@ -47,7 +31,8 @@ export class PmiLayer {
         geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
         return owners.map((owner) => {
           const o = create(geometry);
-          o.raycast = () => {}; // not pickable; bounds stay the model's
+          o.raycast = () => {}; // picked explicitly in pick()
+          o.userData.pmi = index;
           owner.add(o);
           return o;
         });
@@ -68,39 +53,29 @@ export class PmiLayer {
     this.objects.forEach((objects, i) => objects.forEach((o) => (o.visible = visible && !hidden.has(i))));
   }
 
-  /** Highlights an item's lines and overlays the faces it refers to. */
-  select(index: number | null): void {
-    if (this.selected !== null) this.paint(this.selected, false);
-    this.clearFaces();
-    this.selected = index;
-    const item = index === null ? undefined : this.model?.pmi[index];
-    if (!item || !this.model) return;
-    this.paint(index!, true);
-    if (item.nodeFaces) {
-      for (const [, node, ...faces] of item.nodeFaces) {
-        const owner = this.nodeObjects[node];
-        if (owner) this.addFaces(faceTriangles(this.model.protos[this.model.nodes[node].proto], faces), [owner]);
+  /** Highlights these items' lines and text. */
+  select(indices: number[]): void {
+    for (const i of this.selected) this.paint(i, false);
+    this.selected = indices;
+    for (const i of indices) this.paint(i, true);
+  }
+
+  /** The shown item nearest along the ray, and how far; lines within the raycaster's line threshold. */
+  pick(raycaster: THREE.Raycaster): { index: number; distance: number } | null {
+    const hits: THREE.Intersection[] = [];
+    for (const objects of this.objects)
+      for (const o of objects) {
+        if (!isShown(o)) continue;
+        if (o instanceof THREE.Mesh) THREE.Mesh.prototype.raycast.call(o, raycaster, hits);
+        else THREE.LineSegments.prototype.raycast.call(o, raycaster, hits);
       }
-      return;
-    }
-    if (item.proto < 0 || !item.faces.length) return;
-    this.addFaces(faceTriangles(this.model.protos[item.proto], item.faces), this.owners[item.proto]);
+    const nearest = hits.reduce<THREE.Intersection | undefined>((a, h) => (!a || h.distance < a.distance ? h : a), undefined);
+    return nearest ? { index: nearest.object.userData.pmi as number, distance: nearest.distance } : null;
   }
 
-  private addFaces(positions: Float32Array, owners: THREE.Object3D[]): void {
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    for (const owner of owners) {
-      const mesh = new THREE.Mesh(geometry, this.faceMaterial);
-      mesh.raycast = () => {};
-      owner.add(mesh);
-      this.faces.push(mesh);
-    }
-  }
-
-  /** Every PMI object in the scene: presentations and face overlays. */
+  /** Every PMI object in the scene. */
   get all(): THREE.Object3D[] {
-    return [...this.objects.flat(), ...this.faces];
+    return this.objects.flat();
   }
 
   /** Bounds of the shown PMI, in world coordinates. */
@@ -116,7 +91,6 @@ export class PmiLayer {
   }
 
   clear(): void {
-    this.clearFaces();
     for (const objects of this.objects)
       for (const o of objects) {
         o.geometry.dispose(); // shared by an item's instances; disposing twice is harmless
@@ -124,20 +98,11 @@ export class PmiLayer {
       }
     this.objects = [];
     this.owners = [];
-    this.nodeObjects = [];
-    this.selected = null;
-    this.model = undefined;
+    this.selected = [];
   }
 
   dispose(): void {
     this.clear();
     for (const m of [this.line, this.selectedLine, this.fill, this.selectedFill]) m.dispose();
-    this.faceMaterial.dispose();
-  }
-
-  private clearFaces(): void {
-    new Set(this.faces.map((m) => m.geometry)).forEach((g) => g.dispose());
-    this.faces.forEach((m) => m.removeFromParent());
-    this.faces = [];
   }
 }

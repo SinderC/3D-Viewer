@@ -26,8 +26,8 @@
 - **External references:** an assembly that keeps parts in other files (STEP AP203, AP214 or AP242,
   or JT, IGES, STL, BREP, OBJ, VRML) opens together with them when they are selected at the same time. If any are missing, the viewer names them and offers to add them.
 - **AP242 PMI:** dimensions, geometric tolerances, datums and notes as drawn in the file (lines and
-  filled text), each with show/hide, its referenced faces and its semantic values (type, nominal,
-  tolerances, datums). Assembly PMI on particular component instances is drawn once in the
+  filled text), each with show/hide, its referenced faces, edges and vertices, and its semantic values
+  (type, nominal, tolerances, datums). Assembly PMI on particular component instances is drawn once in the
   assembly, also when the components are in other files (AP242 external element references).
 - **Attributes** (user-defined) of parts, and of single component instances, deep ones included.
 - **Saved views:** direction, up vector and the PMI they show. OCCT keeps no camera position, so a
@@ -53,7 +53,7 @@ B-rep geometry, so every measurement works.
   assemblies, colours of bodies and faces, and the file's length unit (including the product's scale
   coefficient). Bodies the file hides (auxiliary geometry) are hidden.
 - **PMI:** characteristics (dimensions and geometric tolerances) with their nominal, tolerance or
-  limits, datums and referenced faces; datums, datum targets and notes. Drawn as the file places them
+  limits, datums and referenced faces, edges and vertices; datums, datum targets and notes. Drawn as the file places them
   (`PMIDisplay`: frames, leaders, witness lines, graphics and text). Text uses one font of our own
   (osifont), not the font the file names, so its width may differ slightly from the exporter's
   frames. Saved views with their direction and the PMI they show.

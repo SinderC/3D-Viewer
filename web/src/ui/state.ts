@@ -1,8 +1,9 @@
 import type { AppearanceId, AppearanceSetting, ColorSetting, PartColor } from '../core/appearances';
 import type { Model } from '../core/model';
+import { pmiElements, refersTo, type ElementRef } from '../core/pmi';
 import type { UnitId } from '../core/units';
 import { MEASURE_MODES, type MeasureMode } from '../viewer/measure';
-import type { DisplayStyle, Section, Tool } from '../viewer/Viewer';
+import type { DisplayStyle, Section, Selection, Tool } from '../viewer/Viewer';
 import type { Quality } from '../worker/protocol';
 
 export interface State {
@@ -15,6 +16,8 @@ export interface State {
   model?: Model;
   hidden: ReadonlySet<number>;
   selected: number | null;
+  /** A face, edge or vertex picked in the selected part. */
+  element: ElementRef | null;
   tool: Tool;
   measureMode: MeasureMode;
   unit: UnitId;
@@ -40,6 +43,7 @@ export type Action =
   | { type: 'close' }
   | { type: 'setHidden'; hidden: ReadonlySet<number> }
   | { type: 'select'; id: number | null }
+  | { type: 'pickElement'; element: ElementRef }
   | { type: 'setTool'; tool: Tool }
   | { type: 'setMeasureMode'; mode: MeasureMode }
   | { type: 'setUnit'; unit: UnitId }
@@ -64,6 +68,7 @@ export const initialState: State = {
   status: 'idle',
   hidden: new Set(),
   selected: null,
+  element: null,
   tool: 'select',
   measureMode: 'pointDistance',
   unit: 'mm',
@@ -136,7 +141,9 @@ export function reducer(state: State, action: Action): State {
     case 'setHidden':
       return { ...state, hidden: action.hidden };
     case 'select':
-      return { ...state, selected: action.id, selectedPmi: action.id === null ? state.selectedPmi : null };
+      return { ...state, selected: action.id, element: null, selectedPmi: null };
+    case 'pickElement':
+      return { ...state, selected: action.element.node, element: action.element, selectedPmi: null };
     case 'setTool':
       return { ...state, tool: action.tool };
     case 'setMeasureMode':
@@ -164,7 +171,12 @@ export function reducer(state: State, action: Action): State {
     case 'setHiddenPmi':
       return { ...state, hiddenPmi: action.hidden };
     case 'selectPmi':
-      return { ...state, selectedPmi: action.index, selected: action.index === null ? state.selected : null };
+      return {
+        ...state,
+        selectedPmi: action.index,
+        selected: action.index === null ? state.selected : null,
+        element: action.index === null ? state.element : null,
+      };
     case 'applyView': {
       // A view shows exactly its PMI; views without any (e.g. "Front") leave PMI visibility as it is.
       const shown = new Set(state.model?.views[action.index]?.pmi);
@@ -172,6 +184,25 @@ export function reducer(state: State, action: Action): State {
       return { ...state, view: { index: action.index }, pmi: state.pmi || shown.size > 0, hiddenPmi };
     }
   }
+}
+
+/** What the selection highlights: the selected part (unless an element of it is picked), the picked
+ * element or the selected PMI's elements, and the selected PMI or the PMI that refers to the element. */
+export function highlight({ model, selected, element, selectedPmi }: Pick<State, 'model' | 'selected' | 'element' | 'selectedPmi'>): Selection {
+  if (model && selectedPmi !== null)
+    return { focus: null, part: null, elements: pmiElements(model, model.pmi[selectedPmi]), pmi: [selectedPmi] };
+  if (model && element) {
+    const pmi = [...model.pmi.keys()].filter((i) => refersTo(model, model.pmi[i], element));
+    return { focus: selected, part: null, elements: [element], pmi };
+  }
+  return { focus: selected, part: selected, elements: [], pmi: [] };
+}
+
+/** The nodes and their ancestors, so collapsed branches show what they hold. */
+export function withAncestors(model: Model, nodes: Iterable<number>): Set<number> {
+  const out = new Set<number>();
+  for (const n of nodes) for (let p = n; p >= 0 && !out.has(p); p = model.nodes[p].parent) out.add(p);
+  return out;
 }
 
 // Hide everything except the node, its ancestors and its subtree.

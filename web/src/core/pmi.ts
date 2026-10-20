@@ -1,5 +1,5 @@
 // Display text for PMI items. Lengths come in mm and follow the chosen display unit; angles are degrees.
-import type { PmiItem, PmiKind } from './model';
+import type { Model, PmiItem, PmiKind } from './model';
 import { formatLength, type UnitId } from './units';
 
 export const PMI_KINDS: Record<PmiKind, string> = {
@@ -51,11 +51,49 @@ export function pmiLabel(p: PmiItem, unit: UnitId): string {
   return parts.filter(Boolean).join(' ');
 }
 
-/** Faces the item refers to; for assembly PMI, under the first instance of its assembly. */
-const faceCount = (p: PmiItem) =>
-  p.nodeFaces
-    ? p.nodeFaces.filter(([owner]) => owner === p.nodes?.[0]).reduce((n, [, , ...faces]) => n + faces.length, 0)
-    : p.faces.length;
+export type ElementKind = 'face' | 'edge' | 'vertex';
+
+/** A B-rep face, edge or vertex of a part instance: an index into its prototype's faceStarts, edgeStarts or vertices. */
+export interface ElementRef {
+  node: number;
+  kind: ElementKind;
+  index: number;
+}
+
+// Where PmiItem keeps the references to each kind: for part PMI, and per instance for assembly PMI.
+const LISTS = {
+  face: ['faces', 'nodeFaces'],
+  edge: ['edges', 'nodeEdges'],
+  vertex: ['vertices', 'nodeVertices'],
+} as const;
+const KINDS = Object.keys(LISTS) as ElementKind[];
+
+/** The elements an item refers to: on every instance of its part, or for assembly PMI, on the instances it names. */
+export function pmiElements(model: Model, p: PmiItem): ElementRef[] {
+  const out: ElementRef[] = [];
+  for (const kind of KINDS) {
+    const [list, nodeList] = LISTS[kind];
+    if (p.nodes) for (const [, node, ...indices] of p[nodeList] ?? []) for (const index of indices) out.push({ node, kind, index });
+    else if (p.proto >= 0)
+      for (const n of model.nodes) if (n.proto === p.proto) for (const index of p[list]) out.push({ node: n.id, kind, index });
+  }
+  return out;
+}
+
+/** Whether an item refers to the element. */
+export function refersTo(model: Model, p: PmiItem, e: ElementRef): boolean {
+  const [list, nodeList] = LISTS[e.kind];
+  if (p.nodes) return !!p[nodeList]?.some(([, node, ...indices]) => node === e.node && indices.includes(e.index));
+  return p.proto >= 0 && p.proto === model.nodes[e.node]?.proto && p[list].includes(e.index);
+}
+
+/** Elements of a kind the item refers to; for assembly PMI, under the first instance of its assembly. */
+const count = (p: PmiItem, kind: ElementKind) => {
+  const [list, nodeList] = LISTS[kind];
+  return p.nodes
+    ? (p[nodeList] ?? []).filter(([owner]) => owner === p.nodes![0]).reduce((n, [, , ...indices]) => n + indices.length, 0)
+    : p[list].length;
+};
 
 /** Label/value rows for the info panel. */
 export function pmiInfo(p: PmiItem, unit: UnitId): [string, string][] {
@@ -67,7 +105,9 @@ export function pmiInfo(p: PmiItem, unit: UnitId): [string, string][] {
     ['Deviation', deviation(p, unit)],
     ['Per unit', p.perUnit && `${perUnit(p, unit)} ${p.unitArea ? 'area' : 'length'}`],
     ['Datums', p.datums?.join(', ') || undefined],
-    ['Faces', faceCount(p) ? String(faceCount(p)) : undefined],
+    ['Faces', count(p, 'face') ? String(count(p, 'face')) : undefined],
+    ['Edges', count(p, 'edge') ? String(count(p, 'edge')) : undefined],
+    ['Vertices', count(p, 'vertex') ? String(count(p, 'vertex')) : undefined],
   ];
   return rows.filter((r): r is [string, string] => r[1] !== undefined);
 }

@@ -29,6 +29,7 @@ export interface RawModel {
     faceData: Range;
     edgeStarts: Range;
     edgeData: Range;
+    vertices: Range;
     groups: [start: number, count: number, color: number][];
   }[];
   pmi: (Omit<PmiItem, 'segments' | 'triangles'> & { segments: Range; triangles: Range })[];
@@ -78,13 +79,18 @@ export interface PmiItem {
   segments: Float32Array;
   /** Filled presentation areas (text glyphs), 9 floats per triangle, in the owner's coordinates. */
   triangles: Float32Array;
-  /** Referenced faces of the owning prototype (indices into its faceStarts). */
+  /** What it refers to in the owning prototype: indices into its faceStarts, edgeStarts and vertices. */
   faces: number[];
+  edges: number[];
+  vertices: number[];
   /** Assembly PMI: the nodes it is drawn in (instances of the assembly it is defined in), instead of `proto`. */
   nodes?: number[];
   /** Assembly PMI: referenced faces per component instance, as [owner node, instance node, ...faces of
    * the instance's prototype]; the owner is the one of `nodes` the instance is under. */
   nodeFaces?: number[][];
+  /** Likewise edges and vertices. */
+  nodeEdges?: number[][];
+  nodeVertices?: number[][];
   value?: [number];
   plusMinus?: [lower: number, upper: number];
   range?: [lower: number, upper: number];
@@ -118,6 +124,8 @@ export interface Proto {
   edgeStarts: Uint32Array;
   /** Per edge, EDGE_STRIDE values: kind (0 other, 1 line, 2 circle), length, radius, centre xyz, axis xyz. */
   edgeData: Float64Array;
+  /** B-rep vertices of the edges, xyz each. */
+  vertices: Float32Array;
   groups: { start: number; count: number; color: number }[];
   /** Texture coordinates by three.js attribute name, and per-vertex colours; from glTF only. */
   uvs?: Partial<Record<UvSet, Float32Array>>;
@@ -211,6 +219,7 @@ export function decodeModel(raw: RawModel, geometry: ArrayBuffer): Model {
     faceData: f64(p.faceData),
     edgeStarts: u32(p.edgeStarts),
     edgeData: f64(p.edgeData),
+    vertices: f32(p.vertices),
     groups: p.groups.map(([start, count, color]) => ({ start, count, color })),
   }));
 

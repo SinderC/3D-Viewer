@@ -1,9 +1,9 @@
-import { useEffect, useState, type Dispatch } from 'react';
+import { useEffect, useMemo, useState, type Dispatch } from 'react';
 import { ModelTree } from './ModelTree';
 import { PmiList } from './PmiList';
 import { Properties } from './Properties';
 import { Splitter } from './Splitter';
-import type { Action, State } from './state';
+import { highlight, withAncestors, type Action, type State } from './state';
 
 type Tab = 'model' | 'pmi' | 'views' | 'info';
 
@@ -18,9 +18,14 @@ interface Props {
 
 // Model tree, and PMI and saved views when the file has them.
 export function Sidebar({ state, dispatch, info, onCollapse }: Props) {
-  const { model, unit } = state;
+  const { model, unit, selected, element, selectedPmi } = state;
   const [tab, setTab] = useState<Tab>('model');
   useEffect(() => setTab('model'), [model]);
+  // Cross-highlighting: the parts holding what the selected PMI refers to, and the PMI that refers to the picked element.
+  const related = useMemo(() => {
+    const { elements, pmi } = highlight({ model, selected, element, selectedPmi });
+    return { nodes: model ? withAncestors(model, elements.map((e) => e.node)) : new Set<number>(), pmi: new Set(pmi) };
+  }, [model, selected, element, selectedPmi]);
 
   if (!model) {
     return (
@@ -51,10 +56,24 @@ export function Sidebar({ state, dispatch, info, onCollapse }: Props) {
         </div>
       )}
       {current === 'model' && (
-        <ModelTree key={state.fileName} model={model} hidden={state.hidden} selected={state.selected} dispatch={dispatch} />
+        <ModelTree
+          key={state.fileName}
+          model={model}
+          hidden={state.hidden}
+          selected={selected}
+          related={related.nodes}
+          dispatch={dispatch}
+        />
       )}
       {current === 'pmi' && (
-        <PmiList model={model} hidden={state.hiddenPmi} selected={state.selectedPmi} unit={unit} dispatch={dispatch} />
+        <PmiList
+          model={model}
+          hidden={state.hiddenPmi}
+          selected={selectedPmi}
+          related={related.pmi}
+          unit={unit}
+          dispatch={dispatch}
+        />
       )}
       {current === 'views' && (
         <div className="tree">

@@ -181,6 +181,7 @@ input[type='checkbox'] { accent-color: var(--accent); margin: 0; }
 }
 .row:hover { background: var(--surface-2); }
 .row.selected { background: var(--accent-fill); }
+.row.related { background: var(--accent-tint); }
 .row.dim .name { color: var(--text-3); }
 .row .name { flex: 1; overflow: hidden; text-overflow: ellipsis; }
 .row .caret, .row .isolate { display: inline-flex; padding: 0; background: none; border: 0; color: var(--text-2); }

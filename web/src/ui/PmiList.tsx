@@ -8,12 +8,16 @@ interface Props {
   model: Model;
   hidden: ReadonlySet<number>;
   selected: number | null;
+  /** Items that refer to the picked face, edge or vertex. */
+  related: ReadonlySet<number>;
   unit: UnitId;
   dispatch: Dispatch<Action>;
 }
 
 // PMI items grouped by kind: a checkbox to show or hide each, click to select.
-export function PmiList({ model, hidden, selected, unit, dispatch }: Props) {
+export function PmiList({ model, hidden, selected, related, unit, dispatch }: Props) {
+  // The row to scroll to: the selected item, else the first that refers to the picked element.
+  const focus = selected ?? related.values().next().value;
   const groups = Object.keys(PMI_KINDS)
     .map((kind) => [kind as PmiKind, [...model.pmi.keys()].filter((i) => model.pmi[i].kind === kind)] as const)
     .filter(([, items]) => items.length);
@@ -41,6 +45,8 @@ export function PmiList({ model, hidden, selected, unit, dispatch }: Props) {
               label={pmiLabel(model.pmi[i], unit)}
               hidden={hidden.has(i)}
               selected={selected === i}
+              related={related.has(i)}
+              focus={focus === i}
               onToggle={() => toggle(i)}
               onSelect={() => dispatch({ type: 'selectPmi', index: selected === i ? null : i })}
             />
@@ -55,17 +61,23 @@ interface RowProps {
   label: string;
   hidden: boolean;
   selected: boolean;
+  related: boolean;
+  focus: boolean;
   onToggle: () => void;
   onSelect: () => void;
 }
 
-function PmiRow({ label, hidden, selected, onToggle, onSelect }: RowProps) {
+function PmiRow({ label, hidden, selected, related, focus, onToggle, onSelect }: RowProps) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (selected) ref.current?.scrollIntoView({ block: 'nearest' });
-  }, [selected]);
+    if (focus) ref.current?.scrollIntoView({ block: 'nearest' });
+  }, [focus]);
   return (
-    <div ref={ref} className={`row${selected ? ' selected' : ''}${hidden ? ' dim' : ''}`} onClick={onSelect}>
+    <div
+      ref={ref}
+      className={`row${selected ? ' selected' : related ? ' related' : ''}${hidden ? ' dim' : ''}`}
+      onClick={onSelect}
+    >
       <input
         type="checkbox"
         aria-label="Visible"

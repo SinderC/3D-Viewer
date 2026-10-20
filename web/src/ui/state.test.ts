@@ -1,6 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import type { Model } from '../core/model';
-import { appearanceOf, colorOf, displayStyle, initialState, measureMode, reducer, searchTree, type State } from './state';
+import {
+  appearanceOf,
+  colorOf,
+  displayStyle,
+  highlight,
+  initialState,
+  measureMode,
+  reducer,
+  searchTree,
+  withAncestors,
+  type State,
+} from './state';
 
 describe('reducer', () => {
   it('close drops the model and keeps view preferences', () => {
@@ -73,6 +84,45 @@ describe('PMI state', () => {
     const s = reducer({ ...ready, selectedPmi: 1 }, { type: 'select', id: 4 });
     expect(s.selectedPmi).toBeNull();
     expect(reducer(s, { type: 'selectPmi', index: 2 }).selected).toBeNull();
+  });
+});
+
+describe('element selection', () => {
+  // Part 0 has two instances (nodes 1, 2); PMI 0 refers to its face 3, PMI 1 to its edge 3.
+  const node = (id: number, proto: number) => ({ id, name: '', parent: id ? 0 : -1, children: [], proto, color: -1 });
+  const pmi = (p: object) => ({ proto: 0, faces: [], edges: [], vertices: [], ...p });
+  const model = {
+    nodes: [node(0, -1), node(1, 0), node(2, 0)],
+    pmi: [pmi({ faces: [3] }), pmi({ edges: [3] })],
+  } as unknown as Model;
+  const ready: State = { ...initialState, status: 'ready', model };
+  const face = { node: 2, kind: 'face', index: 3 } as const;
+
+  it('picking an element selects its part and clears the PMI selection', () => {
+    const s = reducer({ ...ready, selectedPmi: 1 }, { type: 'pickElement', element: face });
+    expect(s).toMatchObject({ selected: 2, element: face, selectedPmi: null });
+    expect(reducer(s, { type: 'select', id: null }).element).toBeNull();
+    expect(reducer({ ...ready, selectedPmi: 1 }, { type: 'select', id: null }).selectedPmi).toBeNull(); // empty space
+    expect(reducer(s, { type: 'selectPmi', index: 0 }).element).toBeNull();
+  });
+
+  it('highlights the element and the PMI that refers to it, not the whole part', () => {
+    // zoom to selection still fits the element's part
+    expect(highlight({ ...ready, selected: 2, element: face })).toEqual({ focus: 2, part: null, elements: [face], pmi: [0] });
+    expect(highlight({ ...ready, selected: 2 })).toEqual({ focus: 2, part: 2, elements: [], pmi: [] });
+  });
+
+  it('highlights the elements of the selected PMI on every instance', () => {
+    expect(highlight({ ...ready, selectedPmi: 1 })).toEqual({
+      focus: null,
+      part: null,
+      elements: [
+        { node: 1, kind: 'edge', index: 3 },
+        { node: 2, kind: 'edge', index: 3 },
+      ],
+      pmi: [1],
+    });
+    expect([...withAncestors(model, [1, 2])]).toEqual([1, 0, 2]);
   });
 });
 

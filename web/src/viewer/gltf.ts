@@ -35,6 +35,7 @@ function proto(geometry: THREE.BufferGeometry, groups: Proto['groups']): Proto {
     faceData: new Float64Array(7),
     edgeStarts: EMPTY_U32,
     edgeData: new Float64Array(0),
+    vertices: EMPTY_F32,
     groups: groups.map((g) => ({ ...g, count: Math.min(g.count, indices.length - g.start) })), // Infinity counts run to the end
     uvs: Object.fromEntries(UV_SETS.flatMap((set) => (geometry.hasAttribute(set) ? [[set, floats(geometry.getAttribute(set))]] : []))),
     vertexColors: vertexColor && { array: floats(vertexColor), itemSize: vertexColor.itemSize as 3 | 4 },

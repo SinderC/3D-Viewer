@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { PmiItem } from './model';
-import { pmiInfo, pmiLabel } from './pmi';
+import type { Model, ModelNode, PmiItem } from './model';
+import { pmiElements, pmiInfo, pmiLabel, refersTo } from './pmi';
 
 const item = (p: Partial<PmiItem>): PmiItem => ({
   kind: 'dimension',
@@ -10,6 +10,8 @@ const item = (p: Partial<PmiItem>): PmiItem => ({
   segments: new Float32Array(),
   triangles: new Float32Array(),
   faces: [],
+  edges: [],
+  vertices: [],
   ...p,
 });
 
@@ -64,5 +66,51 @@ describe('pmiInfo', () => {
     // 2 faces under the first instance; the second instance of the assembly resolved only one
     const p = item({ nodes: [0, 7], nodeFaces: [[0, 2, 5], [0, 4, 5], [7, 9, 5]] });
     expect(pmiInfo(p, 'mm')).toContainEqual(['Faces', '2']);
+  });
+
+  it('counts edges and vertices', () => {
+    expect(pmiInfo(item({ edges: [1, 2, 3], vertices: [0] }), 'mm')).toEqual(
+      expect.arrayContaining([
+        ['Edges', '3'],
+        ['Vertices', '1'],
+      ]),
+    );
+  });
+});
+
+describe('cross-highlighting', () => {
+  // An assembly (node 0) with two instances (1, 2) of part 0 and one (3) of part 1.
+  const node = (id: number, proto: number): ModelNode => ({ id, name: '', parent: id ? 0 : -1, children: [], proto, color: -1 });
+  const model = { nodes: [node(0, -1), node(1, 0), node(2, 0), node(3, 1)] } as Model;
+
+  it('puts part PMI on every instance of its part', () => {
+    const p = item({ faces: [4], edges: [7], vertices: [2] });
+    expect(pmiElements(model, p)).toEqual([
+      { node: 1, kind: 'face', index: 4 },
+      { node: 2, kind: 'face', index: 4 },
+      { node: 1, kind: 'edge', index: 7 },
+      { node: 2, kind: 'edge', index: 7 },
+      { node: 1, kind: 'vertex', index: 2 },
+      { node: 2, kind: 'vertex', index: 2 },
+    ]);
+    expect(refersTo(model, p, { node: 2, kind: 'edge', index: 7 })).toBe(true);
+    expect(refersTo(model, p, { node: 2, kind: 'face', index: 7 })).toBe(false); // edge 7, not face 7
+    expect(refersTo(model, p, { node: 3, kind: 'face', index: 4 })).toBe(false); // another part
+  });
+
+  it('puts assembly PMI only on the instances it names', () => {
+    const p = item({ proto: -1, nodes: [0], nodeFaces: [[0, 2, 5]], nodeEdges: [[0, 3, 1]] });
+    expect(pmiElements(model, p)).toEqual([
+      { node: 2, kind: 'face', index: 5 },
+      { node: 3, kind: 'edge', index: 1 },
+    ]);
+    expect(refersTo(model, p, { node: 2, kind: 'face', index: 5 })).toBe(true);
+    expect(refersTo(model, p, { node: 1, kind: 'face', index: 5 })).toBe(false); // the other instance
+  });
+
+  it('refers to nothing for model-coordinate PMI', () => {
+    const p = item({ proto: -1, faces: [0] });
+    expect(pmiElements(model, p)).toEqual([]);
+    expect(refersTo(model, p, { node: 1, kind: 'face', index: 0 })).toBe(false);
   });
 });

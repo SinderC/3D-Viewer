@@ -3,11 +3,11 @@ import { isolate } from '../ui/state';
 import { apOf, decodeModel, defaultView, type RawModel, type SavedView } from './model';
 
 function rawFixture(): { raw: RawModel; geometry: ArrayBuffer } {
-  // One triangle prototype: 3 positions, 3 normals, 3 indices, 1 edge segment.
+  // One triangle prototype: 3 positions, 3 normals, 3 indices, 1 edge segment, its 2 vertices.
   const pos = [0, 0, 0, 1, 0, 0, 0, 1, 0];
   const nrm = [0, 0, 1, 0, 0, 1, 0, 0, 1];
   const edg = [0, 0, 0, 1, 0, 0];
-  const buf = new ArrayBuffer(120 + 7 * 8 + 9 * 8);
+  const buf = new ArrayBuffer(120 + 7 * 8 + 9 * 8 + 6 * 4);
   new Float32Array(buf, 0, 9).set(pos);
   new Float32Array(buf, 36, 9).set(nrm);
   new Uint32Array(buf, 72, 3).set([0, 1, 2]);
@@ -15,6 +15,7 @@ function rawFixture(): { raw: RawModel; geometry: ArrayBuffer } {
   // 108: faceStarts [0], 112: edgeStarts [0], 120: faceData (7 doubles), 176: edgeData (9 doubles)
   new Float64Array(buf, 120, 7).set([1, 0, 0, 0, 0, 0, 1]);
   new Float64Array(buf, 176, 9).set([1, 1, 0, 0, 0, 0, 0, 0, 0]);
+  new Float32Array(buf, 248, 6).set(edg); // vertices
   const raw: RawModel = {
     format: 'STEP',
     schema: 'AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF { 1 0 10303 442 1 1 4 }',
@@ -35,10 +36,11 @@ function rawFixture(): { raw: RawModel; geometry: ArrayBuffer } {
         edgeStarts: [112, 1],
         faceData: [120, 7],
         edgeData: [176, 9],
+        vertices: [248, 6],
         groups: [[0, 3, -1]],
       },
     ],
-    pmi: [{ kind: 'dimension', type: 'Distance', name: 'd1', proto: 0, segments: [84, 6], triangles: [0, 9], faces: [0], value: [1] }],
+    pmi: [{ kind: 'dimension', type: 'Distance', name: 'd1', proto: 0, segments: [84, 6], triangles: [0, 9], faces: [0], edges: [0], vertices: [1], value: [1] }],
     views: [{ name: 'MBD_A', direction: [0, 0, -1], up: [0, 1, 0], pmi: [0] }],
     products: [],
     counts: {},
@@ -62,7 +64,9 @@ describe('decodeModel', () => {
     expect(Array.from(m.protos[0].faceData)).toEqual([1, 0, 0, 0, 0, 0, 1]);
     expect(Array.from(m.protos[0].edgeData)).toEqual([1, 1, 0, 0, 0, 0, 0, 0, 0]);
     expect(Array.from(m.pmi[0].segments)).toEqual([0, 0, 0, 1, 0, 0]);
+    expect(Array.from(m.protos[0].vertices)).toEqual([0, 0, 0, 1, 0, 0]);
     expect(m.pmi[0].faces).toEqual([0]);
+    expect(m.pmi[0].vertices).toEqual([1]);
     expect(m.views[0].pmi).toEqual([0]);
   });
 });

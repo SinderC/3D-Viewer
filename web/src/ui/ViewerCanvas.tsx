@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState, type Dispatch } from 'react';
+import { useEffect, useMemo, useRef, useState, type Dispatch } from 'react';
 import { Viewer, type PmiColor, type Theme, type UpAxis } from '../viewer/Viewer';
 import { defaultView } from '../core/model';
-import { appearanceOf, colorOf, displayStyle, measureMode, type Action, type State } from './state';
+import { appearanceOf, colorOf, displayStyle, highlight, measureMode, type Action, type State } from './state';
 
 interface Props {
   state: State;
@@ -16,7 +16,7 @@ interface Props {
 export function ViewerCanvas({ state, dispatch, viewerRef, theme, pmiColor, upAxis }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const [viewer, setViewer] = useState<Viewer | null>(null);
-  const { model, hidden, selected, tool, unit, section, ortho, grid, ghost, explode, appearances, colors, pmi, hiddenPmi, selectedPmi, view } =
+  const { model, hidden, selected, element, tool, unit, section, ortho, grid, ghost, explode, appearances, colors, pmi, hiddenPmi, selectedPmi, view } =
     state;
   const display = displayStyle(state);
   const mode = measureMode(state);
@@ -24,6 +24,8 @@ export function ViewerCanvas({ state, dispatch, viewerRef, theme, pmiColor, upAx
   useEffect(() => {
     const viewer = new Viewer(host.current!);
     viewer.onPick = (id) => dispatch({ type: 'select', id });
+    viewer.onPickElement = (element) => dispatch({ type: 'pickElement', element });
+    viewer.onPickPmi = (index) => dispatch({ type: 'selectPmi', index });
     viewer.onSectionFace = (normal, position) => {
       dispatch({ type: 'setSection', section: { axis: 'face', normal, position } });
       dispatch({ type: 'setTool', tool: 'select' });
@@ -45,7 +47,8 @@ export function ViewerCanvas({ state, dispatch, viewerRef, theme, pmiColor, upAx
   useEffect(() => {
     if (model) viewer?.setLooks((id) => ({ appearance: appearanceOf(model, appearances, id), color: colorOf(model, colors, id) }));
   }, [viewer, model, appearances, colors]);
-  useEffect(() => viewer?.select(selected), [viewer, model, selected]);
+  const selection = useMemo(() => highlight({ model, selected, element, selectedPmi }), [model, selected, element, selectedPmi]);
+  useEffect(() => viewer?.setSelection(selection), [viewer, selection]);
   useEffect(() => viewer?.setTool(tool), [viewer, tool]);
   useEffect(() => viewer?.setMeasureMode(mode), [viewer, model, mode]);
   useEffect(() => viewer?.setUnit(unit), [viewer, unit]);
@@ -57,7 +60,6 @@ export function ViewerCanvas({ state, dispatch, viewerRef, theme, pmiColor, upAx
   useEffect(() => viewer?.setOrthographic(ortho), [viewer, ortho]);
   useEffect(() => viewer?.setGridVisible(grid), [viewer, grid]);
   useEffect(() => viewer?.setPmi(pmi, hiddenPmi), [viewer, model, pmi, hiddenPmi]);
-  useEffect(() => viewer?.selectPmi(selectedPmi), [viewer, model, selectedPmi]);
   // After the PMI visibility above, so the camera frames the view's PMI.
   // A file with saved views opens in its default one (orientation only; all PMI stays shown).
   useEffect(() => {

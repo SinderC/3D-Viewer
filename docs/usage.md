@@ -26,8 +26,14 @@ Open a file with **File › Open**, Cmd/Ctrl+O, or by dropping it on the window.
 - **Measure:** edge length, radius and diameter; distance between points, with vertex snapping; point
   to planar face; distance and angle between planar faces; point coordinates. Units are mm, cm, m,
   in, ft or ft-in (1/16"). Measurements stay on screen until removed.
-- **PMI:** see [formats](formats.md) for what each format provides. Select an item to see its
-  referenced faces and values; select a saved view to apply it.
+- **Selection:** on parts with exact (B-rep) geometry, a click picks the vertex, edge or face under
+  the cursor, shown faintly before you click, and selects its part in the model tree. On a face, a
+  vertex or edge must be within 2 pixels to take the click; off the model, within 6. Mesh parts (STL, OBJ, glTF, JT without exact geometry) are picked whole. A click on empty
+  space, or Esc, clears the selection. Hidden edges and vertices of a selection show through the model.
+- **PMI:** see [formats](formats.md) for what each format provides. Select an item, in the list or by
+  clicking it in the view, to see its values and the faces, edges and vertices it refers to; the
+  parts holding them are marked in the model tree. Picking a face, edge or vertex marks the PMI that
+  refers to it, in the view and in the PMI list. Select a saved view to apply it.
 - **Appearance:** for the selected part or the whole model, pick a colour or a finish: polished,
   brushed, sand-blasted or cast metal, anodised, brass, copper, glossy, matte or textured plastic,
   rubber, carbon fibre or wood, with environment reflections. Finishes keep the part's colour (light
@@ -39,7 +45,7 @@ Open a file with **File › Open**, Cmd/Ctrl+O, or by dropping it on the window.
 
 | Input | Action |
 |---|---|
-| Click | Select a part |
+| Click | Select a face, edge, vertex or PMI item; a part of a mesh model |
 | Drag | Rotate |
 | Right-drag or Shift+drag | Pan |
 | Scroll | Zoom |

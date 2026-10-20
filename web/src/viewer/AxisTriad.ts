@@ -5,7 +5,8 @@ const SIZE = 80; // px, keep in sync with .axis-triad in styles.css
 const LENGTH = 26; // px from origin to the axis tip
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
-const AXES = [
+/** Axis colours, also used by the rotation centre's rings. */
+export const AXES = [
   { label: 'X', dir: new THREE.Vector3(1, 0, 0), color: '#e5534b' },
   { label: 'Y', dir: new THREE.Vector3(0, 1, 0), color: '#57ab5a' },
   { label: 'Z', dir: new THREE.Vector3(0, 0, 1), color: '#539bf5' },
