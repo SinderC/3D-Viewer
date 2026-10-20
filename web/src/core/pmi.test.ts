@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Model, ModelNode, PmiItem } from './model';
+import type { Model, ModelNode, PmiItem, ToleranceModifier } from './model';
 import { pmiElements, pmiInfo, pmiLabel, refersTo } from './pmi';
 
 const item = (p: Partial<PmiItem>): PmiItem => ({
@@ -39,6 +39,36 @@ describe('pmiLabel', () => {
     expect(pmiInfo(straightness, 'mm')).toContainEqual(['Per unit', '15.000 mm length']);
     const area = item({ kind: 'tolerance', type: 'Flatness', value: [0.1], perUnit: [10, 20], unitArea: 'rectangular' });
     expect(pmiLabel(area, 'mm')).toBe('Flatness 0.100 mm / 10.000 mm × 20.000 mm');
+  });
+
+  it('adds the zone form, modifiers, projected zone and maximum to tolerances', () => {
+    const position = item({
+      kind: 'tolerance',
+      type: 'Position',
+      value: [0.1],
+      zone: 'diameter',
+      modifiers: ['maximumMaterial', 'freeState'],
+      projected: [12],
+      maxValue: [0.2],
+      datums: ['A'],
+    });
+    expect(pmiLabel(position, 'mm')).toBe('Position Ø0.100 mm Ⓜ 0.200 mm max Ⓕ Ⓟ 12.000 mm | A');
+    expect(pmiInfo(position, 'mm')).toEqual(
+      expect.arrayContaining([
+        ['Tolerance', 'Ø0.100 mm'],
+        ['Modifiers', 'maximum material, free state'],
+        ['Projected zone', '12.000 mm'],
+        ['Maximum', '0.200 mm'],
+      ]),
+    );
+    const sphere = item({ kind: 'tolerance', type: 'Position', value: [0.5], zone: 'spherical', modifiers: ['leastMaterial'] });
+    expect(pmiLabel(sphere, 'mm')).toBe('Position SØ0.500 mm Ⓛ');
+    const straightness = item({ kind: 'tolerance', type: 'Straightness', value: [0.05], perUnit: [25], modifiers: ['maximumMaterial'] });
+    expect(pmiLabel(straightness, 'mm')).toBe('Straightness 0.050 mm / 25.000 mm Ⓜ');
+    const unknown = item({ kind: 'tolerance', type: 'Position', value: [0.1], modifiers: ['unitedFeature' as ToleranceModifier] });
+    expect(pmiLabel(unknown, 'mm')).toBe('Position 0.100 mm unitedFeature');
+    const runout = item({ kind: 'tolerance', type: 'Circular runout', value: [0.1], runout: [45] });
+    expect(pmiInfo(runout, 'mm')).toContainEqual(['Zone angle', '45°']);
   });
 
   it('uses the name for notes and the type for datums', () => {

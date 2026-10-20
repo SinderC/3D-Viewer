@@ -253,6 +253,11 @@ struct Pmi
   bool                     angular = false; // values in degrees, not model units
   std::vector<double>      perUnit;  // length or area sides a tolerance applies per, if any
   std::string              unitArea; // circular, rectangular or square for a unit area
+  std::string              zone;      // tolerance zone form: diameter (Ø) or spherical (SØ), if either
+  std::vector<std::string> modifiers; // tolerance modifiers, e.g. maximumMaterial, commonZone
+  std::vector<double>      projected; // projected tolerance zone length, if any
+  std::vector<double>      runout;    // runout tolerance zone orientation angle, if any
+  std::vector<double>      maxValue;  // maximum upper tolerance, if any
   std::vector<std::string> datums;
 };
 
@@ -1183,6 +1188,23 @@ private:
           default: break;
         }
       }
+      if (obj->GetTypeOfValue() == XCAFDimTolObjects_GeomToleranceTypeValue_Diameter)
+        p.zone = "diameter";
+      else if (obj->GetTypeOfValue() == XCAFDimTolObjects_GeomToleranceTypeValue_SphericalDiameter)
+        p.zone = "spherical";
+      if (obj->GetMaterialRequirementModifier() == XCAFDimTolObjects_GeomToleranceMatReqModif_M)
+        p.modifiers.push_back("maximumMaterial");
+      else if (obj->GetMaterialRequirementModifier() == XCAFDimTolObjects_GeomToleranceMatReqModif_L)
+        p.modifiers.push_back("leastMaterial");
+      for (const XCAFDimTolObjects_GeomToleranceModif m : obj->GetModifiers())
+        if (const char* name = toleranceModifier(m))
+          p.modifiers.push_back(name);
+      if (obj->GetZoneModifier() == XCAFDimTolObjects_GeomToleranceZoneModif_Projected)
+        p.projected = {obj->GetValueOfZoneModifier()};
+      else if (obj->GetZoneModifier() == XCAFDimTolObjects_GeomToleranceZoneModif_Runout)
+        p.runout = {obj->GetValueOfZoneModifier()};
+      if (obj->GetMaxValueModifier() > 0)
+        p.maxValue = {obj->GetMaxValueModifier()};
       LabelSequence datums;
       XCAFDoc_DimTolTool::GetDatumOfTolerLabels(l, datums);
       for (const TDF_Label& d : datums)
@@ -1434,6 +1456,17 @@ private:
                                          "Total runout"};
     const auto i = size_t(t);
     return i < sizeof kNames / sizeof *kNames ? kNames[i] : "Tolerance";
+  }
+
+  static const char* toleranceModifier(XCAFDimTolObjects_GeomToleranceModif m)
+  {
+    static const char* const kNames[] = {
+      "anyCrossSection", "commonZone",     "eachRadialElement", "freeState",     "leastMaterial",
+      "lineElement",     "majorDiameter",  "maximumMaterial",   "minorDiameter", "notConvex",
+      "pitchDiameter",   "reciprocity",    "separate",          "statistical",   "tangentPlane",
+      "allAround",       "allOver"};
+    const auto i = size_t(m);
+    return i < sizeof kNames / sizeof *kNames ? kNames[i] : nullptr;
   }
 
   Options                    myOpts;
@@ -2613,6 +2646,18 @@ std::string toJson(const Source& src, const Builder& b)
     numbers("perUnit", p.perUnit);
     if (!p.unitArea.empty())
       o << ",\"unitArea\":\"" << p.unitArea << '"';
+    if (!p.zone.empty())
+      o << ",\"zone\":\"" << p.zone << '"';
+    if (!p.modifiers.empty())
+    {
+      o << ",\"modifiers\":[";
+      for (size_t k = 0; k < p.modifiers.size(); ++k)
+        o << (k ? "," : "") << '"' << p.modifiers[k] << '"';
+      o << ']';
+    }
+    numbers("projected", p.projected);
+    numbers("runout", p.runout);
+    numbers("maxValue", p.maxValue);
     if (!p.bound.empty())
       o << ",\"bound\":\"" << p.bound << '"';
     if (p.angular)

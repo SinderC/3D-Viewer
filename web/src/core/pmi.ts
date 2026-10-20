@@ -1,5 +1,5 @@
 // Display text for PMI items. Lengths come in mm and follow the chosen display unit; angles are degrees.
-import type { Model, PmiItem, PmiKind } from './model';
+import type { Model, PmiItem, PmiKind, ToleranceModifier } from './model';
 import { formatLength, type UnitId } from './units';
 
 export const PMI_KINDS: Record<PmiKind, string> = {
@@ -8,6 +8,36 @@ export const PMI_KINDS: Record<PmiKind, string> = {
   datum: 'Datums',
   note: 'Notes',
 };
+
+// Frame symbol and name of each tolerance modifier (PMI RP Table 14). All around and all over are
+// leader symbols, given in words.
+const MODIFIERS: Record<ToleranceModifier, [symbol: string, name: string]> = {
+  maximumMaterial: ['Ⓜ', 'maximum material'],
+  leastMaterial: ['Ⓛ', 'least material'],
+  anyCrossSection: ['ACS', 'any cross section'],
+  commonZone: ['CZ', 'common zone'],
+  eachRadialElement: ['EACH RADIAL ELEMENT', 'each radial element'],
+  freeState: ['Ⓕ', 'free state'],
+  lineElement: ['LE', 'line element'],
+  majorDiameter: ['MD', 'major diameter'],
+  minorDiameter: ['LD', 'minor diameter'],
+  notConvex: ['NC', 'not convex'],
+  pitchDiameter: ['PD', 'pitch diameter'],
+  reciprocity: ['Ⓡ', 'reciprocity'],
+  separate: ['SEP REQT', 'separate requirement'],
+  statistical: ['<ST>', 'statistical'],
+  tangentPlane: ['Ⓣ', 'tangent plane'],
+  allAround: ['all around', 'all around'],
+  allOver: ['all over', 'all over'],
+};
+
+// Unknown ids (from a newer producer) show as they are.
+const symbol = (m: ToleranceModifier) => MODIFIERS[m]?.[0] ?? m;
+const modifierName = (m: ToleranceModifier) => MODIFIERS[m]?.[1] ?? m;
+
+const partition = <T>(list: T[], test: (v: T) => boolean): [T[], T[]] => [list.filter(test), list.filter((v) => !test(v))];
+
+const ZONES = { diameter: 'Ø', spherical: 'SØ' };
 
 function amount(v: number, p: PmiItem, unit: UnitId): string {
   return p.angular ? `${+v.toFixed(4)}°` : formatLength(v, unit);
@@ -32,7 +62,7 @@ function perUnit(p: PmiItem, unit: UnitId): string | undefined {
 
 function nominal(p: PmiItem, unit: UnitId): string | undefined {
   if (p.range) return `${amount(p.range[0], p, unit)} – ${amount(p.range[1], p, unit)}`;
-  if (p.value) return amount(p.value[0], p, unit) + (p.bound ? ` ${p.bound}` : '');
+  if (p.value) return (p.zone ? ZONES[p.zone] : '') + amount(p.value[0], p, unit) + (p.bound ? ` ${p.bound}` : '');
   return undefined;
 }
 
@@ -41,10 +71,16 @@ export function pmiLabel(p: PmiItem, unit: UnitId): string {
   if (p.kind === 'datum') return p.type;
   if (p.kind === 'note' || !(p.value || p.range)) return p.name || p.type;
   const per = perUnit(p, unit);
+  // Frame order: value, unit basis, material modifier and its maximum, other modifiers, projected zone
+  const [material, others] = partition(p.modifiers ?? [], (m) => m === 'maximumMaterial' || m === 'leastMaterial');
   const parts = [
     p.type,
     nominal(p, unit),
     per && `/ ${per}`,
+    ...material.map(symbol),
+    p.maxValue && `${formatLength(p.maxValue[0], unit)} max`,
+    ...others.map(symbol),
+    p.projected && `Ⓟ ${formatLength(p.projected[0], unit)}`,
     deviation(p, unit),
     p.datums?.length ? `| ${p.datums.join(' | ')}` : undefined,
   ];
@@ -104,6 +140,10 @@ export function pmiInfo(p: PmiItem, unit: UnitId): [string, string][] {
     [p.range ? 'Limits' : p.bound ? 'Limit' : p.kind === 'tolerance' ? 'Tolerance' : 'Nominal', nominal(p, unit)],
     ['Deviation', deviation(p, unit)],
     ['Per unit', p.perUnit && `${perUnit(p, unit)} ${p.unitArea ? 'area' : 'length'}`],
+    ['Modifiers', p.modifiers?.map(modifierName).join(', ') || undefined],
+    ['Projected zone', p.projected && formatLength(p.projected[0], unit)],
+    ['Zone angle', p.runout && `${+p.runout[0].toFixed(4)}°`],
+    ['Maximum', p.maxValue && formatLength(p.maxValue[0], unit)],
     ['Datums', p.datums?.join(', ') || undefined],
     ['Faces', count(p, 'face') ? String(count(p, 'face')) : undefined],
     ['Edges', count(p, 'edge') ? String(count(p, 'edge')) : undefined],

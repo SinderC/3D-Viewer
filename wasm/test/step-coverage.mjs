@@ -508,6 +508,35 @@ const tests = {
     assert.deepEqual([...new Float32Array(m.geometry, ...drawn.segments)], [10, 5, 12, 40, 5, 12]);
   },
 
+  'tolerance zone form, modifiers, projected zone and maximum tolerance, in inches (PMI RP 6.9)'() {
+    const s = new Step();
+    const ctx = context(s, true);
+    const out = {};
+    const part = product(s, ctx, 'block', [box(s, [0, 0, 0], 1, 'ADVANCED_FACE', out)], 'ADVANCED_BREP_SHAPE_REPRESENTATION');
+    const side = s.add(`SHAPE_ASPECT('top','',${part.pds},.T.)`);
+    s.add(`GEOMETRIC_ITEM_SPECIFIC_USAGE('','',${side},${part.sr},${out.faces[1]})`);
+    const mm = s.add('( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.) )');
+    const dims = s.add('DIMENSIONAL_EXPONENTS(1.,0.,0.,0.,0.,0.,0.)');
+    const inch = s.add(`( CONVERSION_BASED_UNIT('INCH',${s.add(`LENGTH_MEASURE_WITH_UNIT(LENGTH_MEASURE(25.4),${mm})`)}) LENGTH_UNIT() NAMED_UNIT(${dims}) )`);
+    const length = (v) => s.add(`LENGTH_MEASURE_WITH_UNIT(LENGTH_MEASURE(${v}),${inch})`);
+    // Position Ø0.01 Ⓜ Ⓟ 0.5, at most 0.02
+    const tol = s.add(
+      `( GEOMETRIC_TOLERANCE('pos','',${length(0.01)},${side}) GEOMETRIC_TOLERANCE_WITH_MAXIMUM_TOLERANCE(${length(0.02)}) ` +
+        'GEOMETRIC_TOLERANCE_WITH_MODIFIERS((.MAXIMUM_MATERIAL_REQUIREMENT.,.FREE_STATE.)) POSITION_TOLERANCE() )',
+    );
+    const zone = s.add(`TOLERANCE_ZONE('','',${part.pds},.F.,(${tol}),${s.add("TOLERANCE_ZONE_FORM('cylindrical or circular')")})`);
+    s.add(`PROJECTED_ZONE_DEFINITION(${zone},(${side}),${side},${length(0.5)})`);
+    const m = read('tolerance-modifiers.stp', s.text(AP242));
+
+    const pos = m.pmi.find((p) => p.type === 'Position');
+    assert.ok(pos, JSON.stringify(m.pmi));
+    near(pos.value[0], 0.254, 1e-9, 'tolerance in mm');
+    assert.equal(pos.zone, 'diameter');
+    assert.deepEqual(pos.modifiers, ['maximumMaterial', 'freeState']);
+    near(pos.projected[0], 12.7, 1e-9, 'projected zone length in mm');
+    near(pos.maxValue[0], 0.508, 1e-9, 'maximum tolerance in mm');
+  },
+
   'assembly PMI across files: external element references (EXTERNAL_ANCHOR, product_definition_reference)'() {
     // ExtRef RP 7: the part's file anchors the shape aspect; the assembly places the part through an
     // external reference whose product definition is a product_definition_reference_with_local_

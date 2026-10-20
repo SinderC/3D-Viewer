@@ -27,7 +27,10 @@
   or JT, IGES, STL, BREP, OBJ, VRML) opens together with them when they are selected at the same time. If any are missing, the viewer names them and offers to add them.
 - **AP242 PMI:** dimensions, geometric tolerances, datums and notes as drawn in the file (lines and
   filled text), each with show/hide, its referenced faces, edges and vertices, and its semantic values
-  (type, nominal, tolerances, datums). Assembly PMI on particular component instances is drawn once in the
+  (type, nominal, tolerances, datums; for geometric tolerances also the zone form Ø/SØ, modifiers such as
+  Ⓜ Ⓛ Ⓕ CZ, projected zone length, runout zone angle, maximum tolerance and unit basis). Not read:
+  unequally disposed zones (Ⓤ), non-uniform zones, other zone forms, affected planes and the ISO 1101
+  association modifiers. Assembly PMI on particular component instances is drawn once in the
   assembly, also when the components are in other files (AP242 external element references).
 - **Attributes** (user-defined) of parts, and of single component instances, deep ones included.
 - **Saved views:** direction, up vector and the PMI they show. OCCT keeps no camera position, so a

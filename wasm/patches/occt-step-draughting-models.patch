@@ -27,6 +27,11 @@ Changes to OCCT (V8_0_1) for the Open CAD Viewer. Applied by wasm/scripts/build-
   complex entity StepDimTol_GeoTolAndGeoTolWthDefUnit (type 827). XCAF tolerances get the unit
   size, second unit size and unit area shape (XCAFDimTolObjects_GeomToleranceUnitArea), stored
   under a new child label. OCCT read these as unknown entities and dropped them.
+- STEP: convert the maximum upper tolerance of a geometric tolerance with the length unit. OCCT
+  applied the angle conversion, so it stayed in file units (inch files read as mm).
+- XCAF geometric tolerance objects start with every value and modifier unset. The constructor left
+  type, value, zone form, zone and material modifiers and the maximum uninitialised, and
+  XCAFDoc_GeomTolerance stores them when they look set.
 - Tolerances on the whole part find the B-rep through shape_representation_relationship when
   the part's shape representation is not the B-rep itself.
 
@@ -839,6 +844,14 @@ index 1262ea95..b6e3c85c 100644
    // get modifiers
    XCAFDimTolObjects_GeomToleranceTypeValue aTypeV = XCAFDimTolObjects_GeomToleranceTypeValue_None;
    Interface_EntityIterator                 anIter = aGraph.Sharings(aTolEnt);
+@@ -5294,6 +5455,6 @@ static void setGeomTolObjectToXCAF(const occ::handle<Standard_Transient>&    the
+     occ::handle<StepBasic_NamedUnit> NU = anUnit.NamedUnit();
+     STEPConstruct_UnitContext        anUnitCtx;
+     anUnitCtx.ComputeFactors(NU, theLocalFactors);
+-    convertAngleValue(anUnitCtx, aVal);
++    aVal = aVal * anUnitCtx.LengthFactor();
+     aTolObj->SetMaxValueModifier(aVal);
+   }
 @@ -5304,6 +5465,36 @@ static void setGeomTolObjectToXCAF(const occ::handle<Standard_Transient>&    the
  
  //=================================================================================================
@@ -1108,17 +1121,24 @@ diff --git a/src/DataExchange/TKXCAF/XCAFDimTolObjects/XCAFDimTolObjects_GeomTol
 index 35a3140a..3807ff33 100644
 --- a/src/DataExchange/TKXCAF/XCAFDimTolObjects/XCAFDimTolObjects_GeomToleranceObject.cxx
 +++ b/src/DataExchange/TKXCAF/XCAFDimTolObjects/XCAFDimTolObjects_GeomToleranceObject.cxx
-@@ -24,6 +24,9 @@ XCAFDimTolObjects_GeomToleranceObject::XCAFDimTolObjects_GeomToleranceObject()
+@@ -24,6 +24,16 @@ XCAFDimTolObjects_GeomToleranceObject::XCAFDimTolObjects_GeomToleranceObject()
    myHasPnt            = false;
    myHasPntText        = false;
    myAffectedPlaneType = XCAFDimTolObjects_ToleranceZoneAffectedPlane_None;
 +  myUnitSize          = 0.;
 +  mySecondUnitSize    = 0.;
 +  myUnitArea          = XCAFDimTolObjects_GeomToleranceUnitArea_None;
++  myType              = XCAFDimTolObjects_GeomToleranceType_None;
++  myTypeOfValue       = XCAFDimTolObjects_GeomToleranceTypeValue_None;
++  myValue             = 0.;
++  myMatReqModif       = XCAFDimTolObjects_GeomToleranceMatReqModif_None;
++  myZoneModif         = XCAFDimTolObjects_GeomToleranceZoneModif_None;
++  myValueOfZoneModif  = 0.;
++  myMaxValueModif     = 0.;
  }
  
  //=================================================================================================
-@@ -39,6 +42,9 @@ XCAFDimTolObjects_GeomToleranceObject::XCAFDimTolObjects_GeomToleranceObject(
+@@ -39,6 +49,9 @@ XCAFDimTolObjects_GeomToleranceObject::XCAFDimTolObjects_GeomToleranceObject(
    myValueOfZoneModif  = theObj->myValueOfZoneModif;
    myModifiers         = theObj->myModifiers;
    myMaxValueModif     = theObj->myMaxValueModif;

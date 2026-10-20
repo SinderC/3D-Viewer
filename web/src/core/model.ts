@@ -100,8 +100,37 @@ export interface PmiItem {
   /** Length, or area sides, a tolerance applies per (e.g. flatness 0.05 per Ø25 area). */
   perUnit?: [number] | [number, number];
   unitArea?: 'circular' | 'rectangular' | 'square';
+  /** Tolerance zone within a cylinder or circle (Ø) or a sphere (SØ). */
+  zone?: 'diameter' | 'spherical';
+  modifiers?: ToleranceModifier[];
+  /** Projected tolerance zone length (Ⓟ). */
+  projected?: [number];
+  /** Runout tolerance zone orientation angle, degrees. */
+  runout?: [number];
+  /** Maximum upper tolerance (e.g. Ø0.1 Ⓜ, 0.2 max). */
+  maxValue?: [number];
   datums?: string[];
 }
+
+/** Geometric tolerance modifiers OCCT reads (PMI RP Table 14). */
+export type ToleranceModifier =
+  | 'maximumMaterial'
+  | 'leastMaterial'
+  | 'anyCrossSection'
+  | 'commonZone'
+  | 'eachRadialElement'
+  | 'freeState'
+  | 'lineElement'
+  | 'majorDiameter'
+  | 'minorDiameter'
+  | 'notConvex'
+  | 'pitchDiameter'
+  | 'reciprocity'
+  | 'separate'
+  | 'statistical'
+  | 'tangentPlane'
+  | 'allAround'
+  | 'allOver';
 
 /** Saved view: the direction the camera looks, and the PMI it shows. */
 export interface SavedView {
