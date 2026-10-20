@@ -594,8 +594,8 @@ const tests = {
     cases['tolerance-non-uniform.stp'] = [s.text(AP242), [['Profile of a surface', 0.2]]];
 
     // Affected plane (6.9.2.1, Figure 53 with a plane element): straightness 0.05 in the plane of a
-    // placement, given in a constructive geometry representation. The RP text puts 'affected plane
-    // association' in the relationship's description, its figures in the name: as the figures.
+    // placement, given in a constructive geometry representation. 'affected plane association' is the
+    // relationship's name, as in the RP figures, ISO 10303-519 and NIST SFA (the RP text says description).
     start();
     const straight = s.add(`STRAIGHTNESS_TOLERANCE('Straightness AP','',${block.length(0.05)},${block.aspect('top')})`);
     const plane = axis(s, [0.5, 0.5, 1], [1, 0, 0], [0, 1, 0]);
