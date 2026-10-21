@@ -12,7 +12,7 @@ OCCT_INSTALL="$DEPS_DIR/occt-install-$OCCT_TAG"
 RAPIDJSON_SRC="$DEPS_DIR/rapidjson"
 # JT reader (TKJT, GPL-2.0+) from our fork of PyOpenJt, and liblzma (xz, 0BSD) for JT 10 segments.
 TKJT_REPO="${TKJT_REPO:-https://github.com/SinderC/PyOpenJt.git}"
-TKJT_COMMIT="69139779bbb36c5c5d5cdf332c642ec4ba7a5f32"
+TKJT_COMMIT="e0e45c70580b01acd1acd789b979e41386b691cc"
 XZ_TAG="v5.8.1"
 TKJT_SRC="$DEPS_DIR/pyopenjt-${TKJT_COMMIT:0:8}"
 XZ_SRC="$DEPS_DIR/xz-src-$XZ_TAG"

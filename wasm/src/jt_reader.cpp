@@ -22,9 +22,11 @@
 #include <JtNode_MetaData.hxx>
 #include <JtNode_Part.hxx>
 #include <JtNode_Partition.hxx>
+#include <JtNode_Shape_PolylineSet.hxx>
 #include <JtNode_Shape_Vertex.hxx>
 #include <JtProperty_LateLoaded.hxx>
 
+#include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRep_Builder.hxx>
 #include <Poly_Triangulation.hxx>
 #include <Quantity_ColorRGBA.hxx>
@@ -159,7 +161,7 @@ public:
       myColors->SetColor(def, *a.color, XCAFDoc_ColorSurf);
   }
 
-  bool empty() const { return myTriangles == 0; }
+  bool empty() const { return myTriangles == 0 && myEdges == 0; }
 
   FilePmi& pmi() { return myPmi; }
 
@@ -326,6 +328,11 @@ private:
     if (auto inst = Handle(JtNode_Instance)::DownCast(node); !inst.IsNull())
       return collect(Handle(JtNode_Base)::DownCast(inst->Object()), trsf, color, compound, faceColors);
 
+    if (auto lines = Handle(JtNode_Shape_PolylineSet)::DownCast(node); !lines.IsNull())
+    {
+      addPolylines(lines, trsf, compound);
+      return;
+    }
     if (auto shape = Handle(JtNode_Shape_Vertex)::DownCast(node); !shape.IsNull())
     {
       const TopoDS_Face face = triangulate(shape, trsf);
@@ -523,9 +530,11 @@ private:
       myPartViews = std::move(pmi.views);
   }
 
-  TopoDS_Face triangulate(const Handle(JtNode_Shape_Vertex)& shape, const gp_Trsf& trsf)
+  // Calls use on the shape's LODs, most detailed first, until one decodes and use accepts it.
+  // Other segment types (generic shape) come after the LODs, in file order.
+  template <class Use>
+  void firstLod(const Handle(JtNode_Shape_Vertex)& shape, Use use)
   {
-    // Most detailed LOD segment first; other segment types (generic shape) after, in file order.
     const JtData_Object::VectorOfLateLoads& lateLoads = shape->LateLoads();
     const auto rank = [&](Standard_Size i) {
       const Jt_I32 type = lateLoads[i]->getSegmentType();
@@ -550,12 +559,53 @@ private:
       const auto lod = Handle(JtElement_ShapeLOD_Vertex)::DownCast(late->DefferedObject());
       if (lod.IsNull())
         continue;
-      TopoDS_Face face = toFace(*lod, trsf);
-      late->Unload(); // free the decoded arrays; the triangulation holds its own copy
-      if (!face.IsNull())
-        return face;
+      const bool accepted = use(*lod);
+      late->Unload(); // free the decoded arrays; the shape built from them holds its own copy
+      if (accepted)
+        return;
     }
-    return {};
+  }
+
+  TopoDS_Face triangulate(const Handle(JtNode_Shape_Vertex)& shape, const gp_Trsf& trsf)
+  {
+    TopoDS_Face face;
+    firstLod(shape, [&](const JtElement_ShapeLOD_Vertex& lod) {
+      face = toFace(lod, trsf);
+      return !face.IsNull();
+    });
+    return face;
+  }
+
+  // Adds a line segment edge to compound for each segment of the polylines of shape.
+  void addPolylines(const Handle(JtNode_Shape_Vertex)& shape, const gp_Trsf& trsf, TopoDS_Compound& compound)
+  {
+    firstLod(shape, [&](const JtElement_ShapeLOD_Vertex& lod) {
+      const auto& idx = lod.Indices(); // two per segment
+      const auto&  pos = lod.Vertices();
+      const float* xyz = pos.Data();
+      const int    nbV = int(pos.Count());
+      size_t       added = 0;
+      for (int i = 0; i + 1 < int(idx.Count()); i += 2)
+      {
+        if (idx[i] < 0 || idx[i + 1] < 0 || idx[i] >= nbV || idx[i + 1] >= nbV)
+          continue;
+        const auto point = [&](int k) {
+          gp_Pnt p(xyz[3 * k], xyz[3 * k + 1], xyz[3 * k + 2]);
+          p.Transform(trsf);
+          return gp_Pnt(p.XYZ() * myScale);
+        };
+        const gp_Pnt a = point(idx[i]), b = point(idx[i + 1]);
+        if (a.SquareDistance(b) < 1e-12)
+          continue; // MakeEdge refuses a zero length
+        BRepBuilderAPI_MakeEdge edge(a, b);
+        if (!edge.IsDone())
+          continue;
+        BRep_Builder().Add(compound, edge.Edge());
+        ++added;
+      }
+      myEdges += added;
+      return added > 0;
+    });
   }
 
   TopoDS_Face toFace(const JtElement_ShapeLOD_Vertex& lod, const gp_Trsf& trsf)
@@ -614,6 +664,7 @@ private:
   FilePmi                                      myPmi;
   std::vector<FilePmiView>                     myPartViews;
   size_t                                     myTriangles = 0;
+  size_t                                     myEdges     = 0;
   std::map<const Standard_Transient*, TDF_Label> myDefs;
 };
 

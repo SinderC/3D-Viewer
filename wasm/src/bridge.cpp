@@ -695,7 +695,7 @@ private:
     // Any location stored on the definition shape stays baked into the mesh,
     // so sub-shape style keys match the faces we explore.
     Proto     proto = meshPart(def, XCAFDoc_ShapeTool::GetShape(def));
-    const int idx   = proto.indices.count ? int(myProtos.size()) : -1;
+    const int idx   = proto.indices.count || proto.edges.count ? int(myProtos.size()) : -1; // line-only parts too
     if (idx >= 0)
       myProtos.push_back(std::move(proto));
     myProtoByEntry[entry.ToCString()] = idx;
