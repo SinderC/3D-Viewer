@@ -3,7 +3,8 @@
 // Part nodes (and groups holding only geometry) become XCAF parts: one triangulated face per
 // tri-strip shape, baked into part coordinates. Other groups become assemblies. The transform and
 // material of a node (and of the instance nodes referencing it) go on the XCAF component that
-// places it; materials below a part become face colours. Of each LOD node only the finest LOD is read.
+// places it; materials below a part become face colours. Of each LOD node only the first child is read;
+// of each shape, the most detailed mesh that decodes.
 // Parts that embed their exact B-rep (XT data) also get its edges, as free edges next to the faces.
 // PMI (late-loaded PMI Manager elements on metadata nodes) is parsed by jt_pmi.cpp.
 
@@ -35,6 +36,7 @@
 #include <XCAFDoc_DocumentTool.hxx>
 #include <XCAFDoc_ShapeTool.hxx>
 
+#include <algorithm>
 #include <map>
 #include <optional>
 #include <set>
@@ -104,6 +106,8 @@ Attributes attributesOf(const Handle(JtNode_Base)& node)
 // Segment types (ISO 14306 segment type table).
 constexpr Jt_I32 kPmiSegment    = 3;
 constexpr Jt_I32 kXtBRepSegment = 17;
+constexpr Jt_I32 kLod0Segment   = 7; // shape LOD0..LOD9 are 7..16, 7 the most detailed
+constexpr Jt_I32 kLod9Segment   = 16;
 
 bool isLod(const Handle(JtData_Object)& o) { return o->IsKind(STANDARD_TYPE(JtNode_LOD)); }
 bool isShape(const Handle(JtData_Object)& o) { return o->IsKind(STANDARD_TYPE(JtNode_Shape_Base)); }
@@ -330,7 +334,8 @@ private:
     const auto group = Handle(JtNode_Group)::DownCast(node);
     if (group.IsNull())
       return;
-    // LOD children are alternatives, finest first.
+    // LOD children are alternatives. The spec gives plain LOD nodes no order; Range LOD puts the nearest
+    // (usually finest) first. See GEO-46.
     const Standard_Size n = isLod(node) ? std::min<Standard_Size>(1, group->Children().Count())
                                         : group->Children().Count();
     for (Standard_Size i = 0; i < n; ++i)
@@ -514,8 +519,17 @@ private:
 
   TopoDS_Face triangulate(const Handle(JtNode_Shape_Vertex)& shape, const gp_Trsf& trsf)
   {
+    // Most detailed LOD segment first; other segment types (generic shape) after, in file order.
     const JtData_Object::VectorOfLateLoads& lateLoads = shape->LateLoads();
-    for (Standard_Size i = 0; i < lateLoads.Count(); ++i)
+    const auto rank = [&](Standard_Size i) {
+      const Jt_I32 type = lateLoads[i]->getSegmentType();
+      return type >= kLod0Segment && type <= kLod9Segment ? type : kLod9Segment + 1;
+    };
+    std::vector<Standard_Size> order(lateLoads.Count());
+    for (Standard_Size i = 0; i < order.size(); ++i)
+      order[i] = i;
+    std::stable_sort(order.begin(), order.end(), [&](Standard_Size a, Standard_Size b) { return rank(a) < rank(b); });
+    for (const Standard_Size i : order)
     {
       const Handle(JtProperty_LateLoaded)& late = lateLoads[i];
       try

@@ -47,7 +47,8 @@ B-rep geometry, so every measurement works.
 ## JT
 
 - JT 8, 9 and 10 (ISO 14306, including JT 10.5): tessellated geometry, assembly structure, instances
-  and material colours. Only the finest LOD is read.
+  and material colours. Of each shape the most detailed LOD mesh is read; of each LOD node, only the
+  first child, which the spec doesn't guarantee to be the finest.
 - Parts that embed their exact B-rep as Parasolid XT data get its edges: feature edges and exact edge
   length, radius and diameter. Faces stay the JT mesh.
 - **PMI:** JT 10 PMI as drawn in the file (lines, arrowheads and font glyphs), per part and for the
