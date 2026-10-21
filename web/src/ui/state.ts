@@ -39,7 +39,7 @@ export type Action =
   | { type: 'loadStart'; fileName: string; quality: Quality }
   | { type: 'progress'; stage: string; percent: number }
   | { type: 'loaded'; model: Model; ms: number }
-  | { type: 'failed'; error: string }
+  | { type: 'failed'; error: string; fileName?: string }
   | { type: 'close' }
   | { type: 'setHidden'; hidden: ReadonlySet<number> }
   | { type: 'select'; id: number | null }
@@ -128,6 +128,7 @@ export function reducer(state: State, action: Action): State {
       return {
         ...state,
         status: 'ready',
+        fileName: action.model.mainFile ?? state.fileName,
         model: action.model,
         unit: action.model.unit,
         loadMs: action.ms,
@@ -135,7 +136,7 @@ export function reducer(state: State, action: Action): State {
         hidden: new Set(action.model.nodes.filter((n) => n.hidden).map((n) => n.id)),
       };
     case 'failed':
-      return { ...state, status: 'error', error: action.error, progress: undefined };
+      return { ...state, status: 'error', error: action.error, fileName: action.fileName ?? state.fileName, progress: undefined };
     case 'close':
       return keepPrefs(state);
     case 'setHidden':

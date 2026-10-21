@@ -316,6 +316,8 @@ struct Node
 };
 
 std::vector<uint8_t> gGeometry;
+// The file a JT load reads when it is not the one given; kept for the error of a load that fails.
+std::string gMainFile;
 
 template <typename T>
 Range append(const std::vector<T>& data)
@@ -1578,6 +1580,8 @@ struct Source
   int annotations = -1, views = -1;
   // Files the assembly references (external references).
   std::vector<ExternalRef> externalFiles;
+  // The file read, when it is not the one given (a JT assembly picked from the files opened together).
+  std::string mainFile;
 };
 
 // Files opened together with the main one: name and bytes (Uint8Array).
@@ -2319,12 +2323,12 @@ Source readStepDoc(std::string&                    bytes,
   src.externalFiles = external.references();
   if (!reader.Transfer(doc))
   {
-    std::string missing;
+    std::vector<std::string> missing;
     for (const ExternalRef& ref : src.externalFiles)
       if (!ref.loaded)
-        missing += (missing.empty() ? "" : ", ") + ref.name;
+        missing.push_back(ref.name);
     throw std::runtime_error(missing.empty() ? "STEP transfer failed"
-                                             : "This assembly is in other files too. Open them together with it: " + missing);
+                                             : "This assembly is in other files too. Open them together with it:\n" + nameLines(missing));
   }
   external.insertOtherParts(reader, doc, progress);
   progress.mark("transferred");
@@ -2512,12 +2516,52 @@ Source readQifDoc(const std::string& bytes, const Handle(TDocStd_Document)& doc,
   return src;
 }
 
-Source readJtDoc(const std::string& bytes, const Handle(TDocStd_Document)& doc, Progress& progress)
+// Which of the JT files opened together to read: the one that names others of them and that none of
+// them names, else the first (see mainFileIndex in web/src/core/mainFile.ts).
+size_t jtAssemblyIndex(const JtFiles& files)
+{
+  std::vector<size_t> assemblies;
+  std::vector<bool>   named(files.size());
+  for (size_t i = 0; i < files.size(); ++i)
+  {
+    const TempFile file(".jt", files[i].second);
+    bool           names = false;
+    for (const std::string& ref : jtReferences(file.path()))
+      for (size_t j = 0; j < files.size(); ++j)
+        if (j != i && lowercase(baseName(files[j].first)) == lowercase(ref))
+          names = named[j] = true;
+    if (names)
+      assemblies.push_back(i);
+  }
+  const auto top = std::find_if(assemblies.begin(), assemblies.end(), [&](size_t i) { return !named[i]; });
+  return top != assemblies.end() ? *top : assemblies.empty() ? 0 : assemblies[0];
+}
+
+Source readJtDoc(std::string& bytes, const std::string& fileName, const ExtraFiles& extra, const Handle(TDocStd_Document)& doc, Progress& progress)
 {
   progress("read", -1);
-  TempFile file(".jt", bytes);
-  Source   src{"JT", {}, {}, {}};
-  src.unit = readJt(file.path(), doc, src.pmi);
+  JtFiles files;
+  files.emplace_back(fileName, std::move(bytes));
+  for (const auto& [name, data] : extra)
+    if (lowerExtension(name) == ".jt")
+    {
+      std::string copy(data["length"].as<size_t>(), '\0');
+      val(emscripten::typed_memory_view(copy.size(), copy.data())).call<void>("set", data);
+      files.emplace_back(name, std::move(copy));
+    }
+  if (files.size() > 1)
+    std::swap(files[0], files[jtAssemblyIndex(files)]);
+  Source src{"JT", {}, {}, {}};
+  std::vector<JtReference> references;
+  if (files[0].first != fileName)
+    src.mainFile = gMainFile = files[0].first;
+  {
+    const TempFile file(".jt", files[0].second);
+    std::string().swap(files[0].second);
+    src.unit = readJt(file.path(), doc, src.pmi, files, references);
+  }
+  for (const JtReference& ref : references)
+    src.externalFiles.push_back({ref.name, ref.loaded, {}});
   return src;
 }
 
@@ -2552,7 +2596,7 @@ Source readDoc(std::string&                    bytes,
   if (ext == ".brep" || ext == ".brp")
     return readBrepDoc(bytes, name, doc, progress);
   if (ext == ".jt")
-    return readJtDoc(bytes, doc, progress);
+    return readJtDoc(bytes, fileName, extra, doc, progress);
   if (ext == ".qif")
     return readQifDoc(bytes, doc, progress);
   throw std::runtime_error("Unsupported file type: " + (ext.empty() ? fileName : ext));
@@ -2800,6 +2844,8 @@ std::string toJson(const Source& src, const Builder& b)
       sep = ",";
     }
   o << '}';
+  if (!src.mainFile.empty())
+    o << ",\"mainFile\":\"" << jsonEscape(src.mainFile) << '"';
   if (!src.externalFiles.empty())
   {
     o << ",\"externalFiles\":[";
@@ -2846,6 +2892,7 @@ val readModel(val jsBytes, const std::string& fileName, val jsOptions, val onPro
 
   gGeometry.clear();
   gGeometry.shrink_to_fit();
+  gMainFile.clear();
 
   val result = val::object();
   try
@@ -2881,6 +2928,8 @@ val readModel(val jsBytes, const std::string& fileName, val jsOptions, val onPro
   {
     result.set("error", std::string(e.what()));
   }
+  if (result.hasOwnProperty("error") && !gMainFile.empty())
+    result.set("mainFile", gMainFile);
   return result;
 }
 

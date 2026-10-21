@@ -19,10 +19,24 @@ export function MissingFiles({ model, onAdd }: { model: Model; onAdd: () => void
       role="status"
       onTransitionEnd={(e) => leaving === model && e.propertyName === 'opacity' && setDismissed(model)}
     >
-      <p>
-        <strong>{missingFiles.map(externalFileLabel).join(', ')}</strong> {missing.length === 1 ? 'is' : 'are'} missing,{' '}
-        {nothingShown ? 'so no parts can be shown.' : "so some parts aren't shown."}
-      </p>
+      <div className="notice-text">
+        <p>
+          {missing.length === 1 ? (
+            <strong>{externalFileLabel(missingFiles[0])}</strong>
+          ) : (
+            <strong>{missing.length} files</strong>
+          )}{' '}
+          {missing.length === 1 ? 'is' : 'are'} missing,{' '}
+          {nothingShown ? 'so no parts can be shown.' : "so some parts aren't shown."}
+        </p>
+        {missing.length > 1 && (
+          <ul>
+            {[...missingFiles].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })).map((f) => (
+              <li key={f.name}>{externalFileLabel(f)}</li>
+            ))}
+          </ul>
+        )}
+      </div>
       <button onClick={onAdd}>{missing.length === 1 ? `Add ${missing[0]}…` : 'Add files…'}</button>
       <button className="icon" aria-label="Dismiss" title="Dismiss" onClick={() => setLeaving(model)}>
         <CloseIcon />

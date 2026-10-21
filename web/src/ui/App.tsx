@@ -122,7 +122,13 @@ export function App() {
         );
         dispatch({ type: 'loaded', model, ms: Math.round(performance.now() - t0) });
       } catch (e) {
-        if (!signal.aborted) dispatch({ type: 'failed', error: e instanceof Error ? e.message : String(e) });
+        if (!signal.aborted) {
+          dispatch({
+            type: 'failed',
+            error: e instanceof Error ? e.message : String(e),
+            fileName: (e as { mainFile?: string }).mainFile,
+          });
+        }
       }
     },
     [quality],

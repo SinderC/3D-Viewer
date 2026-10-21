@@ -8,7 +8,7 @@ interface OcctModule {
     fileName: string,
     options: object,
     onProgress: (stage: string, percent: number) => void,
-  ): { json?: string; geometry?: Uint8Array; error?: string };
+  ): { json?: string; geometry?: Uint8Array; error?: string; mainFile?: string };
 }
 
 const post = (msg: WorkerResponse, transfer: Transferable[] = []) => self.postMessage(msg, transfer);
@@ -31,7 +31,10 @@ self.onmessage = async ({ data }: MessageEvent<WorkerRequest>) => {
       { ...data.options, files: data.others?.map(({ name, bytes }) => ({ name, bytes: new Uint8Array(bytes) })) },
       (stage, percent) => post({ type: 'progress', stage, percent }),
     );
-    if (res.error || !res.json || !res.geometry) throw new Error(res.error ?? 'Empty result');
+    if (res.error || !res.json || !res.geometry) {
+      post({ type: 'error', message: res.error ?? 'Empty result', mainFile: res.mainFile });
+      return;
+    }
     // The view aliases WASM memory; copy it into a transferable buffer.
     const geometry = res.geometry.slice().buffer;
     post({ type: 'result', model: JSON.parse(res.json), geometry }, [geometry]);

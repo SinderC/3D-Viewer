@@ -37,6 +37,8 @@ export interface RawModel {
   products: Product[];
   counts: Counts;
   externalFiles?: ExternalFile[];
+  /** The file read, when it is not the first of several opened together (a JT assembly among its parts). */
+  mainFile?: string;
 }
 
 /** A file a STEP assembly references for some of its parts, and whether it was opened with it. */
@@ -258,6 +260,7 @@ export interface Model {
   products: Product[];
   counts: Counts;
   externalFiles?: ExternalFile[];
+  mainFile?: string;
   /** Parallel to `colors`: the file's material where it says more than a colour (glTF textures, PBR). */
   materials?: Material[];
 }
@@ -329,5 +332,6 @@ export function decodeModel(raw: RawModel, geometry: ArrayBuffer): Model {
     products: raw.products,
     counts: raw.counts,
     externalFiles: raw.externalFiles,
+    mainFile: raw.mainFile,
   };
 }

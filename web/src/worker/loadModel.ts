@@ -49,7 +49,7 @@ export function loadModel(
       if (data.type === 'progress') return onProgress(data.stage, data.percent);
       finish();
       if (data.type === 'result') resolve(decodeModel(data.model, data.geometry));
-      else reject(new Error(data.message));
+      else reject(Object.assign(new Error(data.message), { mainFile: data.mainFile }));
     };
     worker.onerror = (e) => {
       finish();

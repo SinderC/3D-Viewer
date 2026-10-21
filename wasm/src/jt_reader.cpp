@@ -36,7 +36,13 @@
 #include <XCAFDoc_DocumentTool.hxx>
 #include <XCAFDoc_ShapeTool.hxx>
 
+#include <TCollection_AsciiString.hxx>
+
+#include <sys/stat.h>
+
 #include <algorithm>
+#include <cstdio>
+#include <fstream>
 #include <map>
 #include <optional>
 #include <set>
@@ -611,21 +617,155 @@ private:
   std::map<const Standard_Transient*, TDF_Label> myDefs;
 };
 
+std::string lowercase(std::string s)
+{
+  std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+  return s;
+}
+
+// The name as the file gives it, which TKJT opens as it is; and without folders, Windows ones included.
+std::string pathOf(const Handle(JtNode_Partition)& p) { return TCollection_AsciiString(p->FileName(), ' ').ToCString(); }
+
+std::string baseName(const std::string& path)
+{
+  const size_t slash = path.find_last_of("/\\");
+  return slash == std::string::npos ? path : path.substr(slash + 1);
+}
+
+// The partition nodes below o: the files an assembly keeps parts in. A partition's children are
+// those of the file it names once loaded, so loading goes on from them.
+void collectPartitions(const Handle(JtData_Object)&               o,
+                       std::set<const Standard_Transient*>&       seen,
+                       std::vector<Handle(JtNode_Partition)>&     out)
+{
+  if (o.IsNull() || !seen.insert(o.get()).second)
+    return;
+  if (const auto inst = Handle(JtNode_Instance)::DownCast(o); !inst.IsNull())
+    return collectPartitions(inst->Object(), seen, out);
+  const auto group = Handle(JtNode_Group)::DownCast(o);
+  if (group.IsNull())
+    return;
+  if (const auto partition = Handle(JtNode_Partition)::DownCast(o); !partition.IsNull())
+    out.push_back(partition);
+  for (Standard_Size i = 0; i < group->Children().Count(); ++i)
+    collectPartitions(group->Children()[i], seen, out);
+}
+
+// Writes the files the partitions name where Partition::Load looks for them, as named (in MEMFS any
+// name is a path), and removes them when done.
+class PartFiles
+{
+public:
+  // Frees bytes once written: the file is in MEMFS now.
+  void write(const std::string& path, std::string& bytes)
+  {
+    for (size_t slash = path.find('/', 1); slash != std::string::npos; slash = path.find('/', slash + 1))
+      mkdir(path.substr(0, slash).c_str(), 0777); // folders on the way; existing ones fail harmlessly
+    std::ofstream(path, std::ios::binary).write(bytes.data(), std::streamsize(bytes.size()));
+    myWritten.push_back(path);
+    std::string().swap(bytes);
+  }
+  ~PartFiles()
+  {
+    for (const std::string& path : myWritten)
+      std::remove(path.c_str());
+  }
+
+private:
+  std::vector<std::string> myWritten;
+};
+
+// Reads the files the assembly references into their partitions, those of referenced assemblies too.
+// A file several partitions name is read once and its nodes shared. written: they stay until the
+// nodes have read what they late-load from them.
+void loadPartitions(const Handle(JtNode_Partition)& root,
+                    JtFiles&                        files,
+                    PartFiles&                      written,
+                    std::vector<JtReference>&       references)
+{
+  std::set<const Standard_Transient*>   seen;
+  std::vector<Handle(JtNode_Partition)> partitions;
+  seen.insert(root.get());
+  for (Standard_Size i = 0; i < root->Children().Count(); ++i)
+    collectPartitions(root->Children()[i], seen, partitions);
+
+  std::map<std::string, std::string*> fileOf; // by lowercase name; of two files of a name, the first
+  for (auto& [name, bytes] : files)
+    fileOf.emplace(lowercase(baseName(name)), &bytes);
+  std::map<std::string, Handle(JtNode_Partition)> readBy; // by lowercase name; null when it could not be read
+  std::map<std::string, size_t>                   referenceAt;
+  for (size_t i = 0; i < partitions.size(); ++i) // grows as referenced assemblies load
+  {
+    const Handle(JtNode_Partition) partition = partitions[i];
+    const std::string              path      = pathOf(partition);
+    const std::string              name      = baseName(path);
+    if (name.empty())
+      continue;
+    const std::string key = lowercase(name);
+    bool              loaded;
+    if (auto [it, first] = readBy.try_emplace(key); first)
+    {
+      const auto file = fileOf.find(key);
+      loaded          = file != fileOf.end() && (written.write(path, *file->second), partition->Load());
+      if (loaded)
+        it->second = partition;
+    }
+    else
+      loaded = !it->second.IsNull() && partition->ShareLoaded(it->second);
+    if (auto [it, first] = referenceAt.try_emplace(key, references.size()); first)
+      references.push_back({name, loaded});
+    else
+      references[it->second].loaded = references[it->second].loaded || loaded;
+    if (loaded)
+      for (Standard_Size c = 0; c < partition->Children().Count(); ++c)
+        collectPartitions(partition->Children()[c], seen, partitions);
+  }
+}
+
 } // namespace
 
-std::string readJt(const char* path, const Handle(TDocStd_Document)& doc, FilePmi& pmi)
+std::vector<std::string> jtReferences(const char* path)
+{
+  Handle(JtData_Model)     model = new JtData_Model(TCollection_ExtendedString(path));
+  Handle(JtNode_Partition) root  = model->Init();
+  std::vector<std::string> names;
+  if (root.IsNull())
+    return names;
+  std::set<const Standard_Transient*>   seen{root.get()};
+  std::vector<Handle(JtNode_Partition)> partitions;
+  for (Standard_Size i = 0; i < root->Children().Count(); ++i)
+    collectPartitions(root->Children()[i], seen, partitions);
+  for (const Handle(JtNode_Partition)& p : partitions)
+    names.push_back(baseName(pathOf(p)));
+  return names;
+}
+
+std::string readJt(const char*                     path,
+                   const Handle(TDocStd_Document)& doc,
+                   FilePmi&                        pmi,
+                   JtFiles&                        files,
+                   std::vector<JtReference>&       references)
 {
   Handle(JtData_Model)     model = new JtData_Model(TCollection_ExtendedString(path));
   Handle(JtNode_Partition) root  = model->Init();
   if (root.IsNull())
     throw std::runtime_error("Not a readable JT file");
+  PartFiles written;
+  loadPartitions(root, files, written, references);
 
   const auto [scale, unit] = unitOf(TCollection_AsciiString(model->MeasurementUnits()));
   Converter conv(doc, model, scale);
   conv.addRoot(root);
   XCAFDoc_DocumentTool::ShapeTool(doc->Main())->UpdateAssemblies();
   if (conv.empty())
-    throw std::runtime_error("JT file has no tessellated geometry");
+  {
+    std::vector<std::string> missing;
+    for (const JtReference& ref : references)
+      if (!ref.loaded)
+        missing.push_back(ref.name);
+    throw std::runtime_error(missing.empty() ? "JT file has no tessellated geometry"
+                                             : "This assembly is in other files too. Open them together with it:\n" + nameLines(missing));
+  }
   pmi = std::move(conv.pmi());
   return unit;
 }
