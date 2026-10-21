@@ -56,8 +56,8 @@ B-rep geometry, so every measurement works.
 - **External references:** an assembly that keeps parts in other `.jt` files opens together with them when
   they are selected at the same time, in any order; the assembly is the file that names the others. If any
   are missing, the viewer names them and offers to add them. A referenced file is found by its name
-  without folders, matched without regard to case.
-  A file that several parts name is read once and shared.
+  without folders, matched without regard to case, so opening files that share a name (from different
+  folders) together is refused. A file that several parts name is read once and shared.
 - Not supported: JT B-rep, the ISO 14306 STEP B-Rep segment (an embedded STEP file; ignored, the mesh is
   shown).
 

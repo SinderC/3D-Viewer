@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState } from 'react';
 import type { Viewer } from '../viewer/Viewer';
 import { EXTENSIONS, FORMATS, isSupported } from '../core/formats';
+import { duplicateNames, filesOfDrop, filesOfFolder } from '../core/dropFiles';
 import { mainFile } from '../core/mainFile';
 import { loadModel } from '../worker/loadModel';
 import { QUALITY, type Quality } from '../worker/protocol';
@@ -56,6 +57,7 @@ export function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
   const viewer = useRef<Viewer | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const folderInput = useRef<HTMLInputElement>(null);
   const addInput = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [quality, setQuality] = useStored<Quality>('quality', QUALITY, 'normal');
@@ -105,6 +107,14 @@ export function App() {
       const file = await mainFile(files);
       if (signal.aborted) return;
       dispatch({ type: 'loadStart', fileName: file.name, quality: q });
+      const same = duplicateNames(files);
+      if (same.length) {
+        dispatch({
+          type: 'failed',
+          error: `Several files are named ${same.join(', ')}, and an assembly finds its parts by name. Open the files you need together instead.`,
+        });
+        return;
+      }
       if (!isSupported(file.name)) {
         dispatch({ type: 'failed', error: `Unsupported file type. Supported: ${EXTENSIONS.join(' ')}` });
         return;
@@ -221,12 +231,18 @@ export function App() {
       onDrop={(e) => {
         e.preventDefault();
         setDragging(false);
-        if (e.dataTransfer.files.length) open([...e.dataTransfer.files]);
+        filesOfDrop(e.dataTransfer).then(
+          (files) => {
+            if (files.length) open(files);
+          },
+          (err) => dispatch({ type: 'failed', error: `The dropped files could not be read: ${err instanceof Error ? err.message : err}` }),
+        );
       }}
     >
       <Toolbar
         status={status}
         onOpen={() => fileInput.current?.click()}
+        onOpenFolder={() => folderInput.current?.click()}
         onClose={close}
         onSaveImage={saveImage}
         onExport={exportModel}
@@ -245,6 +261,18 @@ export function App() {
         hidden
         onChange={(e) => {
           if (e.target.files?.length) open([...e.target.files]);
+          e.target.value = '';
+        }}
+      />
+      <input
+        ref={folderInput}
+        type="file"
+        multiple
+        hidden
+        {...{ webkitdirectory: '' }}
+        onChange={(e) => {
+          const files = filesOfFolder(e.target.files ?? []);
+          if (files.length) open(files);
           e.target.value = '';
         }}
       />

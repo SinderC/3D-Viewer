@@ -6,6 +6,7 @@ import type { State } from './state';
 interface Props {
   status: State['status'];
   onOpen: () => void;
+  onOpenFolder: () => void;
   onClose: () => void;
   onSaveImage: () => void;
   onExport: (format: 'stl' | 'glb') => void;
@@ -20,12 +21,13 @@ export const MAC = /Mac|iPhone|iPad/.test(navigator.userAgent);
 const MOD = MAC ? '⌘' : 'Ctrl+';
 const REPO = 'https://github.com/SinderC/3D-Viewer';
 
-export function Toolbar({ status, onOpen, onClose, onSaveImage, onExport, showProps, onToggleProps, onHelp, children }: Props) {
+export function Toolbar({ status, onOpen, onOpenFolder, onClose, onSaveImage, onExport, showProps, onToggleProps, onHelp, children }: Props) {
   return (
     <header className="toolbar">
       <span className="app-name">Open CAD Viewer</span>
       <Menu title="File" label="File" className="menu-trigger" bar>
         <MenuItem label="Open…" kbd={`${MOD}O`} onClick={onOpen} />
+        <MenuItem label="Open folder…" onClick={onOpenFolder} />
         <MenuItem label="Close" disabled={status === 'idle'} onClick={onClose} />
         <hr className="menu-sep" />
         <MenuItem label="Save image…" disabled={status !== 'ready'} onClick={onSaveImage} />

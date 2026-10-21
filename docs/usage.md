@@ -3,6 +3,10 @@
 Open a file with **File › Open**, Cmd/Ctrl+O, or by dropping it on the window. Installed as a PWA
 (Chromium), the app can be the operating system's handler for the supported extensions.
 
+An assembly that keeps its parts in other files opens with them when they are opened together: select
+them all, drop them all, or use **File › Open folder** or drop the folder (its model files, subfolders
+included).
+
 ## Model tree
 
 - Parts are listed with the assembly structure and colours from the file, with name search.
