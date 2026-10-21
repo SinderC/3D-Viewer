@@ -52,7 +52,8 @@ B-rep geometry, so every measurement works.
   length, radius and diameter. Faces stay the JT mesh.
 - **PMI:** JT 10 PMI as drawn in the file (lines, arrowheads and font glyphs), per part and for the
   model, with saved views. JT 8 and 9 give saved views only. No semantic values or referenced faces.
-- Not supported: JT B-rep, external part files.
+- Not supported: JT B-rep, the ISO 14306 STEP B-Rep segment (an embedded STEP file; ignored, the mesh is
+  shown), external part files.
 
 ## QIF
 
