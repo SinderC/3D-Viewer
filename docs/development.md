@@ -10,7 +10,7 @@ git, curl, CMake ≥ 3.20, Python 3, Node ≥ 20. Toolchain and library versions
 ```sh
 wasm/scripts/setup-emsdk.sh    # once: installs the pinned Emscripten SDK into wasm/.emsdk
 wasm/scripts/build-occt.sh     # once (~15 min): builds OCCT static libs into wasm/.deps
-wasm/scripts/build-jt-deps.sh  # once: fetches TKJT (+ wasm/patches) and builds liblzma
+wasm/scripts/build-jt-deps.sh  # once: fetches TKJT (our PyOpenJt fork) and builds liblzma
 wasm/scripts/build-bridge.sh   # builds wasm/build/occt-viewer.{js,wasm} → web/public/occt/
 
 cd web
@@ -21,7 +21,7 @@ npm run build && npm run preview    # production build, with CSP and service wor
 
 Rerun `build-bridge.sh` after changing anything under `wasm/src`. Rerun `build-occt.sh` or
 `build-jt-deps.sh` after changing the pinned versions or their patches. How patches are written and
-applied: [patches.md](patches.md).
+applied, and how TKJT is changed: [patches.md](patches.md).
 
 ## Tests
 
@@ -57,7 +57,7 @@ wasm/src/jt_pmi.cpp       JT PMI Manager data → drawn PMI and saved views
 wasm/src/xt_reader.cpp    Parasolid XT (neutral binary) → edges, for JT parts with embedded XT data
 wasm/src/qif_reader.cpp   QIF (ISO 23952) B-rep, product structure and PMI → XCAF document and drawn PMI
 wasm/src/pmi_text.cpp     text → filled triangles (osifont via FreeType), for drawn PMI
-wasm/patches/             changes to TKJT (JT 10 support, fixes, raw PMI data) and OCCT (STEP and meshing fixes)
+wasm/patches/             changes to OCCT (STEP and meshing fixes); TKJT changes are commits in the PyOpenJt fork
 wasm/scripts/             toolchain and build scripts
 wasm/test/                Node tests against the built module
 web/src/core/             format table, model, units, PMI and product data (no rendering)

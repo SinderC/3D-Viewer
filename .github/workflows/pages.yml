@@ -38,9 +38,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: |
-            wasm/.deps/pyopenjt
+            wasm/.deps/pyopenjt-*
             wasm/.deps/xz-install-*
-          key: jt-${{ runner.os }}-${{ hashFiles('wasm/scripts/env.sh', 'wasm/scripts/build-jt-deps.sh', 'wasm/patches/tkjt-*.patch') }}
+          key: jt-${{ runner.os }}-${{ hashFiles('wasm/scripts/env.sh', 'wasm/scripts/build-jt-deps.sh') }}
 
       - name: Build JT reader dependencies
         if: steps.jtdeps.outputs.cache-hit != 'true'

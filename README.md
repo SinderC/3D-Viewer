@@ -8,7 +8,7 @@ After the first visit it works offline as an installable PWA.
 
 **Formats:** STEP, IGES, BREP, JT, QIF, glTF/GLB, FBX, 3MF, Collada, OBJ, STL, PLY and VRML.
 CAD files are read and tessellated by [Open CASCADE Technology](https://dev.opencascade.org/) compiled
-to WebAssembly, JT by TKJT (from [PyOpenJt](https://github.com/jriegel/PyOpenJt)), QIF by a reader
+to WebAssembly, JT by TKJT (from [PyOpenJt](https://github.com/SinderC/PyOpenJt), a fork of [jriegel/PyOpenJt](https://github.com/jriegel/PyOpenJt)), QIF by a reader
 of our own on OCCT, and the other mesh formats by three.js.
 
 **Highlights:** assembly tree, STEP AP242, JT and QIF PMI with saved views, measurement on exact B-rep

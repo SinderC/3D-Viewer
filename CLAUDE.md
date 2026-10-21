@@ -24,8 +24,9 @@ Full build, deployment and code layout: [docs/development.md](docs/development.m
 - `wasm/src/bridge.cpp`: every OCCT-read format becomes an XCAF document, then one Builder emits JSON +
   one packed geometry buffer. JT, QIF and XT readers are separate files beside it.
 - `web/src/core/` has no rendering code; `web/src/viewer/` is three.js; `web/src/ui/` is React.
-- Changes to OCCT or TKJT go in `wasm/patches/`, never in the downloaded sources. Read
-  [docs/patches.md](docs/patches.md) before adding or editing a patch.
+- Changes to OCCT go in `wasm/patches/`, never in the downloaded sources. TKJT changes are commits in
+  the SinderC/PyOpenJt fork (clone at `../PyOpenJt`), pinned by `TKJT_COMMIT` in `wasm/scripts/env.sh`.
+  Read [docs/patches.md](docs/patches.md) before adding or editing either.
 
 ## Conventions
 

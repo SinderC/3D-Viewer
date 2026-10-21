@@ -6,12 +6,9 @@ source "$EMSDK_DIR/emsdk_env.sh" >/dev/null 2>&1
 
 if [ ! -d "$TKJT_SRC" ]; then
   git init -q "$TKJT_SRC"
-  git -C "$TKJT_SRC" fetch -q --depth 1 https://github.com/jriegel/PyOpenJt.git "$TKJT_COMMIT"
+  git -C "$TKJT_SRC" fetch -q --depth 1 "$TKJT_REPO" "$TKJT_COMMIT"
   git -C "$TKJT_SRC" checkout -q FETCH_HEAD
 fi
-for p in "$WASM_DIR"/patches/tkjt-*.patch; do
-  git -C "$TKJT_SRC" apply --reverse --check "$p" 2>/dev/null || git -C "$TKJT_SRC" apply "$p"
-done
 if [ ! -d "$XZ_SRC" ]; then
   git clone -q --depth 1 --branch "$XZ_TAG" https://github.com/tukaani-project/xz.git "$XZ_SRC"
 fi

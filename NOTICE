@@ -11,7 +11,7 @@ company, and Milo Yip, licensed under the MIT License, used by OCCT's glTF reade
 
 It also includes TKJT, the JT reader from PyOpenJt (https://github.com/jriegel/PyOpenJt),
 Copyright (c) 2013-2015 OPEN CASCADE SAS and (c) 2024 Juergen Riegel, licensed under the GNU General
-Public License version 2 or later, with the changes in wasm/patches.
+Public License version 2 or later, with our changes (https://github.com/SinderC/PyOpenJt).
 
 It also includes FreeType (https://freetype.org/), used by OCCT to read the font for drawn PMI text.
 Portions of this software are copyright (c) 2026 The FreeType Project (www.freetype.org). All rights

@@ -1,18 +1,25 @@
-# Patches to OCCT and TKJT
+# Patches to OCCT, and the TKJT fork
 
-OCCT and TKJT are downloaded at pinned versions (`wasm/scripts/env.sh`) and patched by the build:
-`build-occt.sh` applies `wasm/patches/occt-*.patch`, `build-jt-deps.sh` applies `wasm/patches/tkjt-*.patch`.
+OCCT is downloaded at a pinned version (`wasm/scripts/env.sh`) and patched by the build:
+`build-occt.sh` applies `wasm/patches/occt-*.patch`.
+
+TKJT is not patched: `build-jt-deps.sh` fetches the pinned commit (`TKJT_COMMIT`) of our fork,
+https://github.com/SinderC/PyOpenJt (of jriegel/PyOpenJt; `upstream` remote), which carries the JT 10
+reading, PMI and partition changes as ordinary commits. To change TKJT, commit to the fork, push, set
+`TKJT_COMMIT` in `env.sh` to the new commit, and rerun `build-jt-deps.sh` and `build-bridge.sh`.
+`TKJT_REPO=/path/to/PyOpenJt` fetches a local clone instead, for trying a commit before pushing it.
+Commits from other forks (e.g. wwmayer/TKJT) can be cherry-picked there.
 
 ## How patches are applied
 
-Patches apply in glob (alphabetical) order. A patch is skipped when `git apply --reverse --check`
+OCCT patches apply in glob (alphabetical) order. A patch is skipped when `git apply --reverse --check`
 succeeds, so the scripts can be rerun on an already patched tree. That only works if each patch's hunks
 stay more than 3 lines (the diff context) away from every other patch's hunks; otherwise a rerun tries
 to apply a patch again and fails.
 
 ## Writing or changing a patch
 
-1. Make the change in the source tree under `wasm/.deps/` (e.g. `occt-src-V8_0_1`).
+1. Make the change in the source tree under `wasm/.deps/` `occt-src-V8_0_1`.
 2. Generate the patch as a diff against HEAD plus every *other* patch, so it contains only its own change:
 
    ```sh
@@ -29,7 +36,7 @@ to apply a patch again and fails.
 
 3. Check that all patches apply on a clean tree: `git worktree add` a fresh checkout of the pinned tag
    and `git apply --check` each patch in order.
-4. Rebuild: `build-occt.sh` (or `build-jt-deps.sh`), then `build-bridge.sh`.
+4. Rebuild: `build-occt.sh`, then `build-bridge.sh`.
 
 ## Fast rebuild while debugging one OCCT toolkit
 
